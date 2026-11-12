@@ -6,6 +6,10 @@
  * - Idle guard: when nobody is connected to /api/v1/stream and no API request arrived for
  *   IDLE_AFTER_MS, ticks are skipped (memory stays bounded on a forgotten dev server).
  *   The next request or stream connection resumes it automatically.
+ * - Demo day loop: at 1× the virtual clock crosses KST midnight after ~34 real minutes, which
+ *   would zero every "오늘" KPI and let result rows grow without bound. When the virtual date
+ *   leaves the seeded day, the engine is re-seeded (same deterministic data) and SSE
+ *   subscribers, speed and pause carry over; a "sim" message tells clients to refetch.
  * - Every engine bus event is re-broadcast to SSE subscribers in a compact, JSON-safe form.
  */
 import type {
@@ -58,18 +62,23 @@ function broadcast<K extends StreamEventType>(rt: Runtime, type: K, data: Stream
   }
 }
 
-function createRuntime(): Runtime {
+function kstDay(rt: Runtime, t: number): string {
+  return rt.engine._internal.isoKst(t).slice(0, 10);
+}
+
+function createRuntime(carry?: Pick<Runtime, "listeners" | "speed" | "paused" | "tickNo">): Runtime {
   const engine = createMockEngine(globalThis) as unknown as MockEngine;
   const sim = engine.createSimulator({ seed: SIM_SEED, tickMs: TICK_MS });
+  if (carry && carry.speed !== 1) sim.setSpeed(carry.speed);
   const rt: Runtime = {
     engine,
     sim,
-    paused: false,
-    speed: 1,
-    tickNo: 0,
+    paused: carry?.paused ?? false,
+    speed: carry?.speed ?? 1,
+    tickNo: carry?.tickNo ?? 0,
     lastActivity: Date.now(),
     timer: null,
-    listeners: new Set(),
+    listeners: carry?.listeners ?? new Set(),
     lastTick: null,
     idempotency: new Map(),
     createdAt: Date.now(),
@@ -97,6 +106,7 @@ function createRuntime(): Runtime {
     if (rt.paused || isIdle(rt)) return;
     rt.sim.tick();
     rt.tickNo++;
+    if (rollDayIfNeeded(rt)) return;
     const snap = buildTick(rt);
     rt.lastTick = snap;
     broadcast(rt, "tick", snap);
@@ -104,6 +114,19 @@ function createRuntime(): Runtime {
   // never keep the process alive just for the simulator
   (rt.timer as unknown as { unref?: () => void }).unref?.();
   return rt;
+}
+
+/** Re-seed the runtime once the virtual clock leaves the seeded KST day. Returns true if it did. */
+function rollDayIfNeeded(rt: Runtime): boolean {
+  if (kstDay(rt, rt.engine.now()) === kstDay(rt, rt.engine.meta.baseNow)) return false;
+  if (rt.timer) clearInterval(rt.timer);
+  const next = createRuntime({ listeners: rt.listeners, speed: rt.speed, paused: rt.paused, tickNo: rt.tickNo });
+  G.__aipoRuntime = next;
+  const snap = buildTick(next);
+  next.lastTick = snap;
+  broadcast(next, "sim", simState(next));
+  broadcast(next, "tick", snap);
+  return true;
 }
 
 function isIdle(rt: Runtime): boolean {
@@ -164,13 +187,16 @@ export function setSpeed(speed: number): SimState {
 /** Advance the simulator synchronously by n ticks (works while paused). */
 export function step(n: number): TickSnapshot {
   const rt = getRuntime();
+  let cur = rt;
   for (let i = 0; i < n; i++) {
-    rt.sim.tick();
-    rt.tickNo++;
+    cur.sim.tick();
+    cur.tickNo++;
+    if (rollDayIfNeeded(cur)) cur = G.__aipoRuntime!;
   }
-  const snap = buildTick(rt);
-  rt.lastTick = snap;
-  broadcast(rt, "tick", snap);
+  const rtNow = cur;
+  const snap = buildTick(rtNow);
+  rtNow.lastTick = snap;
+  broadcast(rtNow, "tick", snap);
   return snap;
 }
 
