@@ -1,0 +1,264 @@
+/* Landing page skin (foundation-owned). Scoped under [data-variant="landing"]. */
+[data-variant="landing"] {
+  --lp-bg: #f3f4f6;
+  --lp-surface: #ffffff;
+  --lp-ink: #111418;
+  --lp-muted: #586070;
+  --lp-faint: #8a919d;
+  --lp-line: #e2e5ea;
+  --lp-line-2: #cfd4db;
+  --lp-accent: #111418;
+  --lp-shadow: 0 1px 2px rgba(17, 20, 24, 0.05), 0 12px 32px -18px rgba(17, 20, 24, 0.28);
+  background: var(--lp-bg);
+  color: var(--lp-ink);
+  font-family: var(--font-pretendard), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+}
+:root[data-theme="dark"] [data-variant="landing"] {
+  --lp-bg: #0b0e13;
+  --lp-surface: #12161d;
+  --lp-ink: #e8ebf0;
+  --lp-muted: #9aa3b2;
+  --lp-faint: #6b7483;
+  --lp-line: #1f252f;
+  --lp-line-2: #2b3340;
+  --lp-accent: #e8ebf0;
+  --lp-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 18px 40px -20px rgba(0, 0, 0, 0.8);
+}
+
+[data-variant="landing"] .lp-mono {
+  font-family: var(--font-flowline-mono), ui-monospace, monospace;
+}
+[data-variant="landing"] .lp-atlas {
+  font-family: var(--font-atlas-sans), sans-serif;
+}
+[data-variant="landing"] .lp-lanes {
+  font-family: var(--font-lanes-sans), sans-serif;
+}
+[data-variant="landing"] .lp-lanes-title {
+  font-family: var(--font-lanes-display), sans-serif;
+}
+
+[data-variant="landing"] .lp-logo {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--lp-ink);
+  color: var(--lp-bg);
+}
+[data-variant="landing"] .lp-eyebrow {
+  font-family: var(--font-flowline-mono), ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--lp-faint);
+}
+[data-variant="landing"] .lp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--lp-line);
+  background: var(--lp-surface);
+}
+[data-variant="landing"] .lp-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--st-queued);
+}
+[data-variant="landing"] .lp-chip[data-state="open"] .lp-pulse {
+  background: var(--st-success);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--st-success) 60%, transparent);
+  animation: lp-pulse 1.8s ease-out infinite;
+}
+[data-variant="landing"] .lp-chip[data-state="reconnecting"] .lp-pulse {
+  background: var(--st-retry);
+}
+@keyframes lp-pulse {
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+[data-variant="landing"] .lp-icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--lp-line);
+  background: var(--lp-surface);
+  color: var(--lp-ink);
+}
+[data-variant="landing"] .lp-icon-btn:hover {
+  border-color: var(--lp-line-2);
+}
+
+/* KPI strip */
+[data-variant="landing"] .lp-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--lp-line);
+  border-radius: 14px;
+  background: var(--lp-surface);
+  overflow: hidden;
+}
+@media (min-width: 640px) {
+  [data-variant="landing"] .lp-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  [data-variant="landing"] .lp-kpis {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+[data-variant="landing"] .lp-kpi {
+  padding: 16px 18px;
+  border-right: 1px solid var(--lp-line);
+  border-bottom: 1px solid var(--lp-line);
+  margin: 0 -1px -1px 0;
+  min-width: 0;
+}
+[data-variant="landing"] .lp-kpi-num {
+  margin: 6px 0 4px;
+  font-size: 28px;
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+[data-variant="landing"] .lp-bar {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--lp-line);
+  overflow: hidden;
+}
+[data-variant="landing"] .lp-bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  transition: width 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* concept cards */
+[data-variant="landing"] .lp-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--lp-line);
+  border-radius: 16px;
+  background: var(--lp-surface);
+  box-shadow: var(--lp-shadow);
+  overflow: hidden;
+  transition:
+    transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1),
+    border-color 0.2s;
+  outline-offset: 3px;
+}
+[data-variant="landing"] .lp-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--lp-line-2);
+}
+[data-variant="landing"] .lp-card:focus-visible {
+  outline: 2px solid var(--st-running);
+}
+[data-variant="landing"] .lp-preview {
+  aspect-ratio: 16 / 9;
+  border-bottom: 1px solid var(--lp-line);
+}
+[data-variant="landing"] .lp-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  font-weight: 700;
+}
+[data-variant="landing"] .lp-token {
+  transition:
+    cx 0.9s cubic-bezier(0.2, 0.7, 0.2, 1),
+    cy 0.9s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+[data-variant="landing"] .lp-cell {
+  transition: fill 0.4s;
+}
+[data-variant="landing"] .lp-flow {
+  animation: lp-dash 1.2s linear infinite;
+}
+@keyframes lp-dash {
+  to {
+    stroke-dashoffset: -7;
+  }
+}
+
+/* simulator */
+[data-variant="landing"] .lp-sim {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px;
+  border: 1px dashed var(--lp-line-2);
+  border-radius: 14px;
+}
+[data-variant="landing"] .lp-sim > div:first-child {
+  max-width: 62ch;
+}
+[data-variant="landing"] .lp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 9px;
+  border: 1px solid var(--lp-line-2);
+  background: var(--lp-surface);
+  font-size: 13px;
+  font-weight: 600;
+}
+[data-variant="landing"] .lp-btn:hover:not(:disabled) {
+  border-color: var(--lp-ink);
+}
+[data-variant="landing"] .lp-btn:disabled,
+[data-variant="landing"] .lp-seg button:disabled {
+  opacity: 0.55;
+}
+[data-variant="landing"] .lp-seg {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--lp-line-2);
+  background: var(--lp-surface);
+}
+[data-variant="landing"] .lp-seg button {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--lp-muted);
+}
+[data-variant="landing"] .lp-seg button[data-active] {
+  background: var(--lp-ink);
+  color: var(--lp-bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-variant="landing"] .lp-flow,
+  [data-variant="landing"] .lp-chip .lp-pulse {
+    animation: none;
+  }
+  [data-variant="landing"] .lp-token,
+  [data-variant="landing"] .lp-card,
+  [data-variant="landing"] .lp-bar > span {
+    transition: none;
+  }
+}

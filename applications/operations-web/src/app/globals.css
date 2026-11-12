@@ -1,0 +1,231 @@
+/*
+ * AIPO Operations Web — GLOBAL foundation styles (shared; variants must not edit this file).
+ *
+ * Contains: Tailwind v4 entry, theme switching variant, shared design tokens (status + language
+ * colors, chart fallbacks, font aliases), Korean typesetting defaults, and minimal base styles for
+ * the shared primitives (.st-pill, .lang-badge). Variant skins live in src/styles/<variant>.css and
+ * are scoped under [data-variant="<variant>"].
+ */
+@import "tailwindcss";
+
+/* Dark mode follows <html data-theme="dark"> (set by ThemeScript/ThemeProvider), not just the OS. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/* ─────────────────────────────────────────── tokens: light (default) ── */
+:root {
+  /* standardized status tones (plan §6.4) */
+  --st-success: #1f8f4e;
+  --st-running: #2a78d6;
+  --st-queued: #7a8190;
+  --st-retry: #c27a00;
+  --st-failed: #d23f3f;
+  --st-dlq: #7d3cc8;
+  --st-cancelled: #5c6370;
+
+  /* language colors */
+  --lang-ko: #2a78d6;
+  --lang-en: #eb6834;
+  --lang-ja: #1baf7a;
+  --lang-es: #eda100;
+
+  /* chart fallbacks (variants override inside their scope) */
+  --chart-text: #1f2430;
+  --chart-muted: #6b7280;
+  --chart-grid: rgba(15, 23, 42, 0.08);
+  --chart-surface: #ffffff;
+  --chart-tooltip-bg: #ffffff;
+  --chart-font: var(--font-pretendard), system-ui, sans-serif;
+  --chart-mono: ui-monospace, monospace;
+
+  /* neutral page fallback (landing + placeholders; variants define their own palettes) */
+  --app-bg: #f6f7f9;
+  --app-fg: #15181e;
+
+  /* font aliases — Pretendard is loaded once and shared by Flowline and Lanes */
+  --font-flowline-sans: var(--font-pretendard);
+  --font-lanes-sans: var(--font-pretendard);
+
+  color-scheme: light;
+}
+
+/* ─────────────────────────────────────────── tokens: dark ── */
+:root[data-theme="dark"] {
+  --st-success: #3fb871;
+  --st-running: #3987e5;
+  --st-queued: #9aa0aa;
+  --st-retry: #e0a42a;
+  --st-failed: #e66767;
+  --st-dlq: #a77ff0;
+  --st-cancelled: #8b929c;
+
+  --lang-ko: #3987e5;
+  --lang-en: #d95926;
+  --lang-ja: #199e70;
+  --lang-es: #c98500;
+
+  --chart-text: #dce4f0;
+  --chart-muted: #8b95a7;
+  --chart-grid: rgba(255, 255, 255, 0.08);
+  --chart-surface: #131c2b;
+  --chart-tooltip-bg: #1b2536;
+
+  --app-bg: #0c1018;
+  --app-fg: #e6eaf1;
+
+  color-scheme: dark;
+}
+/* before the inline script runs (or with JS disabled) follow the OS */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --st-success: #3fb871;
+    --st-running: #3987e5;
+    --st-queued: #9aa0aa;
+    --st-retry: #e0a42a;
+    --st-failed: #e66767;
+    --st-dlq: #a77ff0;
+    --st-cancelled: #8b929c;
+    --lang-ko: #3987e5;
+    --lang-en: #d95926;
+    --lang-ja: #199e70;
+    --lang-es: #c98500;
+    --app-bg: #0c1018;
+    --app-fg: #e6eaf1;
+    color-scheme: dark;
+  }
+}
+
+/* ─────────────────────────────────────────── Tailwind theme bridge ── */
+@theme inline {
+  /* font-* utilities. NOTE: keys must not equal the next/font variable names (self-reference),
+     hence "-code"/"-title":  font-landing · font-flowline · font-flowline-code · font-atlas ·
+     font-atlas-code · font-lanes · font-lanes-title · font-lanes-code */
+  --font-sans: var(--font-pretendard), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --font-landing: var(--font-pretendard);
+  --font-flowline: var(--font-flowline-sans);
+  --font-flowline-code: var(--font-flowline-mono);
+  --font-atlas: var(--font-atlas-sans);
+  --font-atlas-code: var(--font-atlas-mono);
+  --font-lanes-title: var(--font-lanes-display);
+  --font-lanes: var(--font-lanes-sans);
+  --font-lanes-code: var(--font-lanes-mono);
+
+  /* color utilities: text-st-running, bg-st-failed/15, border-lang-ko, … */
+  --color-st-success: var(--st-success);
+  --color-st-running: var(--st-running);
+  --color-st-queued: var(--st-queued);
+  --color-st-retry: var(--st-retry);
+  --color-st-failed: var(--st-failed);
+  --color-st-dlq: var(--st-dlq);
+  --color-st-cancelled: var(--st-cancelled);
+  --color-lang-ko: var(--lang-ko);
+  --color-lang-en: var(--lang-en);
+  --color-lang-ja: var(--lang-ja);
+  --color-lang-es: var(--lang-es);
+}
+
+/* ─────────────────────────────────────────── Korean typesetting defaults ── */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  body {
+    background: var(--app-bg);
+    color: var(--app-fg);
+    font-family: var(--font-sans);
+    word-break: keep-all; /* 한국어: 어절 단위 줄바꿈 */
+    line-break: strict; /* 금칙 처리 */
+    overflow-wrap: break-word; /* 긴 ID·URI 는 넘치지 않게 */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-synthesis-weight: none;
+  }
+  :where(h1, h2, h3, h4) {
+    letter-spacing: -0.012em; /* 한글 헤딩은 살짝 좁게 */
+    text-wrap: balance;
+  }
+  :where(code, kbd, samp, pre) {
+    word-break: normal;
+    font-feature-settings: "liga" 0, "calt" 0;
+  }
+}
+
+@layer utilities {
+  /* 숫자 정렬 (KPI, 표) */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+  /* 한글 헤딩 자간 단계 */
+  .ko-tight {
+    letter-spacing: -0.02em;
+  }
+  .ko-tighter {
+    letter-spacing: -0.035em;
+  }
+  /* 긴 식별자 (workflow_id, gs:// URI) */
+  .break-id {
+    word-break: break-all;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ─────────────────────────────────────────── shared primitives (minimal, token-driven) ── */
+@layer components {
+  .st-pill {
+    --tone: var(--st-queued);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--tone);
+    background: color-mix(in oklab, var(--tone) 13%, transparent);
+    border: 1px solid color-mix(in oklab, var(--tone) 32%, transparent);
+  }
+  .st-pill[data-size="xs"] {
+    font-size: 0.6875rem;
+    padding: 0.05em 0.45em;
+  }
+  .st-pill[data-size="md"] {
+    font-size: 0.8125rem;
+    padding: 0.25em 0.7em;
+  }
+  .st-pill .st-icon {
+    width: 1.05em;
+    height: 1.05em;
+    flex: none;
+  }
+  .lang-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .st-spin {
+    animation: st-spin 1.4s linear infinite;
+  }
+  .echart {
+    min-width: 0;
+  }
+}
+
+@keyframes st-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .st-spin {
+    animation: none;
+  }
+}
