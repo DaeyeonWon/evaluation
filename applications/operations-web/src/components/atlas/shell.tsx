@@ -1,54 +1,91 @@
 "use client";
 /**
- * Atlas application shell: top bar (brand, numbered drawing-sheet tabs, ⌘K palette, virtual clock,
- * simulator controls → POST /api/v1/sim, theme toggle), toasts, command palette.
+ * Atlas application shell. Two-row drawing-sheet title block:
+ *   row 1 — brand · ⌘K search · global period selector · virtual clock · simulator · KO|EN · theme · user
+ *   row 2 — numbered sheet tabs (priority overflow → "더 보기" menu; Hermes as an external link)
+ * plus toasts and the ⌘K command palette (screens, stages, pipelines, files, workflows, DLQ).
+ * Nav links carry the current ?range= / ?from=&to= so the period survives navigation.
  */
 import clsx from "clsx";
 import {
+  ArchiveX,
   BarChart3,
-  GitBranch,
+  CornerDownLeft,
+  ExternalLink,
+  FileSearch,
+  FolderSearch,
   Gauge,
+  GitBranch,
   LayoutGrid,
+  LogOut,
   Map as MapIcon,
   Moon,
+  MoreHorizontal,
   Pause,
   Play,
   Search,
   SlidersHorizontal,
+  SquareKanban,
   Sun,
   Table,
-  ArchiveX,
-  CornerDownLeft,
+  UserRound,
+  Users,
+  Workflow as WorkflowIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { CatalogIcon, fmt, useTheme } from "@/components/shared";
-import { STAGES, STATUS_META, DLQ_STATUS_META } from "@/lib/catalog";
-import { api, useLiveStream, useSimNow, useStreamEvent } from "@/lib/client";
-import type { DeadLetter, WorkflowSummary } from "@/lib/types";
+import { CatalogIcon, LocaleToggle, useTheme } from "@/components/shared";
+import { stageLabel, statusLabel } from "@/i18n";
+import { useFmt, useLocale, useT } from "@/i18n/client";
+import { STAGES, STATUS_META } from "@/lib/catalog";
+import { api, useApi, useLiveStream, useSession, useSimNow, useStreamEvent, useTimeRange } from "@/lib/client";
+import type { DeadLetter, FileSearchHit, WorkflowSummary } from "@/lib/types";
+import { RangePicker, useRangeHref } from "./time-range";
 import { ToastProvider, useToast, useReducedMotionSafe } from "./ui";
 
-export const TABS = [
-  { href: "/", no: "A-00", label: "오케스트레이션", Icon: MapIcon },
-  { href: "/overview", no: "S-01", label: "개요", Icon: LayoutGrid },
-  { href: "/capacity", no: "S-02", label: "Capacity", Icon: Gauge },
-  { href: "/explorer", no: "S-03", label: "Explorer", Icon: Search },
-  { href: "/workflows", no: "S-04", label: "Pipeline 상세", Icon: GitBranch },
-  { href: "/dlq", no: "S-05", label: "DLQ", Icon: ArchiveX },
-  { href: "/results", no: "U-01", label: "평가 결과", Icon: Table },
-  { href: "/analytics", no: "S-07", label: "분석", Icon: BarChart3 },
-  { href: "/config", no: "S-06", label: "설정", Icon: SlidersHorizontal },
-] as const;
+type NavKey = "orchestration" | "board" | "overview" | "capacity" | "explorer" | "pipelines" | "workflows" | "files" | "dlq" | "results" | "analytics" | "config" | "hermes";
+interface Tab {
+  key: NavKey;
+  href: string;
+  no: string;
+  Icon: ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  external?: boolean;
+}
+
+export const TABS: Tab[] = [
+  { key: "orchestration", href: "/", no: "A-00", Icon: MapIcon },
+  { key: "board", href: "/board", no: "A-01", Icon: SquareKanban },
+  { key: "overview", href: "/overview", no: "S-01", Icon: LayoutGrid },
+  { key: "capacity", href: "/capacity", no: "S-02", Icon: Gauge },
+  { key: "explorer", href: "/explorer", no: "S-03", Icon: Search },
+  { key: "pipelines", href: "/pipelines", no: "P-01", Icon: WorkflowIcon },
+  { key: "workflows", href: "/workflows", no: "S-04", Icon: GitBranch },
+  { key: "files", href: "/files", no: "F-01", Icon: FolderSearch },
+  { key: "dlq", href: "/dlq", no: "S-05", Icon: ArchiveX },
+  { key: "results", href: "/results", no: "U-01", Icon: Table },
+  { key: "analytics", href: "/analytics", no: "S-07", Icon: BarChart3 },
+  { key: "config", href: "/config", no: "S-06", Icon: SlidersHorizontal },
+  { key: "hermes", href: "/hermes", no: "X-01", Icon: ExternalLink, external: true },
+];
 
 function isActive(path: string, href: string) {
   return href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
 }
 
+function useTabs() {
+  const { can } = useSession();
+  const hermes = can("hermes:access");
+  return useMemo(() => TABS.filter((t) => t.key !== "hermes" || hermes), [hermes]);
+}
+
 function Brand() {
+  const t = useT("shell");
+  const nav = useT("nav");
+  const c = useT("common");
   return (
-    <Link className="brand" href="/" aria-label="AIPO Atlas 홈 (오케스트레이션)">
+    <Link className="brand" href="/" aria-label={nav("home")}>
       <svg viewBox="0 0 32 32" aria-hidden="true">
         <rect x="1.5" y="1.5" width="29" height="29" fill="none" stroke="currentColor" strokeWidth="1.5" />
         <path d="M6 24 L13 8 L20 24 M9 18h8" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -56,8 +93,10 @@ function Brand() {
         <path d="M20 24h6" stroke="var(--accent)" strokeWidth="2" />
       </svg>
       <div>
-        <b>AIPO Atlas</b>
-        <small>빅스비 실발화 평가 · PROD</small>
+        <b>{t("brand.name")}</b>
+        <small>
+          {c("app.subtitle")} · {t("brand.env")}
+        </small>
       </div>
     </Link>
   );
@@ -76,38 +115,46 @@ export function useSim() {
 function SimControls() {
   const { running, speed, status, set } = useSim();
   const toast = useToast();
+  const t = useT("shell");
+  const { can } = useSession();
+  const allowed = can("sim:control");
+  const deny = allowed ? undefined : t("sim.denied");
   const toggle = async () => {
+    if (!allowed) return;
     try {
       const r = running ? await api.simPause() : await api.simResume();
       set({ running: r.sim.running, speed: r.sim.speed });
-      toast.ok(running ? "실시간 시뮬레이션을 일시정지했습니다." : "실시간 시뮬레이션을 재개했습니다.");
+      toast.ok(running ? t("sim.paused") : t("sim.resumed"));
     } catch (e) {
       toast.err(e);
     }
   };
   const setSpeed = async (s: number) => {
+    if (!allowed) return;
     try {
       const r = await api.simSpeed(s);
       set({ running: r.sim.running, speed: r.sim.speed });
+      toast.ok(t("sim.speedSet", { speed: s }));
     } catch (e) {
       toast.err(e);
     }
   };
+  const lbl = running ? t("sim.pause") : t("sim.resume");
   return (
     <>
-      <button className="btn icon" onClick={toggle} aria-label={running ? "시뮬레이터 일시정지" : "시뮬레이터 재개"} title={running ? "시뮬레이터 일시정지" : "시뮬레이터 재개"}>
+      <button className="btn icon" onClick={toggle} aria-label={lbl} title={deny ?? lbl} aria-disabled={!allowed || undefined}>
         {running ? <Pause /> : <Play />}
       </button>
-      <div className="seg hide-sm" role="group" aria-label="시뮬레이터 속도">
+      <div className="seg hide-md" role="group" aria-label={t("sim.speed")} title={deny}>
         {[1, 2, 5].map((s) => (
-          <button key={s} aria-pressed={speed === s} onClick={() => setSpeed(s)}>
+          <button key={s} aria-pressed={speed === s} aria-disabled={!allowed || undefined} onClick={() => setSpeed(s)}>
             {s}x
           </button>
         ))}
       </div>
       {status !== "open" && status !== "idle" ? (
-        <span className="conn hide-sm" title="실시간 스트림 연결 상태">
-          {status === "connecting" ? "연결 중" : "재연결 중"}
+        <span className="conn hide-sm" title={t("stream.title")}>
+          {status === "connecting" ? t("stream.connecting") : t("stream.reconnecting")}
         </span>
       ) : null}
     </>
@@ -116,24 +163,277 @@ function SimControls() {
 
 function Clock() {
   const now = useSimNow();
+  const f = useFmt();
+  const c = useT("common");
   const { running } = useSim();
   return (
-    <div className={clsx("clock", !running && "paused")} aria-live="off">
+    <div className={clsx("clock hide-md", !running && "paused")} aria-live="off">
       <b suppressHydrationWarning>
         <span className="live-dot" style={{ marginRight: 6 }} />
-        {fmt.time(now)}
+        {f.time(now)}
       </b>
-      <span suppressHydrationWarning>{fmt.dateKo(now)} · 가상시계</span>
+      <span suppressHydrationWarning>
+        {f.dateLabel(now)} · {c("time.virtualClock")}
+      </span>
     </div>
   );
 }
 
-function ThemeBtn() {
+function ThemeBtn({ className }: { className?: string }) {
   const { resolved, toggle } = useTheme();
+  const c = useT("common");
+  const lbl = resolved === "dark" ? c("theme.switchToLight") : c("theme.switchToDark");
   return (
-    <button className="btn icon" onClick={toggle} aria-label={resolved === "dark" ? "라이트 테마로 전환" : "다크 테마로 전환"} suppressHydrationWarning>
+    <button className={clsx("btn icon", className)} onClick={toggle} aria-label={lbl} title={lbl} suppressHydrationWarning>
       {resolved === "dark" ? <Sun /> : <Moon />}
     </button>
+  );
+}
+
+/* ───────────── generic popover menu ───────────── */
+function useDismiss(open: boolean, ref: React.RefObject<HTMLElement | null>, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && close();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, ref, close]);
+}
+
+function MenuPop({ children, className, label }: { children: ReactNode; className?: string; label: string }) {
+  const reduced = useReducedMotionSafe();
+  return (
+    <motion.div
+      className={clsx("menu-pop", className)}
+      role="menu"
+      aria-label={label}
+      initial={reduced ? false : { opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={reduced ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: -4, transition: { duration: 0.12 } }}
+      transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/* ───────────── user menu ───────────── */
+function initials(name: string) {
+  const s = name.trim();
+  if (!s) return "?";
+  if (/[가-힣]/.test(s)) return s.slice(0, 1);
+  return s
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+}
+
+function UserMenu() {
+  const t = useT("shell");
+  const s = useSession();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, ref, close);
+  if (!s.user) {
+    return (
+      <Link className="btn" href="/login" prefetch={false}>
+        <UserRound />
+        {t("user.signIn")}
+      </Link>
+    );
+  }
+  const role = s.roles[0] ?? "—";
+  return (
+    <div className="umenu" ref={ref}>
+      <button className="btn umenu-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} aria-label={t("user.menu", { name: s.user.name, role })}>
+        <span className="avatar" aria-hidden>
+          {initials(s.user.name)}
+        </span>
+        <span className="umenu-n">
+          <b>{s.user.name}</b>
+          <small>{role}</small>
+        </span>
+      </button>
+      <AnimatePresence>
+        {open ? (
+          <MenuPop className="umenu-pop" label={t("user.menuLabel")}>
+            <div className="umenu-head">
+              <span className="avatar lg" aria-hidden>
+                {initials(s.user.name)}
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <b>{s.user.name}</b>
+                <div className="mono muted ell">{s.user.email}</div>
+              </div>
+            </div>
+            <dl className="umenu-dl">
+              <dt>{t("user.roles")}</dt>
+              <dd>
+                {s.roles.length ? (
+                  s.roles.map((r) => (
+                    <span key={r} className={`role-tag role-${r}`}>
+                      {r}
+                    </span>
+                  ))
+                ) : (
+                  <span className="muted">{t("user.noRole")}</span>
+                )}
+              </dd>
+              <dt>{t("user.auth")}</dt>
+              <dd className="mono">{s.mode.toUpperCase()}</dd>
+              <dt>{t("user.perms")}</dt>
+              <dd className="mono umenu-perms">{s.permissions.join(" · ") || "—"}</dd>
+            </dl>
+            <div className="umenu-prefs" role="none">
+              <span>{t("user.prefs")}</span>
+              <LocaleToggle />
+              <ThemeBtn />
+            </div>
+            <div className="umenu-acts" role="none">
+              {s.mode === "mock" ? (
+                <Link className="menu-item" role="menuitem" href="/login" prefetch={false} onClick={close}>
+                  <Users aria-hidden />
+                  {t("user.switch")}
+                </Link>
+              ) : null}
+              <button
+                className="menu-item danger"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void s.logout();
+                }}
+              >
+                <LogOut aria-hidden />
+                {busy ? t("user.loggingOut") : t("user.logout")}
+              </button>
+            </div>
+          </MenuPop>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/* ───────────── nav strip with priority overflow ───────────── */
+function TabLink({ tab, on, href, pend, onClick, menu }: { tab: Tab; on: boolean; href: string; pend: number; onClick?: () => void; menu?: boolean }) {
+  const nav = useT("nav");
+  const c = useT("common");
+  const label = nav(`${tab.key}.label`);
+  const ext = tab.external
+    ? { target: "_blank", rel: "noopener noreferrer", prefetch: false as const, "aria-label": `${label} (${c("a11y.externalLink")})` }
+    : {};
+  return (
+    <Link href={href} className={clsx(menu ? "menu-item" : "tab", tab.external && "ext")} role={menu ? "menuitem" : undefined} aria-current={on ? "page" : undefined} onClick={onClick} {...ext}>
+      {menu ? <tab.Icon aria-hidden /> : null}
+      <span className="no">{tab.no}</span>
+      <span className="tl">{label}</span>
+      {tab.external ? <ExternalLink aria-hidden className="ext-ico" /> : null}
+      {tab.key === "dlq" && pend ? (
+        <span className="cnt" aria-label={nav("dlqPendingBadge", { count: pend })}>
+          {pend}
+        </span>
+      ) : null}
+      {on && !menu ? <motion.span layoutId="atlas-tab-ind" className="bar-ind" transition={{ type: "spring", stiffness: 500, damping: 40 }} /> : null}
+    </Link>
+  );
+}
+
+function NavStrip() {
+  const path = usePathname();
+  const tabs = useTabs();
+  const rh = useRangeHref();
+  const nav = useT("nav");
+  const t = useT("shell");
+  const { snapshot } = useLiveStream();
+  const pend = snapshot?.kpis.dlqPendingReview ?? 0;
+  const box = useRef<HTMLDivElement>(null);
+  const measure = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(tabs.length);
+  const [open, setOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(open, moreRef, close);
+
+  useLayoutEffect(() => {
+    const el = box.current;
+    const m = measure.current;
+    if (!el || !m) return;
+    const calc = () => {
+      const widths = Array.from(m.children).map((c) => (c as HTMLElement).offsetWidth + 2);
+      const moreW = 92;
+      const avail = el.clientWidth;
+      let used = 0;
+      let n = 0;
+      const total = widths.reduce((a, b) => a + b, 0);
+      if (total <= avail) n = widths.length;
+      else
+        for (const w of widths) {
+          if (used + w + moreW > avail) break;
+          used += w;
+          n++;
+        }
+      setFit(n);
+    };
+    calc();
+    const ro = new ResizeObserver(calc);
+    ro.observe(el);
+    ro.observe(m);
+    return () => ro.disconnect();
+  }, [tabs.length]);
+
+  const shown = tabs.slice(0, fit);
+  const rest = tabs.slice(fit);
+  const activeRest = rest.find((x) => isActive(path, x.href));
+  const hrefOf = (x: Tab) => (x.external ? x.href : rh(x.href));
+
+  return (
+    <div className="navrow">
+      <nav className="tabs" aria-label={nav("label")} ref={box}>
+        {shown.map((x) => (
+          <TabLink key={x.key} tab={x} on={isActive(path, x.href)} href={hrefOf(x)} pend={pend} />
+        ))}
+        {rest.length ? (
+          <div className="more" ref={moreRef}>
+            <button className={clsx("tab more-btn", activeRest && "act")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+              <MoreHorizontal aria-hidden />
+              <span className="tl">{activeRest ? nav(`${activeRest.key}.label`) : t("nav.more")}</span>
+              <span className="cnt muted-cnt">{rest.length}</span>
+              {activeRest ? <motion.span layoutId="atlas-tab-ind" className="bar-ind" transition={{ type: "spring", stiffness: 500, damping: 40 }} /> : null}
+            </button>
+            <AnimatePresence>
+              {open ? (
+                <MenuPop className="more-pop" label={t("nav.moreLabel")}>
+                  {rest.map((x) => (
+                    <TabLink key={x.key} tab={x} on={isActive(path, x.href)} href={hrefOf(x)} pend={pend} onClick={close} menu />
+                  ))}
+                </MenuPop>
+              ) : null}
+            </AnimatePresence>
+          </div>
+        ) : null}
+      </nav>
+      {/* off-screen copy used only to measure natural tab widths */}
+      <div className="tabs tabs-measure" ref={measure} aria-hidden="true">
+        {tabs.map((x) => (
+          <span key={x.key} className={clsx("tab", x.external && "ext")}>
+            <span className="no">{x.no}</span>
+            <span className="tl">{nav(`${x.key}.label`)}</span>
+            {x.external ? <ExternalLink className="ext-ico" /> : null}
+            {x.key === "dlq" && pend ? <span className="cnt">{pend}</span> : null}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -144,52 +444,100 @@ interface PalItem {
   label: string;
   sub: string;
   href: string;
+  /** Shift+Enter target (e.g. the file's Workflow) */
+  alt?: { href: string; label: string };
   tone?: string;
+  mono?: boolean;
 }
+
+const basename = (o: string) => o.split("/").filter(Boolean).pop() ?? o;
 
 function Palette({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const t = useT("shell");
+  const nav = useT("nav");
+  const locale = useLocale();
+  const tabs = useTabs();
+  const rh = useRangeHref();
+  const tr = useTimeRange();
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
-  const [remote, setRemote] = useState<{ q: string; wfs: WorkflowSummary[]; dls: DeadLetter[] }>({ q: "", wfs: [], dls: [] });
+  const [remote, setRemote] = useState<{ q: string; wfs: WorkflowSummary[]; dls: DeadLetter[]; files: FileSearchHit[] }>({ q: "", wfs: [], dls: [], files: [] });
+  const pipes = useApi(["pipelines", "palette"], () => api.pipelines(), { revalidateOnFocus: false });
   const listRef = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotionSafe();
+  const rangeParams = tr.params;
 
   useEffect(() => {
-    const t = q.trim();
+    const term = q.trim();
     let alive = true;
     const h = setTimeout(
       () => {
-        Promise.all([api.workflows({ q: t || undefined, pageSize: t ? 12 : 6, sort: "updated_desc" }), api.deadLetters({ q: t || undefined, pageSize: t ? 10 : 5 })])
-          .then(([w, d]) => alive && setRemote({ q: t, wfs: w.items, dls: d.items }))
+        // ID lookups search the whole data window when a term is typed (an ID from yesterday should
+        // still be found on a "today" page); the recent lists and file hits follow the page period.
+        const idRange = term ? { range: "30d" } : rangeParams;
+        Promise.all([
+          api.workflows({ q: term || undefined, pageSize: term ? 10 : 5, sort: "updated_desc", ...idRange }),
+          api.deadLetters({ q: term || undefined, pageSize: term ? 8 : 4, ...idRange }),
+          term.length >= 2 ? api.fileSearch({ q: term, limit: 8, ...rangeParams }).then((r) => r.items) : Promise.resolve([] as FileSearchHit[]),
+        ])
+          .then(([w, d, files]) => alive && setRemote({ q: term, wfs: w.items, dls: d.items, files }))
           .catch(() => {});
       },
-      t ? 160 : 0,
+      term ? 160 : 0,
     );
     return () => {
       alive = false;
       clearTimeout(h);
     };
-  }, [q]);
+  }, [q, rangeParams]);
 
   const items = useMemo<PalItem[]>(() => {
     const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
     const m = (s: string) => terms.every((x) => s.toLowerCase().includes(x));
     const out: PalItem[] = [];
-    TABS.forEach((t) => {
-      if (m(`${t.label} ${t.no} ${t.href}`)) out.push({ grp: "화면", icon: <t.Icon />, label: t.label, sub: t.no, href: t.href });
+    tabs.forEach((x) => {
+      const label = nav(`${x.key}.label`);
+      if (m(`${label} ${nav(`${x.key}.title`)} ${x.key} ${x.no} ${x.href}`))
+        out.push({ grp: t("palette.groups.screens"), icon: <x.Icon />, label, sub: `${x.no} · ${x.href}`, href: x.external ? x.href : rh(x.href) });
     });
     STAGES.forEach((s) => {
-      if (m(`${s.label.ko} ${s.label.en} ${s.id}`))
-        out.push({ grp: "오케스트레이션 단계", icon: <CatalogIcon name={s.icon} />, label: s.label.ko, sub: s.label.en, href: `/?stage=${s.id}` });
+      const label = stageLabel(s.id, locale);
+      if (m(`${label} ${s.label.ko} ${s.label.en} ${s.id}`)) out.push({ grp: t("palette.groups.stages"), icon: <CatalogIcon name={s.icon} />, label, sub: s.id, href: rh(`/?stage=${s.id}`) });
     });
+    if (terms.length)
+      (pipes.data?.items ?? []).forEach((p) => {
+        const label = locale === "ko" ? p.labelKo || p.label : p.label;
+        if (m(`${p.id} ${p.label} ${p.labelKo} ${p.kind}`))
+          out.push({
+            grp: t("palette.groups.pipelines"),
+            icon: <WorkflowIcon />,
+            label: p.id,
+            mono: true,
+            sub: t("palette.pipelineSub", { label, kind: p.kind === "root" ? t("palette.root") : t("palette.sub"), version: p.latestVersion, runs: p.runs }),
+            href: rh(`/pipelines/${encodeURIComponent(p.id)}`),
+          });
+      });
+    if (remote.q === q.trim())
+      remote.files.forEach((f) =>
+        out.push({
+          grp: t("palette.groups.files"),
+          icon: <FileSearch />,
+          label: basename(f.object),
+          mono: true,
+          sub: [stageLabel(f.stage, locale), f.workflow_id ?? t("palette.noWorkflow"), f.bucket].join(" · "),
+          href: rh(`/files?q=${encodeURIComponent(basename(f.object))}&stage=${f.stage}`),
+          alt: f.workflow_id ? { href: rh(`/workflows/${f.workflow_id}`), label: t("palette.openWorkflow") } : undefined,
+        }),
+      );
     remote.wfs.forEach((w) =>
       out.push({
         grp: "Workflow",
         icon: <CatalogIcon name={STATUS_META[w.status].icon} />,
         tone: STATUS_META[w.status].tone,
         label: w.workflow_id,
-        sub: `${w.batch_id} · ${STATUS_META[w.status].label} · ${w.pipeline_job_id ?? ""}`,
+        mono: true,
+        sub: [w.batch_id, statusLabel("workflow", w.status, locale), w.pipeline_id, w.pipeline_job_id].filter(Boolean).join(" · "),
         href: `/workflows/${w.workflow_id}`,
       }),
     );
@@ -199,18 +547,19 @@ function Palette({ onClose }: { onClose: () => void }) {
         icon: <ArchiveX />,
         tone: "dlq",
         label: d.dead_letter_id,
-        sub: `${d.workflow_id} · ${d.error_code} · ${DLQ_STATUS_META[d.status].label}`,
-        href: `/dlq?sel=${d.dead_letter_id}`,
+        mono: true,
+        sub: `${d.workflow_id} · ${d.error_code} · ${statusLabel("dlq", d.status, locale)}`,
+        href: rh(`/dlq?sel=${d.dead_letter_id}`),
       }),
     );
-    return out.slice(0, 60);
-  }, [q, remote]);
+    return out.slice(0, 70);
+  }, [q, remote, tabs, nav, t, locale, rh, pipes.data]);
 
   const go = useCallback(
-    (it: PalItem | undefined) => {
+    (it: PalItem | undefined, alt = false) => {
       if (!it) return;
       onClose();
-      router.push(it.href);
+      router.push(alt && it.alt ? it.alt.href : it.href);
     },
     [onClose, router],
   );
@@ -234,7 +583,7 @@ function Palette({ onClose }: { onClose: () => void }) {
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="명령 팔레트"
+        aria-label={t("palette.label")}
         initial={reduced ? false : { y: -8, scale: 0.985, opacity: 0 }}
         animate={{ y: 0, scale: 1, opacity: 1 }}
         transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
@@ -244,9 +593,12 @@ function Palette({ onClose }: { onClose: () => void }) {
           <input
             autoFocus
             value={q}
-            placeholder="Workflow ID, Batch, PipelineJob, DLQ ID, 오류 코드, 화면 이름…"
-            aria-label="검색어"
+            placeholder={t("palette.placeholder")}
+            aria-label={t("palette.input")}
             aria-controls="atlas-pal-list"
+            aria-activedescendant={items[cur] ? `atlas-pal-${cur}` : undefined}
+            role="combobox"
+            aria-expanded="true"
             onChange={(e) => {
               setQ(e.target.value);
               setSel(0);
@@ -258,25 +610,27 @@ function Palette({ onClose }: { onClose: () => void }) {
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
                 setSel(Math.max(0, cur - 1));
-              } else if (e.key === "Enter") go(items[cur]);
+              } else if (e.key === "Enter") go(items[cur], e.shiftKey);
               else if (e.key === "Escape") onClose();
             }}
           />
           <span className="kbd">ESC</span>
         </div>
-        <div className="pal-list" id="atlas-pal-list" role="listbox" ref={listRef}>
+        <div className="pal-list" id="atlas-pal-list" role="listbox" ref={listRef} aria-label={t("palette.results")}>
           {items.length === 0 ? (
             <div className="empty">
-              <b>일치하는 항목이 없습니다</b>Workflow ID 일부(예: ko-0022)나 오류 코드(예: QUOTA)로 검색해 보세요.
+              <b>{t("palette.emptyTitle")}</b>
+              {t("palette.emptyHint")}
             </div>
           ) : (
             items.map((it, i) => {
-              const head = it.grp !== lastGrp ? <div className="grp-t">{it.grp}</div> : null;
+              const head = it.grp !== lastGrp ? <div className="grp-t" role="presentation">{it.grp}</div> : null;
               lastGrp = it.grp;
               return (
-                <div key={it.grp + it.href}>
+                <div key={it.grp + it.href + i} role="presentation">
                   {head}
                   <div
+                    id={`atlas-pal-${i}`}
                     className={clsx("pal-item", it.tone && `tone-${it.tone}`)}
                     role="option"
                     aria-selected={i === cur}
@@ -285,11 +639,24 @@ function Palette({ onClose }: { onClose: () => void }) {
                   >
                     <span style={{ color: "var(--tc, var(--ink-3))", display: "grid" }}>{it.icon}</span>
                     <div style={{ minWidth: 0 }}>
-                      <div className="mono" style={{ fontSize: 12.5 }}>
+                      <div className={clsx(it.mono && "mono", "ell")} style={{ fontSize: 12.5 }}>
                         {it.label}
                       </div>
-                      <div className="sub">{it.sub}</div>
+                      <div className="sub ell">{it.sub}</div>
                     </div>
+                    {it.alt ? (
+                      <button
+                        className="btn sm ghost pal-alt"
+                        tabIndex={-1}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          go(it, true);
+                        }}
+                        title="Shift+Enter"
+                      >
+                        {it.alt.label}
+                      </button>
+                    ) : null}
                     <CornerDownLeft className="muted" aria-hidden style={{ width: 13, height: 13 }} />
                   </div>
                 </div>
@@ -297,54 +664,66 @@ function Palette({ onClose }: { onClose: () => void }) {
             })
           )}
         </div>
+        <div className="pal-foot mono muted">
+          <span>
+            <span className="kbd">↑↓</span> {t("palette.keys.move")}
+          </span>
+          <span>
+            <span className="kbd">↵</span> {t("palette.keys.open")}
+          </span>
+          <span>
+            <span className="kbd">⇧↵</span> {t("palette.keys.alt")}
+          </span>
+        </div>
       </motion.div>
     </motion.div>
   );
 }
 
+/* ───────────── top bar ───────────── */
 function TopBar({ onPalette }: { onPalette: () => void }) {
-  const path = usePathname();
-  const { snapshot } = useLiveStream();
-  const pend = snapshot?.kpis.dlqPendingReview ?? 0;
+  const t = useT("shell");
+  const c = useT("common");
   return (
     <header className="top">
-      <Brand />
-      <nav className="tabs" aria-label="화면">
-        {TABS.map((t) => {
-          const on = isActive(path, t.href);
-          return (
-            <Link key={t.href} href={t.href} className="tab" aria-current={on ? "page" : undefined}>
-              <span className="no">{t.no}</span>
-              {t.label}
-              {t.href === "/dlq" && pend ? (
-                <span className="cnt" aria-label={`검토 대기 ${pend}건`}>
-                  {pend}
-                </span>
-              ) : null}
-              {on ? <motion.span layoutId="atlas-tab-ind" className="bar-ind" transition={{ type: "spring", stiffness: 500, damping: 40 }} /> : null}
-            </Link>
-          );
-        })}
-      </nav>
-      <div className="tools">
-        <button className="btn search-btn" onClick={onPalette} aria-label="검색 및 명령 팔레트 열기 (⌘K)">
+      <div className="toprow">
+        <Brand />
+        <span className="mock hide-sm" title={c("app.mockDataHint")}>
+          {c("app.mockData")}
+        </span>
+        <button className="btn search-btn" onClick={onPalette} aria-label={t("palette.open")}>
           <Search />
-          <span className="lbl">Workflow·배치·DLQ 검색</span>
+          <span className="lbl">{t("palette.button")}</span>
           <span className="kbd">⌘K</span>
         </button>
-        <Clock />
-        <SimControls />
-        <ThemeBtn />
-        <span className="mock hide-sm" title="이 화면의 모든 수치는 앱 내장 Mock API의 시뮬레이션 데이터입니다">
-          MOCK DATA
-        </span>
+        <div className="tools">
+          <RangePicker />
+          <Clock />
+          <SimControls />
+          <LocaleToggle className="hide-sm" />
+          <ThemeBtn className="hide-sm" />
+          <UserMenu />
+        </div>
       </div>
+      <NavStrip />
+    </header>
+  );
+}
+
+function TopBarFallback() {
+  return (
+    <header className="top">
+      <div className="toprow">
+        <Brand />
+      </div>
+      <div className="navrow" />
     </header>
   );
 }
 
 export function AtlasShell({ children }: { children: ReactNode }) {
   const [pal, setPal] = useState(false);
+  const c = useT("common");
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -358,9 +737,16 @@ export function AtlasShell({ children }: { children: ReactNode }) {
   const close = useCallback(() => setPal(false), []);
   return (
     <ToastProvider>
-      <TopBar onPalette={() => setPal(true)} />
+      <a className="skip" href="#atlas-main">
+        {c("a11y.skipToContent")}
+      </a>
+      <Suspense fallback={<TopBarFallback />}>
+        <TopBar onPalette={() => setPal(true)} />
+      </Suspense>
       <main id="atlas-main">{children}</main>
-      <AnimatePresence>{pal ? <Palette key="pal" onClose={close} /> : null}</AnimatePresence>
+      <AnimatePresence>
+        {pal ? <Palette key="pal" onClose={close} /> : null}
+      </AnimatePresence>
     </ToastProvider>
   );
 }

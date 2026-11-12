@@ -73,10 +73,26 @@ const curve = (a: Pt, b: Pt, horiz = true) => {
     : `M${a[0]},${a[1]} C${a[0]},${a[1] + dy} ${b[0]},${b[1] - dy} ${b[0]},${b[1]}`;
 };
 
+/** i18n key under `orchestration.edges.*` ("" = unlabeled edge). */
+export type EdgeLabelKey =
+  | ""
+  | "objectFinalized"
+  | "cloudEventPush"
+  | "register"
+  | "admission"
+  | "slotReserved"
+  | "pipelineJob"
+  | "success"
+  | "failure"
+  | "retryLoop"
+  | "toDlq"
+  | "approval"
+  | "manualReplay";
+
 export interface EdgeDef {
   k: string;
   d: string;
-  label: string;
+  label: EdgeLabelKey;
   lx: number;
   ly: number;
   anchor?: "start" | "middle" | "end";
@@ -96,12 +112,12 @@ interface EOpt {
 
 export function edgesDef(N: Layout): EdgeDef[] {
   const vx = N.vertex;
-  const H = (a: NodeId, b: NodeId, label: string, o: EOpt): EdgeDef => {
+  const H = (a: NodeId, b: NodeId, label: EdgeLabelKey, o: EOpt): EdgeDef => {
     const A1 = pt(N, a, o.as ?? "r", o.af ?? 0.5);
     const B1 = pt(N, b, o.bs ?? "l", o.bf ?? 0.5);
     return { k: `${a}>${b}`, d: curve(A1, B1), label, lx: (A1[0] + B1[0]) / 2, ly: Math.min(A1[1], B1[1]) - 8, tone: o.tone, i: o.i };
   };
-  const V = (a: NodeId, b: NodeId, label: string, o: EOpt): EdgeDef => {
+  const V = (a: NodeId, b: NodeId, label: EdgeLabelKey, o: EOpt): EdgeDef => {
     const A1 = pt(N, a, o.as ?? "b", o.af ?? 0.5);
     const B1 = pt(N, b, o.bs ?? "t", o.bf ?? 0.5);
     return { k: `${a}>${b}`, d: curve(A1, B1, false), label, lx: (A1[0] + B1[0]) / 2 + 9, ly: (A1[1] + B1[1]) / 2 + 4, anchor: "start", tone: o.tone, i: o.i };
@@ -120,24 +136,24 @@ export function edgesDef(N: Layout): EdgeDef[] {
   const rgx = N.registry_queue.x + 100;
   const rgB = N.registry_queue.y + N.registry_queue.h;
   return [
-    H("gcs_input", "event_bus", "Object Finalized", { i: 1 }),
-    H("event_bus", "ingress", "CloudEvent push", { i: 2 }),
+    H("gcs_input", "event_bus", "objectFinalized", { i: 1 }),
+    H("event_bus", "ingress", "cloudEventPush", { i: 2 }),
     H("ingress", "registry_queue", "register", { bf: 0.46, i: 3 }),
     H("registry_queue", "scheduler", "admission", { i: 4 }),
-    { k: "scheduler>workflows", d: curve(sw, wt, false), label: "slot reserved", lx: sw[0] + 14, ly: (sw[1] + wt[1]) / 2 + 4, anchor: "start", i: 5 },
-    { k: "workflows>vertex", d: curve(wl, vr), label: "PipelineJob", lx: (wl[0] + vr[0]) / 2, ly: Math.min(wl[1], vr[1]) - 8, i: 6 },
-    { k: "vertex>results", d: curve(vb, rt, false), label: "SUCCESS", tone: "success", lx: vb[0] + 10, ly: (vb[1] + rt[1]) / 2 + 4, anchor: "start", i: 7 },
+    { k: "scheduler>workflows", d: curve(sw, wt, false), label: "slotReserved", lx: sw[0] + 14, ly: (sw[1] + wt[1]) / 2 + 4, anchor: "start", i: 5 },
+    { k: "workflows>vertex", d: curve(wl, vr), label: "pipelineJob", lx: (wl[0] + vr[0]) / 2, ly: Math.min(wl[1], vr[1]) - 8, i: 6 },
+    { k: "vertex>results", d: curve(vb, rt, false), label: "success", tone: "success", lx: vb[0] + 10, ly: (vb[1] + rt[1]) / 2 + 4, anchor: "start", i: 7 },
     { ...H("results", "res_csv", "", { af: 0.2, i: 8 }), tone: "success" },
     { ...H("results", "res_bq", "", { af: 0.72, i: 8 }), tone: "success" },
-    { k: "vertex>retry", d: curve(fA, fB), label: "FAILURE", tone: "failed", lx: (fA[0] + fB[0]) / 2, ly: Math.min(fA[1], fB[1]) - 8, i: 9 },
-    { k: "retry>vertex", d: curve(rA, rB), label: "attempts < 3", tone: "retry", lx: (rA[0] + rB[0]) / 2, ly: Math.max(rA[1], rB[1]) + 16, i: 9 },
-    V("retry", "dlq", "attempts = 3 · non-retryable", { tone: "dlq", i: 10 }),
+    { k: "vertex>retry", d: curve(fA, fB), label: "failure", tone: "failed", lx: (fA[0] + fB[0]) / 2, ly: Math.min(fA[1], fB[1]) - 8, i: 9 },
+    { k: "retry>vertex", d: curve(rA, rB), label: "retryLoop", tone: "retry", lx: (rA[0] + rB[0]) / 2, ly: Math.max(rA[1], rB[1]) + 16, i: 9 },
+    V("retry", "dlq", "toDlq", { tone: "dlq", i: 10 }),
     { ...H("dlq", "dlq_mgr", "", { as: "l", bs: "r", af: 0.5, bf: 0.55, i: 11 }), tone: "dlq" },
-    V("dlq_mgr", "replay", "운영자 승인", { as: "t", bs: "b", tone: "retry", i: 12 }),
+    V("dlq_mgr", "replay", "approval", { as: "t", bs: "b", tone: "retry", i: 12 }),
     {
       k: "dlq>registry_queue",
       d: `M${rp[0]},${rp[1]} L${rp[0]},${LOOP_Y + 14} Q${rp[0]},${LOOP_Y} ${rp[0] + 14},${LOOP_Y} L${rgx - 14},${LOOP_Y} Q${rgx},${LOOP_Y} ${rgx},${LOOP_Y - 14} L${rgx},${rgB}`,
-      label: "MANUAL REPLAY → 새 replay_cycle 로 Language Queue 재등록",
+      label: "manualReplay",
       tone: "retry",
       dashed: true,
       lx: 470,
@@ -313,4 +329,32 @@ export function bounds(N: Layout) {
     y1 = Math.max(y1, n.y + n.h);
   }
   return { x0: x0 - 24, y0: y0 - 34, x1: x1 + 24, y1: y1 + 28 };
+}
+
+/** The main (non-sub) node box of a stage — where badges, focus and the selection ring go. */
+export function primaryNode(N: Layout, stage: StageId): NodeBox | undefined {
+  return Object.values(N).find((x) => x.stage === stage && !x.sub);
+}
+
+/** Every node box of a stage (results → Result Commit + CSV + BigQuery; dlq → DLQ, manager, replay). */
+export function stageNodes(N: Layout, stage: StageId): NodeId[] {
+  return (Object.keys(N) as NodeId[]).filter((id) => N[id].stage === stage);
+}
+
+/** Union box of a stage's nodes (world units), padded. */
+export function stageBox(N: Layout, stage: StageId, pad = 28): Rect | null {
+  const ids = stageNodes(N, stage);
+  if (!ids.length) return null;
+  let x0 = 1e9,
+    y0 = 1e9,
+    x1 = -1e9,
+    y1 = -1e9;
+  for (const id of ids) {
+    const n = N[id];
+    x0 = Math.min(x0, n.x);
+    y0 = Math.min(y0, n.y);
+    x1 = Math.max(x1, n.x + n.w);
+    y1 = Math.max(y1, n.y + n.h);
+  }
+  return { x: x0 - pad, y: y0 - pad - 20, w: x1 - x0 + pad * 2, h: y1 - y0 + pad * 2 + 20 };
 }

@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { forbidden } from "next/navigation";
+import { getT } from "@/i18n/server";
 
-export const metadata: Metadata = { title: "403" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("auth");
+  return { title: t("forbidden.metaTitle") };
+}
 export const dynamic = "force-dynamic";
 
 /**

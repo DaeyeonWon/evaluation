@@ -1,11 +1,16 @@
 import type { Metadata } from "next";
 import { AtlasShell } from "@/components/atlas/shell";
+import { getT } from "@/i18n/server";
 import "@/styles/atlas.css";
 
-export const metadata: Metadata = {
-  title: { default: "Atlas", template: "%s · Atlas" },
-  description: "AIPO Atlas — 빅스비 실발화 평가 오케스트레이션을 설계 도면처럼 보여주는 운영 콘솔 (Mock 데이터).",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const [c, s] = await Promise.all([getT("common"), getT("shell")]);
+  const name = s("brand.name");
+  return {
+    title: { default: name, template: `%s · ${name}` },
+    description: `${name} — ${c("app.consoleName")} · ${c("app.subtitle")} (${c("app.mockData")})`,
+  };
+}
 
 export default function AtlasLayout({ children }: LayoutProps<"/">) {
   return (

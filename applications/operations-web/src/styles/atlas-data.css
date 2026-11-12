@@ -1,0 +1,163 @@
+/* Atlas · data screens (DLQ, Results, Analytics). Owned by the data screens; tokens from atlas.css. */
+[data-variant="atlas"] {
+  /* period chip used in plate headers / KPI subtitles */
+  & .ad-range {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 7px;
+    border: 1px dashed var(--rule);
+    border-radius: 2px;
+    font: 500 10.5px var(--f-mono);
+    color: var(--ink-2);
+    background: var(--sheet);
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  & .ad-range::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex: none;
+  }
+
+  /* pending DLQ outside the selected period */
+  & .ad-outside {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--st-retry);
+    border-left-width: 3px;
+    border-radius: var(--r);
+    background: color-mix(in srgb, var(--st-retry) 9%, var(--sheet));
+    color: var(--ink);
+    font-size: var(--t-sm);
+    animation: ad-in 0.42s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  & .ad-outside > svg {
+    width: 17px;
+    height: 17px;
+    color: var(--st-retry);
+    flex: none;
+  }
+  & .ad-outside .mono {
+    font-size: 11px;
+  }
+
+  /* section divider (drawing-sheet style) */
+  & .ad-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--ink);
+  }
+  & .ad-section .dwg {
+    font: 600 10.5px var(--f-mono);
+    letter-spacing: 0.14em;
+    color: var(--ink);
+  }
+
+  & .ad-empty-chart {
+    display: grid;
+    place-items: center;
+    min-height: 150px;
+    color: var(--ink-3);
+    font-size: var(--t-sm);
+    border: 1px dashed var(--rule-2);
+    border-radius: var(--r);
+    background: repeating-linear-gradient(135deg, transparent 0 7px, color-mix(in srgb, var(--rule-2) 40%, transparent) 7px 8px);
+  }
+
+  & .ad-sel {
+    height: 26px;
+    max-width: 230px;
+    font-size: 11px;
+  }
+
+  /* pipeline drill-down */
+  & .ad-pipe-chips {
+    margin-bottom: 12px;
+  }
+  & .ad-pipe-chips button {
+    font-family: var(--f-mono);
+    font-weight: 500;
+  }
+  & .ad-pipe-chips button.ad-sub {
+    border-style: dashed;
+  }
+  & .ad-drill {
+    display: grid;
+    gap: 12px;
+    animation: ad-in 0.36s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+  & .ad-drill-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    font-size: var(--t-sm);
+  }
+  & .ad-drill-head b {
+    font-size: 14px;
+    font-weight: 500;
+  }
+  & .ad-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: auto;
+    padding: 2px 4px;
+    color: var(--accent);
+    text-align: left;
+  }
+  & .ad-link svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  @media (max-width: 640px) {
+    & .ad-outside .btn {
+      width: 100%;
+      justify-content: center;
+    }
+    & .ad-sel {
+      max-width: 150px;
+    }
+  }
+}
+
+@keyframes ad-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-variant="atlas"] .ad-outside,
+  [data-variant="atlas"] .ad-drill {
+    animation: none;
+  }
+}
+
+/* DLQ detail: long ids / URIs / log lines wrap instead of pushing the plate wider (phones) */
+[data-variant="atlas"] .ad-dlq-detail {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  & pre.code {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}

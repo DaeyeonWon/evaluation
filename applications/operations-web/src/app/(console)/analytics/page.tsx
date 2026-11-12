@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AnalyticsScreen } from "@/components/atlas/analytics";
+import { getT } from "@/i18n/server";
 
-export const metadata: Metadata = { title: "분석" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("nav");
+  return { title: t("analytics.title") };
+}
 
 export default function Page() {
   return (

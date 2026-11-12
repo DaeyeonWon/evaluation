@@ -1,10 +1,113 @@
 /**
- * files — GCS file browser: buckets, objects, preview.
+ * files — file-name search across every orchestration stage (route "/files", src/components/atlas/files/**).
  *
  * ko is the schema: add keys here first (plain strings, nested objects OK, no `as const`), then the
  * same keys in ../en/files.ts. Follow the glossary in docs/i18n.md (system terms stay English).
  * Usage: client `const t = useT("files")` · server `const t = await getT("files")`.
  */
-const files = {};
+const files = {
+  page: {
+    dwg: "F-01 · FILE INDEX",
+    title: "파일 검색",
+    desc: "단계별 파일 이름으로 검색합니다. 입력 JSONL, Pub/Sub 메시지, Firestore 문서, Pipeline artifact(child job 포함), 결과 CSV, DLQ input_uri를 한 번에 찾습니다.",
+    api: "GET /api/v1/files/search",
+  },
+  query: {
+    label: "파일 이름",
+    placeholder: "파일 이름, Workflow ID 또는 Batch ID 일부 · 예: batch-0042",
+    clear: "검색어 지우기",
+    shortcut: "/ 키로 검색창으로 이동",
+  },
+  filters: {
+    aria: "검색 필터",
+    stage: "단계",
+    allStages: "전체 단계",
+    bucket: "버킷",
+    allBuckets: "전체 버킷",
+    language: "언어",
+    status: "상태",
+    anyStatus: "전체 상태",
+    reset: "필터 초기화",
+    noWorkflow: "Workflow 없음",
+  },
+  kinds: {
+    gcs_object: "GCS 객체",
+    pubsub_message: "Pub/Sub 메시지",
+    firestore_doc: "Firestore 문서",
+    reservation: "Reservation",
+    execution: "Execution",
+    dlq_entry: "DLQ 항목",
+  },
+  table: {
+    aria: "파일 검색 결과",
+    stage: "단계",
+    path: "gs:// 경로",
+    generation: "Generation",
+    size: "크기",
+    updated: "갱신",
+    links: "Workflow · Batch · PipelineJob",
+    status: "현재 상태",
+    open: "상세 열기: {uri}",
+  },
+  count: {
+    matches: "건 일치",
+    total: "{count}건",
+    shown: "{total}건 중 최근 {shown}건 표시",
+    statusFiltered: "상태 필터 적용 후",
+    loading: "불러오는 중…",
+  },
+  detail: {
+    aria: "객체 상세",
+    title: "객체 상세",
+    close: "닫기",
+    copy: "gs:// URI 복사",
+    copied: "복사했습니다: {uri}",
+    copyFailed: "복사하지 못했습니다.",
+    metadata: "메타데이터",
+    kind: "기록 유형",
+    ref: "참조",
+    bucket: "버킷",
+    object: "객체",
+    uri: "URI",
+    generation: "Generation",
+    size: "크기",
+    updated: "갱신",
+    language: "언어",
+    workflowId: "workflow_id",
+    batchId: "batch_id",
+    pipelineJobId: "pipeline_job_id",
+    currentStatus: "현재 상태",
+    position: "Flow 위치",
+    positionHint: "이 기록이 속한 단계와 Batch가 지금 있는 단계입니다.",
+    here: "이 기록",
+    now: "Batch 현재",
+    nowAndHere: "이 기록 · Batch 현재",
+    noWorkflow: "이 객체에는 연결된 Workflow가 없습니다.",
+    links: "바로가기",
+    openWorkflow: "Workflow 상세",
+    openInspector: "도면에서 단계 Inspector 열기",
+    openJob: "PipelineJob 보기",
+    sameWorkflow: "이 Workflow의 모든 파일",
+    sameBatchStage: "같은 단계의 다른 결과",
+  },
+  empty: {
+    title: "일치하는 파일이 없습니다",
+    noData: "이 기간에는 색인된 파일이 없습니다",
+    tipsTitle: "검색 팁",
+    tipName: "파일 이름 일부로 검색합니다:",
+    tipPath: "경로 일부도 일치합니다:",
+    tipIds: "Workflow ID와 Batch ID도 일치합니다 (예: wf-…-ko-0031, batch-…-ko-0031).",
+    tipRange: "결과는 기록의 갱신 시각 기준입니다. 상단에서 기간을 넓혀 보세요.",
+    tipStage: "단계 필터를 해제하면 모든 단계에서 찾습니다.",
+    resetAll: "필터 초기화",
+    widen: "최근 30일로 넓히기",
+  },
+  errors: {
+    load: "파일을 검색하지 못했습니다.",
+    sessionExpired: "세션이 만료되었습니다. 로그인 화면으로 이동합니다.",
+    forbidden: "파일 검색 권한이 없습니다.",
+    retry: "다시 시도",
+  },
+};
 
 export default files;

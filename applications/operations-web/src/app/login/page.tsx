@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getConsoleConfig, hasPermission } from "@/config";
+import { getT } from "@/i18n/server";
 import { getSession, permissionsFor, rolesFor, safeNext } from "@/server/auth";
 import { AuthFrame } from "./_ui/frame";
 
-export const metadata: Metadata = { title: "로그인" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("nav");
+  return { title: t("login.title") };
+}
 export const dynamic = "force-dynamic";
+
+const ROLE_ORDER = ["Admin", "Operator", "Viewer"] as const;
 
 /**
  * /login — mock mode: pick a demo operator (signed HttpOnly cookie via POST /api/v1/auth/login; works
@@ -16,16 +22,17 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const next = safeNext(typeof sp.next === "string" ? sp.next : undefined);
   const cfg = getConsoleConfig();
   const session = await getSession();
+  const t = await getT("auth");
 
   if (cfg.auth.mode !== "mock") {
     if (session) redirect(next);
     return (
-      <AuthFrame sheetNo="AUTH-01">
+      <AuthFrame sheetNo="AUTH-01" tone="warn">
         <span className="auth-code">401 · {cfg.auth.mode.toUpperCase()}</span>
-        <h1 id="auth-title" className="auth-title">인증 정보가 없습니다</h1>
-        <p className="auth-lead">
-          이 콘솔은 {cfg.auth.mode === "iap" ? "Google Cloud IAP" : "조직 OIDC 인증 프록시"} 뒤에서만 동작합니다. 프록시를 거쳐 다시 접속해 주세요.
-        </p>
+        <h1 id="auth-title" className="auth-title">
+          {t("proxy.title")}
+        </h1>
+        <p className="auth-lead">{cfg.auth.mode === "iap" ? t("proxy.leadIap") : t("proxy.leadOidc")}</p>
       </AuthFrame>
     );
   }
@@ -35,48 +42,73 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     const perms = permissionsFor(roles);
     return { ...u, roles, hermes: hasPermission(perms, cfg.externalLinks.hermes.requiredPermission) };
   });
+  const groups = ROLE_ORDER.map((r) => [r, users.filter((u) => (u.roles[0] ?? "Viewer") === r)] as const).filter(([, list]) => list.length);
+  const others = users.filter((u) => !ROLE_ORDER.includes((u.roles[0] ?? "Viewer") as (typeof ROLE_ORDER)[number]));
+  const fromPath = next && next !== "/" ? next : null;
 
   return (
     <AuthFrame sheetNo="AUTH-01">
       <span className="auth-code">DEMO LOGIN · MOCK</span>
-      <h1 id="auth-title" className="auth-title">운영자 계정 선택</h1>
+      <h1 id="auth-title" className="auth-title">
+        {t("login.title")}
+      </h1>
       <p className="auth-lead">
-        데모용 로그인입니다. 선택한 계정은 서버가 서명한 HttpOnly 쿠키로 유지되며, 모든 권한 검사와 감사 로그는 이 계정 기준입니다.
-        {session ? (
-          <>
-            {" "}현재 <b>{session.user.name}</b> ({session.roles.join(", ") || "역할 없음"})로 로그인되어 있습니다.
-          </>
-        ) : null}
+        {t("login.lead")}
+        {session ? <> {t("login.current", { name: session.user.name, roles: session.roles.join(", ") || t("login.noRole") })}</> : null}
       </p>
+      {fromPath ? <p className="auth-hint">{t("login.next", { path: fromPath })}</p> : null}
       <form method="post" action="/api/v1/auth/login">
         <input type="hidden" name="next" value={next} />
-        <ul className="auth-users">
-          {users.map((u) => (
-            <li key={u.id}>
-              <button className="auth-user" type="submit" name="userId" value={u.id} aria-current={session?.user.id === u.id ? "true" : undefined}>
-                <span className="n">
-                  {u.name} <span className="muted" style={{ fontWeight: 400 }}>· {u.team}</span>
-                </span>
-                <span className="e">{u.email}</span>
-                <span className="r">
-                  {u.roles.map((r) => (
-                    <span key={r} className={`auth-tag role-${r}`}>
-                      {r}
-                    </span>
-                  ))}
-                  <span className={`auth-tag ${u.hermes ? "yes" : "no"}`} title="Hermes 대시보드 접근 권한">
-                    Hermes {u.hermes ? "✓" : "✕"}
-                  </span>
-                </span>
-              </button>
-            </li>
+        <div style={{ display: "grid", gap: 12 }}>
+          {[...groups, ...(others.length ? ([["—", others]] as const) : [])].map(([role, list]) => (
+            <div key={role} style={{ display: "grid", gap: 10 }}>
+              <div className="auth-group">{role}</div>
+              <ul className="auth-users">
+                {list.map((u) => (
+                  <li key={u.id}>
+                    <button className="auth-user" type="submit" name="userId" value={u.id} aria-current={session?.user.id === u.id ? "true" : undefined}>
+                      <span className="n">
+                        {u.name} <span className="t">· {u.team}</span>
+                      </span>
+                      <span className="e">{u.email}</span>
+                      <span className="r">
+                        {u.roles.map((r) => (
+                          <span key={r} className={`auth-tag role-${r}`}>
+                            {r}
+                          </span>
+                        ))}
+                        <span className={`auth-tag ${u.hermes ? "yes" : "no"}`} title={t("login.hermesTitle")}>
+                          Hermes {u.hermes ? "✓" : "✕"}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
       </form>
+      <dl className="auth-roles">
+        <div>
+          <dt>Admin</dt>
+          <dd>{t("roles.admin")}</dd>
+        </div>
+        <div>
+          <dt>Operator</dt>
+          <dd>{t("roles.operator")}</dd>
+        </div>
+        <div>
+          <dt>Viewer</dt>
+          <dd>{t("roles.viewer")}</dd>
+        </div>
+      </dl>
       {session ? (
         <form method="post" action="/api/v1/auth/logout" className="auth-foot">
-          <button className="btn sm" type="submit">로그아웃</button>
-          <span>세션 쿠키를 삭제합니다.</span>
+          <button className="btn sm" type="submit">
+            {t("login.logout")}
+          </button>
+          <span>{t("login.logoutHint")}</span>
         </form>
       ) : null}
     </AuthFrame>

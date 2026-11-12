@@ -1,17 +1,22 @@
 "use client";
 /**
- * S-03 · Pipeline Explorer. Every filter is a URL query param (back/forward + reload keep context;
+ * S-03 · Workflow Explorer. Every filter is a URL query param (back/forward + reload keep context;
  * returning from S4 restores the list). Server-side filtering/paging via GET /api/v1/workflows.
+ * The global period (?range= / ?from=&to=) applies too; `range_by` picks the timestamp: lifetime
+ * overlap ("active during the period", default), created_at or updated_at.
  */
 import clsx from "clsx";
 import { ChevronLeft, ChevronRight, RefreshCw, RotateCcw, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { LangBadge, StatusPill, fmt } from "@/components/shared";
+import { LangBadge, StatusPill } from "@/components/shared";
+import { failureCategoryLabel, statusLabel } from "@/i18n";
+import { useFmt, useLocale, useT } from "@/i18n/client";
 import { ACTIVE_STATES, FAILURE_CATEGORY_META, LANG_CODES, PIPELINE_VERSIONS, STATES, STATUS_META } from "@/lib/catalog";
-import { api, qs, parseAsBool, parseAsInt, parseAsList, parseAsString, useApi, useQueryStates, type WorkflowQuery } from "@/lib/client";
+import { api, qs, parseAsBool, parseAsInt, parseAsList, parseAsString, useApi, useQueryStates, useTimeRange, type WorkflowQuery } from "@/lib/client";
 import type { FailureCategory, LangCode, WorkflowStatus } from "@/lib/types";
-import { Empty, ErrorNote, Plate, Sheet, SheetHead, Skeleton, EXPLORER_RETURN_KEY } from "./ui";
+import { RangeEmpty, RangeTag } from "./time-range";
+import { ErrorNote, Plate, Sheet, SheetHead, Skeleton, EXPLORER_RETURN_KEY } from "./ui";
 
 const PARSERS = {
   q: parseAsString,
@@ -24,32 +29,31 @@ const PARSERS = {
   event_type: parseAsString,
   error_code: parseAsString,
   error_category: parseAsString,
-  from: parseAsString,
-  to: parseAsString,
+  pipeline_id: parseAsString,
+  model_version: parseAsString,
+  range_by: parseAsString.withDefault("active"),
   has_retries: parseAsBool,
   replay: parseAsBool,
   sort: parseAsString.withDefault("created_desc"),
   page: parseAsInt.withDefault(1),
 };
 const PAGE = 50;
-const SORTS: [string, string][] = [
-  ["created_desc", "최근 생성순"],
-  ["created_asc", "오래된 순"],
-  ["wait_desc", "대기 시간 긴 순"],
-  ["run_desc", "실행 시간 긴 순"],
-  ["updated_desc", "최근 갱신순"],
-  ["attempts_desc", "Attempt 많은 순"],
+const SORTS = ["created_desc", "created_asc", "wait_desc", "run_desc", "updated_desc", "attempts_desc"] as const;
+const RANGE_BY = ["active", "created", "updated"] as const;
+const PRESETS: ["_active" | "_failed", WorkflowStatus[]][] = [
+  ["_active", ACTIVE_STATES],
+  ["_failed", ["RETRY_WAIT", "DEAD_LETTERED", "TIMED_OUT"]],
 ];
-const PRESETS: [string, string, WorkflowStatus[]][] = [
-  ["_active", "Slot 점유 (RESERVED·DISPATCHING·RUNNING)", ACTIVE_STATES],
-  ["_failed", "실패 관련 (RETRY·DLQ·TIMEOUT)", ["RETRY_WAIT", "DEAD_LETTERED", "TIMED_OUT"]],
-];
-const toMs = (local: string | null) => (local ? new Date(local + ":00+09:00").getTime() : undefined);
 const TEXT_KEYS = ["q", "workflow_id", "pipeline_job_id", "batch_id"] as const;
 type TextKey = (typeof TEXT_KEYS)[number];
 
 export function ExplorerScreen() {
   const router = useRouter();
+  const t = useT("explorer");
+  const c = useT("common");
+  const f8 = useFmt();
+  const locale = useLocale();
+  const tr = useTimeRange();
   const [f, setF] = useQueryStates(PARSERS);
   const [draft, setDraft] = useState<Partial<Record<TextKey, string>>>({});
   useEffect(() => {
@@ -74,24 +78,26 @@ export function ExplorerScreen() {
       event_type: f.event_type ?? undefined,
       error_code: f.error_code ?? undefined,
       error_category: f.error_category ?? undefined,
-      from: toMs(f.from),
-      to: toMs(f.to),
+      pipeline_id: f.pipeline_id ?? undefined,
+      model_version: f.model_version ?? undefined,
+      range_by: (RANGE_BY as readonly string[]).includes(f.range_by ?? "") && f.range_by !== "active" ? (f.range_by as WorkflowQuery["range_by"]) : undefined,
+      ...tr.params,
       has_retries: f.has_retries || undefined,
       replay: f.replay || undefined,
       sort: (f.sort ?? "created_desc") as WorkflowQuery["sort"],
       page,
       pageSize: PAGE,
     }),
-    [f, page],
+    [f, page, tr.params],
   );
-  const list = useApi(["workflows", "explorer", query], () => api.workflows(query), { revalidateOn: ["transition"], throttleMs: 2000 });
-  const errs = useApi(["analytics-errors"], () => api.errors({ top: 40 }), { revalidateOnFocus: false });
+  const list = useApi(["workflows", "explorer", tr.key, query], () => api.workflows(query), { revalidateOn: ["transition"], throttleMs: 2000 });
+  const errs = useApi(["analytics-errors", tr.key], () => api.errors({ top: 40, ...tr.params }), { revalidateOnFocus: false });
   const d = list.data;
   const rows = d?.items ?? [];
   const pages = d ? Math.max(1, Math.ceil(d.total / PAGE)) : 1;
   const maxW = Math.max(1, ...rows.map((w) => w.waitMs ?? 0));
   const maxR = Math.max(1, ...rows.map((w) => w.runMs ?? 0));
-  const statusSel = PRESETS.find(([, , s]) => s.length === f.status.length && s.every((x) => f.status.includes(x)))?.[0] ?? (f.status.length === 1 ? f.status[0] : f.status.length ? "_custom" : "");
+  const statusSel = PRESETS.find(([, s]) => s.length === f.status.length && s.every((x) => f.status.includes(x)))?.[0] ?? (f.status.length === 1 ? f.status[0] : f.status.length ? "_custom" : "");
   const set = (p: Partial<typeof f>) => setF({ ...p, page: 1 }, { history: "push" });
   const val = (k: TextKey) => draft[k] ?? f[k] ?? "";
   /** Remember the filtered explorer URL so the detail page's "Explorer" crumb can return to it. */
@@ -103,24 +109,39 @@ export function ExplorerScreen() {
     }
     router.push(`/workflows/${id}`);
   };
-  const anyFilter = TEXT_KEYS.some((k) => f[k]) || f.status.length || f.language.length || f.version || f.event_type || f.error_code || f.error_category || f.from || f.to || f.has_retries || f.replay;
+  const anyFilter =
+    TEXT_KEYS.some((k) => f[k]) || f.status.length || f.language.length || f.version || f.event_type || f.error_code || f.error_category || f.pipeline_id || f.model_version || f.has_retries || f.replay;
+  const pipeOpts = Object.entries(d?.facets.pipeline_id ?? {}).sort((a, b) => b[1] - a[1]);
+  const modelOpts = Object.entries(d?.facets.model_version ?? {}).sort((a, b) => a[0].localeCompare(b[0]));
+  const any = c("state.all");
+  /** clear every filter but keep the period */
+  const resetHref = () => {
+    const keep = new URLSearchParams();
+    Object.entries(tr.params).forEach(([k, v]) => keep.set(k, v));
+    const q = keep.toString();
+    return "/explorer" + (q ? "?" + q : "");
+  };
 
   return (
     <Sheet>
       <SheetHead
-        dwg="SHEET S-03 · PIPELINE EXPLORER"
-        title="Pipeline Explorer"
-        desc="Workflow · PipelineJob · Batch ID · Trace · Idempotency Key로 검색합니다. 필터는 URL에 저장되어 상세 화면에서 돌아오거나 새로고침해도 유지됩니다."
+        dwg="SHEET S-03 · WORKFLOW EXPLORER"
+        title={t("title")}
+        desc={
+          <>
+            {t("desc")} <RangeTag />
+          </>
+        }
         acts={
           <button
             className="btn"
             onClick={() => {
               setDraft({});
-              router.replace("/explorer", { scroll: false });
+              router.replace(resetHref(), { scroll: false });
             }}
           >
             <X />
-            필터 초기화
+            {c("actions.resetFilters")}
           </button>
         }
       />
@@ -128,7 +149,7 @@ export function ExplorerScreen() {
         <div style={{ display: "grid", gap: 12 }}>
           <div className="filters">
             <label className="field f-wide">
-              <span>통합 검색 (ID · Trace · 오브젝트 · 오류 · DLQ)</span>
+              <span>{t("f.q")}</span>
               <input className="in mono" value={val("q")} onChange={(e) => setDraft((x) => ({ ...x, q: e.target.value }))} placeholder="wf-20261112-ko-0022 / trace id / batch-0001.jsonl" />
             </label>
             <label className="field">
@@ -140,36 +161,60 @@ export function ExplorerScreen() {
               <input className="in mono" value={val("pipeline_job_id")} onChange={(e) => setDraft((x) => ({ ...x, pipeline_job_id: e.target.value }))} placeholder="…-attempt-2" />
             </label>
             <label className="field">
-              <span>Status</span>
+              <span>{t("f.status")}</span>
               <select
                 className="in"
                 value={statusSel}
                 onChange={(e) => {
                   const v = e.target.value;
                   const p = PRESETS.find(([k]) => k === v);
-                  set({ status: p ? p[2] : v ? [v] : [] });
+                  set({ status: p ? p[1] : v ? [v] : [] });
                 }}
               >
-                <option value="">전체 상태</option>
+                <option value="">{t("f.statusAll")}</option>
                 {statusSel === "_custom" ? <option value="_custom">{f.status.join(", ")}</option> : null}
-                {PRESETS.map(([k, l]) => (
+                {PRESETS.map(([k]) => (
                   <option key={k} value={k}>
-                    {l}
+                    {t(`presets.${k}`)}
                   </option>
                 ))}
                 {STATES.map((s) => (
                   <option key={s} value={s}>
-                    {STATUS_META[s].label} · {s}
+                    {statusLabel("workflow", s, locale)} · {s}
                   </option>
                 ))}
               </select>
             </label>
             <label className="field">
-              <span>Pipeline Version</span>
+              <span>Pipeline</span>
+              <select className="in" value={f.pipeline_id ?? ""} onChange={(e) => set({ pipeline_id: e.target.value || null })}>
+                <option value="">{any}</option>
+                {f.pipeline_id && !pipeOpts.some(([k]) => k === f.pipeline_id) ? <option value={f.pipeline_id}>{f.pipeline_id}</option> : null}
+                {pipeOpts.map(([k, n]) => (
+                  <option key={k} value={k}>
+                    {k} ({n})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Pipeline version</span>
               <select className="in" value={f.version ?? ""} onChange={(e) => set({ version: e.target.value || null })}>
-                <option value="">전체</option>
+                <option value="">{any}</option>
                 {PIPELINE_VERSIONS.map((v) => (
                   <option key={v}>{v}</option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>{t("f.model")}</span>
+              <select className="in" value={f.model_version ?? ""} onChange={(e) => set({ model_version: e.target.value || null })}>
+                <option value="">{any}</option>
+                {f.model_version && !modelOpts.some(([k]) => k === f.model_version) ? <option value={f.model_version}>{f.model_version}</option> : null}
+                {modelOpts.map(([k, n]) => (
+                  <option key={k} value={k}>
+                    {k} ({n})
+                  </option>
                 ))}
               </select>
             </label>
@@ -178,17 +223,17 @@ export function ExplorerScreen() {
               <input className="in mono" value={val("batch_id")} onChange={(e) => setDraft((x) => ({ ...x, batch_id: e.target.value }))} placeholder="batch-20261112-ko-0022" />
             </label>
             <label className="field">
-              <span>Event Type</span>
+              <span>Event type</span>
               <select className="in" value={f.event_type ?? ""} onChange={(e) => set({ event_type: e.target.value || null })}>
-                <option value="">전체</option>
+                <option value="">{any}</option>
                 <option>pipeline.batch.requested</option>
                 <option>pipeline.batch.replay.requested</option>
               </select>
             </label>
             <label className="field">
-              <span>Error Code</span>
+              <span>{t("f.errorCode")}</span>
               <select className="in" value={f.error_code ?? ""} onChange={(e) => set({ error_code: e.target.value || null })}>
-                <option value="">전체</option>
+                <option value="">{any}</option>
                 {(errs.data?.topErrorCodes ?? []).map((c) => (
                   <option key={c.code} value={c.code}>
                     {c.code} ({c.count})
@@ -197,37 +242,39 @@ export function ExplorerScreen() {
               </select>
             </label>
             <label className="field">
-              <span>Error 유형</span>
+              <span>{t("f.errorCategory")}</span>
               <select className="in" value={f.error_category ?? ""} onChange={(e) => set({ error_category: e.target.value || null })}>
-                <option value="">전체</option>
-                {(Object.keys(FAILURE_CATEGORY_META) as FailureCategory[]).map((c) => (
-                  <option key={c} value={c}>
-                    {FAILURE_CATEGORY_META[c].label}
+                <option value="">{any}</option>
+                {(Object.keys(FAILURE_CATEGORY_META) as FailureCategory[]).map((k) => (
+                  <option key={k} value={k}>
+                    {failureCategoryLabel(k, locale)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="field">
-              <span>생성 시작 (KST)</span>
-              <input className="in mono" type="datetime-local" value={f.from ?? ""} onChange={(e) => set({ from: e.target.value || null })} />
-            </label>
-            <label className="field">
-              <span>생성 종료 (KST)</span>
-              <input className="in mono" type="datetime-local" value={f.to ?? ""} onChange={(e) => set({ to: e.target.value || null })} />
-            </label>
-            <label className="field">
-              <span>정렬</span>
-              <select className="in" value={f.sort ?? "created_desc"} onChange={(e) => set({ sort: e.target.value })}>
-                {SORTS.map(([k, l]) => (
+              <span>{t("f.rangeBy")}</span>
+              <select className="in" value={f.range_by ?? "active"} onChange={(e) => set({ range_by: e.target.value })} title={t(`rangeBy.${(RANGE_BY as readonly string[]).includes(f.range_by ?? "") ? (f.range_by as (typeof RANGE_BY)[number]) : "active"}Help`)}>
+                {RANGE_BY.map((k) => (
                   <option key={k} value={k}>
-                    {l}
+                    {t(`rangeBy.${k}`)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>{t("f.sort")}</span>
+              <select className="in" value={f.sort ?? "created_desc"} onChange={(e) => set({ sort: e.target.value })}>
+                {SORTS.map((k) => (
+                  <option key={k} value={k}>
+                    {t(`sorts.${k}`)}
                   </option>
                 ))}
               </select>
             </label>
           </div>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-            <div className="chipset" role="group" aria-label="언어">
+            <div className="chipset" role="group" aria-label={t("f.language")}>
               {LANG_CODES.map((c) => (
                 <button key={c} aria-pressed={f.language.includes(c)} onClick={() => set({ language: f.language.includes(c) ? f.language.filter((x) => x !== c) : [...f.language, c] })}>
                   <LangBadge lang={c} />
@@ -238,17 +285,17 @@ export function ExplorerScreen() {
             <div className="chipset">
               <button aria-pressed={f.has_retries} onClick={() => set({ has_retries: !f.has_retries })}>
                 <RotateCcw />
-                Retry 발생
+                {t("f.hasRetries")}
               </button>
               <button aria-pressed={f.replay} onClick={() => set({ replay: !f.replay })}>
                 <RefreshCw />
-                Replay 실행
+                {t("f.replay")}
               </button>
             </div>
             <span className="mono muted" style={{ marginLeft: "auto", fontSize: 12 }}>
               {d ? (
                 <>
-                  {fmt.number(d.total)}건
+                  {t("total", { count: f8.number(d.total) })}
                   {(Object.entries(d.facets.status) as [WorkflowStatus, number][]).map(([s, n]) => (
                     <span key={s}>
                       {" · "}
@@ -257,7 +304,7 @@ export function ExplorerScreen() {
                         style={{ padding: 0, height: 18, color: `var(--st-${STATUS_META[s].tone})`, fontFamily: "var(--f-mono)", fontWeight: 500 }}
                         onClick={() => set({ status: [s] })}
                       >
-                        {STATUS_META[s].label} {n}
+                        {statusLabel("workflow", s, locale)} {n}
                       </button>
                     </span>
                   ))}
@@ -277,15 +324,15 @@ export function ExplorerScreen() {
             <thead>
               <tr>
                 <th>Workflow / PipelineJob</th>
-                <th>상태</th>
-                <th>언어</th>
-                <th>버전</th>
+                <th>{t("cols.status")}</th>
+                <th>{t("cols.language")}</th>
+                <th>{t("cols.pipeline")}</th>
                 <th className="r">Attempt</th>
-                <th>대기 시간</th>
-                <th>실행 시간</th>
-                <th>입력 데이터</th>
-                <th>오류</th>
-                <th>생성</th>
+                <th>{t("cols.wait")}</th>
+                <th>{t("cols.run")}</th>
+                <th>{t("cols.input")}</th>
+                <th>{t("cols.error")}</th>
+                <th>{t("cols.created")}</th>
               </tr>
             </thead>
             <tbody className={clsx(list.isValidating && "validating")}>
@@ -317,12 +364,17 @@ export function ExplorerScreen() {
                       <LangBadge lang={w.language} />
                     </td>
                     <td className="mono">
-                      {w.pipeline_version}
-                      {w.replay_of ? (
-                        <span className="chip" style={{ marginLeft: 4 }} title={`replay of ${w.replay_of}`}>
-                          replay c{w.replay_cycle}
-                        </span>
-                      ) : null}
+                      <div style={{ fontSize: 11.5 }}>
+                        {w.pipeline_id ?? "—"} <span className="muted">{w.pipeline_version}</span>
+                      </div>
+                      <div className="muted" style={{ fontSize: 10.5 }}>
+                        {w.model_version ?? ""}
+                        {w.replay_of ? (
+                          <span className="chip" style={{ marginLeft: 4, height: 18 }} title={t("replayOf", { id: w.replay_of })}>
+                            Replay c{w.replay_cycle}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="mono r">
                       {w.attempt || 0}
@@ -330,7 +382,7 @@ export function ExplorerScreen() {
                     </td>
                     <td style={{ minWidth: 110 }}>
                       <div className="mono" style={{ fontSize: 11.5 }}>
-                        {w.waitMs != null ? fmt.duration(w.waitMs, { style: "short" }) : "—"}
+                        {w.waitMs != null ? f8.duration(w.waitMs, { style: "short" }) : "—"}
                       </div>
                       <div className="bar" style={{ height: 3, ["--tc" as string]: "var(--st-queued)" }}>
                         <i style={{ width: `${((w.waitMs ?? 0) / maxW) * 100}%` }} />
@@ -338,7 +390,7 @@ export function ExplorerScreen() {
                     </td>
                     <td style={{ minWidth: 110 }}>
                       <div className="mono" style={{ fontSize: 11.5 }}>
-                        {w.runMs ? fmt.duration(w.runMs, { style: "short" }) : "—"}
+                        {w.runMs ? f8.duration(w.runMs, { style: "short" }) : "—"}
                       </div>
                       <div className="bar" style={{ height: 3, ["--tc" as string]: "var(--st-running)" }}>
                         <i style={{ width: `${((w.runMs ?? 0) / maxR) * 100}%` }} />
@@ -349,17 +401,17 @@ export function ExplorerScreen() {
                         {w.input.object}
                       </div>
                       <div className="muted mono" style={{ fontSize: 10.5 }}>
-                        {w.input.utteranceCount} utt · {fmt.bytes(w.input.sizeBytes)}
+                        {t("utt", { count: w.input.utteranceCount })} · {f8.bytes(w.input.sizeBytes)}
                       </div>
                     </td>
                     <td>{w.lastErrorCode ? <span className="mono sev-ERROR" style={{ fontSize: 11.5 }}>{w.lastErrorCode}</span> : <span className="muted">—</span>}</td>
-                    <td className="mono muted">{fmt.dateTime(w.created_at).slice(5)}</td>
+                    <td className="mono muted">{f8.dateTime(w.created_at).slice(5)}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
                   <td colSpan={10}>
-                    <Empty title="조건에 맞는 Workflow가 없습니다">필터를 줄이거나 Workflow ID 일부로 검색해 보세요.</Empty>
+                    <RangeEmpty title={t("empty.title")} hint={anyFilter ? t("empty.filters") : t("empty.range", { by: t(`rangeBy.${(f.range_by as (typeof RANGE_BY)[number]) ?? "active"}`) })} />
                   </td>
                 </tr>
               )}
@@ -368,16 +420,16 @@ export function ExplorerScreen() {
         </div>
         <div className="pager">
           <span className="muted">
-            {d && d.total ? `${(page - 1) * PAGE + 1}–${Math.min(d.total, page * PAGE)}` : 0} / {fmt.number(d?.total ?? 0)}
+            {d && d.total ? `${(page - 1) * PAGE + 1}–${Math.min(d.total, page * PAGE)}` : 0} / {f8.number(d?.total ?? 0)}
           </span>
           <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <button className="btn sm" disabled={page <= 1} onClick={() => setF({ page: page - 1 }, { history: "push" })} aria-label="이전 페이지">
+            <button className="btn sm" disabled={page <= 1} onClick={() => setF({ page: page - 1 }, { history: "push" })} aria-label={c("actions.previous")}>
               <ChevronLeft />
             </button>
             <span className="mono" style={{ fontSize: 11 }}>
               {page} / {pages}
             </span>
-            <button className="btn sm" disabled={page >= pages} onClick={() => setF({ page: page + 1 }, { history: "push" })} aria-label="다음 페이지">
+            <button className="btn sm" disabled={page >= pages} onClick={() => setF({ page: page + 1 }, { history: "push" })} aria-label={c("actions.next")}>
               <ChevronRight />
             </button>
           </span>

@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { getT } from "@/i18n/server";
 import { ExplorerScreen } from "@/components/atlas/explorer";
 
-export const metadata: Metadata = { title: "Pipeline Explorer" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("nav");
+  return { title: t("explorer.title") };
+}
 
 export default function Page() {
   return (

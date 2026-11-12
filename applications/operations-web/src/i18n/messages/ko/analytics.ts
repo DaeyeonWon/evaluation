@@ -1,10 +1,100 @@
 /**
  * analytics — S-07 Analytics: quality, cost, throughput, error breakdowns (src/components/atlas/analytics.tsx).
+ * Also the shared period helpers in src/components/atlas/analytics/kit.tsx (range labels, API errors)
+ * used by the DLQ and Results screens.
  *
  * ko is the schema: add keys here first (plain strings, nested objects OK, no `as const`), then the
  * same keys in ../en/analytics.ts. Follow the glossary in docs/i18n.md (system terms stay English).
- * Usage: client `const t = useT("analytics")` · server `const t = await getT("analytics")`.
  */
-const analytics = {};
+const analytics = {
+  title: "장기 운영 분석",
+  desc: "선택한 기간의 BigQuery 집계입니다. 24시간 이하는 5분, 7일 이하는 1시간, 그 이상은 1일 단위로 묶습니다. 빨간 음영은 기간 안의 Incident 구간이며, 긴 차트는 드래그·휠로 이동할 수 있습니다.",
+  range: { lastHours: "최근 {count}시간", lastDays: "최근 {count}일" },
+  errors: { forbidden: "이 작업을 할 권한이 없습니다.", loadFailed: "데이터를 불러오지 못했습니다" },
+  bucket: { "5m": "5분 단위", hour: "1시간 단위", day: "1일 단위", fallback: "이 지표의 최소 단위" },
+  units: { min: "분", sec: "초 단위", secShort: "초" },
+  kpi: {
+    period: "기간",
+    bucket: "차트 {bucket}",
+    runs: "Root Pipeline 실행",
+    runsSub: "성공 {ok} · 실패 {failed}",
+    successRate: "Pipeline 성공률",
+    successSub: "성공 / (성공 + 실패)",
+    utterances: "평가 실발화",
+    passRate: "통과율 {rate}",
+    dlqSub: "기간 내 DLQ 격리 Workflow",
+    cost: "비용",
+    costSub: "기간에 걸친 {count}일 합계",
+  },
+  series: {
+    avg: "평균",
+    successRate: "성공률",
+    retryRate: "Retry 비율",
+    failed: "실패",
+    cancelled: "취소",
+    failureRate: "실패율",
+    runs: "실행",
+    failures: "실패 건수",
+  },
+  charts: {
+    throughput: "언어별 처리량",
+    throughputRef: "완료 Pipeline 수",
+    rates: "성공률 및 Retry 비율",
+    duration: "평균 / p95 Pipeline 실행 시간",
+    errorTrend: "실패 유형 추이",
+    errorTrendRef: "Attempt 실패 건수",
+    components: "Component별 실행 시간",
+    componentsFilter: "Root Pipeline 필터",
+    componentsRef: "Registry leaf Component id 기준 · 성공한 Attempt · avg / p95 (초)",
+    allPipelines: "전체 Pipeline",
+    paths: "실패 경로 Top 10",
+    pathsRef: "pipeline-id/…/component · Attempt 기준",
+    topErrors: "오류 코드 Top 10",
+    topErrorsRef: "error_code · Attempt 기준",
+    lastAt: "마지막 발생 {time}",
+    cost: "비용 추이",
+    costRef: "USD/일 · 합계 {total} · * 집계 중",
+    costUnit: "USD/일",
+  },
+  pipelines: {
+    section: "PIPELINE · SUB-PIPELINE",
+    rootDuration: "Root Pipeline 실행 시간",
+    rootFailures: "Root Pipeline 실패",
+    subDuration: "Sub-pipeline 실행 시간",
+    subFailures: "Sub-pipeline 실패",
+    durationRef: "성공 실행 · avg / p95 (분)",
+    subRef: "자식 PipelineJob 호출 기준 · avg / p95 (분)",
+    failuresRef: "실패 + 취소 건수 · 라벨 = 실패율",
+    drill: "Node별 상세",
+    drillRef: "GET /pipelines/{id} · Sub-pipeline Node를 누르면 해당 정의로 이동",
+    root: "Root",
+    sub: "Sub-pipeline",
+    usedBy: "호출하는 Root: {list}",
+    summary: "실행 {runs} · 성공률 {rate} · 평균 {avg}",
+    nodeDuration: "Node 실행 시간 p50 / p95 (분)",
+    topError: "주요 오류 · 경로",
+    openSub: "Sub-pipeline 열기: {id}",
+  },
+  versions: {
+    title: "Pipeline Version별 성능 비교",
+    statusTraffic: "상태 · 트래픽",
+    model: "모델 / Judge",
+    runs: "실행",
+    successRate: "Pipeline 성공률",
+    uttPass: "실발화 통과율",
+    devicePass: "기기제어 통과율",
+    latency: "지연 p95",
+    capsuleChart: "Capsule별 Version 통과율",
+  },
+  languages: {
+    title: "언어 요약",
+    language: "언어",
+    successRate: "성공률",
+    utterances: "기간 실발화",
+    passRate: "기간 통과율",
+    throughput: "기간 처리량",
+  },
+  empty: { noRuns: "이 기간에 실행 기록이 없습니다.", noErrors: "이 기간에 실패가 없습니다." },
+};
 
 export default analytics;

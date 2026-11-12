@@ -6,10 +6,11 @@
 import clsx from "clsx";
 import { KeyRound, X } from "lucide-react";
 import Link from "next/link";
-import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { useT } from "@/i18n/client";
 import { OPERATORS, ROLE_PERMISSIONS } from "@/lib/catalog";
-import { ApiClientError, api, useApi, useOperator } from "@/lib/client";
+import { ApiClientError, useSession } from "@/lib/client";
 import type { Tone } from "@/lib/types";
 
 /* ───────────── sheet chrome ───────────── */
@@ -95,8 +96,9 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 }
 
 export function Skeleton({ rows = 4 }: { rows?: number }) {
+  const t = useT("common");
   return (
-    <div style={{ display: "grid", gap: 10, padding: 14 }} aria-busy="true" aria-label="불러오는 중">
+    <div style={{ display: "grid", gap: 10, padding: 14 }} aria-busy="true" aria-label={t("state.loading")}>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="skel" style={{ width: `${90 - i * 9}%` }} />
       ))}
@@ -104,8 +106,32 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
+/* ───────────── auth-aware errors ───────────── */
+/** Full navigation to /login?next=<current page> (session expired / missing). */
+export function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  const next = window.location.pathname + window.location.search;
+  // full navigation on purpose: drop every client cache/stream tied to the expired session
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+}
+const isStatus = (e: unknown, s: number) => e instanceof ApiClientError && e.status === s;
+
+/** Inline API error. 401 → redirects to /login?next=…; 403 → localized permission message. */
 export function ErrorNote({ error }: { error: unknown }) {
+  const t = useT("shell");
+  const unauth = isStatus(error, 401);
+  useEffect(() => {
+    if (unauth) redirectToLogin();
+  }, [unauth]);
   if (!error) return null;
+  if (unauth) return <div className="note warn">{t("auth.expired")}</div>;
+  if (isStatus(error, 403))
+    return (
+      <div className="note bad">
+        <KeyRound aria-hidden /> {t("auth.forbidden")} <span className="muted">{(error as Error).message}</span>
+      </div>
+    );
   return <div className="note bad">{error instanceof Error ? error.message : String(error)}</div>;
 }
 
@@ -146,50 +172,55 @@ export function JsonView({ value, className, style }: { value: unknown; classNam
   return <pre className={clsx("code", className)} style={style}>{out}</pre>;
 }
 
-/* ───────────── operator + permissions ───────────── */
+/* ───────────── session + permissions ───────────── */
+/**
+ * Back-compat wrapper over useSession(): `op` is the signed-in user (id, name, role), `can(key)`
+ * accepts console keys (`config:write`) and legacy catalog keys (`config.write`). Hiding/disabling
+ * UI only — the server enforces every permission.
+ */
 export function usePerms() {
-  const [op] = useOperator();
-  const me = useApi(["me", op.id], () => api.me(), { revalidateOnFocus: false });
-  const can = useCallback(
-    (key: string) => {
-      const p = me.data?.permissions;
-      if (p && key in p) return !!p[key];
-      const rp = ROLE_PERMISSIONS.find((r) => r.key === key);
-      return rp ? !!rp[op.role] : true;
-    },
-    [me.data, op.role],
+  const s = useSession();
+  const role = s.roles.includes("Admin") ? "Admin" : s.roles.includes("Operator") ? "Operator" : s.roles.includes("Viewer") ? "Viewer" : (s.roles[0] ?? "—");
+  const op = useMemo(
+    () => ({ id: s.user?.id ?? "", name: s.user?.name ?? "—", email: s.user?.email ?? "", role: role as "Viewer" | "Operator" | "Admin", roles: s.roles }),
+    [s.user, s.roles, role],
   );
-  return { op, can };
+  return { op, can: s.can };
 }
 
+const ROLE_ORDER = ["Viewer", "Operator", "Admin"] as const;
+
+/** Permission note for an action: who may run it, and whether the signed-in user can. */
 export function PermNote({ perm }: { perm: string }) {
+  const t = useT("shell");
   const { op, can } = usePerms();
   const p = ROLE_PERMISSIONS.find((r) => r.key === perm);
-  if (!p) return null;
   const ok = can(perm);
-  const roles = (["Viewer", "Operator", "Admin"] as const).filter((r) => p[r]).join(" · ");
+  const roles = p ? ROLE_ORDER.filter((r) => p[r]).join(" · ") : "";
   return (
     <div className={clsx("note", !ok && "bad")}>
       <KeyRound aria-hidden />
-      권한 <b>{p.permission}</b> <span className="mono" style={{ fontSize: 11 }}>({p.key})</span> — 허용 역할 {roles}. 현재 계정 <b>{op.name}</b> ({op.role}){" "}
-      {ok ? "실행 가능" : <b>실행 불가 · 운영자 계정을 바꾸세요</b>}. 모든 변경은 감사 로그에 기록됩니다.
+      {t("perm.need", { perm })}
+      {roles ? <> {t("perm.roles", { roles })}</> : null} {t("perm.current", { name: op.name, role: op.role })}{" "}
+      {ok ? t("perm.ok") : <b>{t("perm.denied")}</b>} {t("perm.audit")}
     </div>
   );
 }
 
-export function OperatorSelect({ label = "실행 계정" }: { label?: string }) {
-  const [op, setOp] = useOperator();
+/** Read-only display of the account that runs actions (the session user; switching = sign out). */
+export function OperatorSelect({ label }: { label?: string }) {
+  const t = useT("shell");
+  const { op } = usePerms();
   return (
-    <label className="field">
-      <span>{label}</span>
-      <select className="in" value={op.id} onChange={(e) => setOp(e.target.value)}>
-        {OPERATORS.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name} · {o.role}
-          </option>
-        ))}
-      </select>
-    </label>
+    <div className="field">
+      <span>{label ?? t("perm.actor")}</span>
+      <div className="in op-ro" aria-readonly="true">
+        <b>{op.name}</b> <span className="mono muted">· {op.role}</span>
+        <Link href="/login" className="op-switch" prefetch={false}>
+          {t("user.switch")}
+        </Link>
+      </div>
+    </div>
   );
 }
 
@@ -223,6 +254,7 @@ const ToastCtx = createContext<{ push: (msg: ReactNode, err?: boolean) => void }
 let tid = 0;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const tc = useT("common");
   const [items, setItems] = useState<ToastItem[]>([]);
   const reduced = useReducedMotionSafe();
   const dismiss = useCallback((id: number) => setItems((x) => x.filter((t) => t.id !== id)), []);
@@ -252,7 +284,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               transition={{ duration: 0.25 }}
             >
               <span className="toast-msg">{t.msg}</span>
-              <button className="toast-x" aria-label="알림 닫기" onClick={() => dismiss(t.id)}>
+              <button className="toast-x" aria-label={tc("actions.dismiss")} onClick={() => dismiss(t.id)}>
                 <X aria-hidden />
               </button>
             </motion.div>
@@ -265,13 +297,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function useToast() {
   const c = useContext(ToastCtx);
+  const t = useT("shell");
   const push = c?.push;
   return useMemo(
     () => ({
       ok: (m: ReactNode) => push?.(m),
-      err: (e: unknown) => push?.(e instanceof ApiClientError ? `${e.message} (${e.status})` : e instanceof Error ? e.message : String(e), true),
+      err: (e: unknown) => {
+        if (isStatus(e, 401)) {
+          push?.(t("auth.expired"), true);
+          redirectToLogin();
+          return;
+        }
+        if (isStatus(e, 403)) {
+          push?.(`${t("auth.forbidden")} ${(e as Error).message}`, true);
+          return;
+        }
+        push?.(e instanceof ApiClientError ? `${e.message} (${e.status})` : e instanceof Error ? e.message : String(e), true);
+      },
     }),
-    [push],
+    [push, t],
   );
 }
 

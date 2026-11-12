@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getT } from "@/i18n/server";
 import { getSession } from "@/server/auth";
 import { AuthFrame } from "./login/_ui/frame";
 
@@ -8,27 +9,34 @@ import { AuthFrame } from "./login/_ui/frame";
  */
 export default async function Forbidden() {
   const session = await getSession();
+  const t = await getT("auth");
   return (
-    <AuthFrame sheetNo="ERR-403">
+    <AuthFrame sheetNo="ERR-403" tone="bad">
       <span className="auth-code">403 · FORBIDDEN</span>
-      <h1 id="auth-title" className="auth-title">이 페이지에 접근할 권한이 없습니다</h1>
-      <p className="auth-lead">권한이 필요하면 콘솔 관리자에게 역할 추가를 요청하세요. 요청 시 아래 계정 정보를 함께 전달하면 됩니다.</p>
+      <h1 id="auth-title" className="auth-title">
+        {t("forbidden.title")}
+      </h1>
+      <p className="auth-lead">{t("forbidden.lead")}</p>
       {session ? (
         <dl className="auth-dl">
-          <dt>계정</dt>
+          <dt>{t("forbidden.account")}</dt>
           <dd>
             {session.user.name} <span className="mono muted">{session.user.email}</span>
           </dd>
-          <dt>역할</dt>
+          <dt>{t("forbidden.roles")}</dt>
           <dd className="mono">{session.roles.join(", ") || "—"}</dd>
+          <dt>{t("forbidden.perms")}</dt>
+          <dd className="mono" style={{ fontSize: 12 }}>
+            {session.permissions.join(" · ") || "—"}
+          </dd>
         </dl>
       ) : null}
       <div className="auth-foot">
         <Link className="btn primary" href="/">
-          콘솔로 돌아가기
+          {t("forbidden.back")}
         </Link>
-        <Link className="btn" href="/login">
-          다른 계정으로 로그인
+        <Link className="btn" href="/login" prefetch={false}>
+          {t("forbidden.switch")}
         </Link>
       </div>
     </AuthFrame>

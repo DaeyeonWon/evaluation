@@ -1,69 +1,125 @@
 "use client";
 /**
- * U3 · Stage inspector. Opens for ANY stage: batches currently in the stage (→ S4), GCS objects
- * (bucket / object / generation / size / time), accumulated events as Pub/Sub envelopes (expandable
- * JSON), a live progress-log stream appended from SSE (`log` + `event`), and the stage metric bag.
+ * U3 · Stage inspector. Opens for ANY stage and is used by two hosts:
+ *   - the canvas (/) as a resizable grid column:   <Inspector stage onClose onWidth />
+ *   - the live board (/board) as a right drawer:   <StageInspector stageId onClose siblings? onStage? />
+ * Tabs: batches in the stage (→ Workflow detail) · objects (file-name search, server ?q=, match
+ * highlighting) · events as Pub/Sub envelopes (expandable JSON) · live log stream (SSE `log` +
+ * `event` + `transition`) · metrics (vertex broken down by pipeline). All data follows the global
+ * time range (URL ?range= / ?from=&to=).
  */
 import clsx from "clsx";
-import { X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { motion } from "motion/react";
-import { LangBadge, StatusPill, fmt } from "@/components/shared";
-import { BUCKETS, STAGE_BY_ID, STAGES, STATE_TO_STAGE } from "@/lib/catalog";
-import { api, useApi, useSimNow, useStreamEvent } from "@/lib/client";
-import type { LogEntry, StageId, WorkflowEvent } from "@/lib/types";
+import { LangBadge, StatusPill } from "@/components/shared";
+import {
+  languageName,
+  stageDescription,
+  stageLabel,
+  stageService,
+  type Locale,
+  type MessageKey,
+  type Schema,
+  type Translator,
+} from "@/i18n";
+import { useFmt, useLocale, useT } from "@/i18n/client";
+import {
+  PIPELINE_BY_ID,
+  STAGE_BY_ID,
+  STAGES,
+  STATE_TO_STAGE,
+} from "@/lib/catalog";
+import {
+  api,
+  useApi,
+  useSimNow,
+  useStreamEvent,
+  useTimeRange,
+} from "@/lib/client";
+import type { LocaleFmt } from "@/lib/format";
+import type {
+  FileSearchHit,
+  LogEntry,
+  StageId,
+  WorkflowEvent,
+} from "@/lib/types";
+import { useRangeHref, useRangeLabel } from "../board/range";
 import { Empty, JsonView, useReducedMotionSafe } from "../ui";
+import "@/styles/atlas-board.css";
 
-const INPUT_BUCKET = BUCKETS.input;
-
-const METRIC_KO: Record<string, string> = {
-  objectsToday: "오늘 업로드 객체", bytesToday: "오늘 업로드 용량", utterancesToday: "오늘 실발화", lastUploadAt: "마지막 업로드", byLanguage: "언어별",
-  deliveredToday: "오늘 전달", avgDeliveryLatencyMs: "평균 전달 지연", p95DeliveryLatencyMs: "p95 전달 지연", redeliveriesToday: "재전달", subscriptionBacklog: "구독 Backlog",
-  deadLetterTopicMessages: "DLT 메시지", receivedToday: "오늘 수신", validatedToday: "검증 완료", duplicatesIgnoredToday: "중복 무시", validationErrorsToday: "검증 오류",
-  p95RegistrationLatencyMs: "등록 지연 p95", inFlight: "처리 중", queued: "대기 중", oldestQueuedAt: "최장 대기 시작", p95WaitSec: "대기 p95", activeSlots: "활성 Slot",
-  globalMax: "Global 상한", reservationsActive: "활성 Reservation", reservationsOrphaned: "Orphan Reservation", admissionsLastHour: "최근 1h 승인", saturatedLanguages: "포화 언어",
-  dispatching: "Dispatching", executionsToday: "오늘 Execution", cancelledToday: "오늘 취소", timedOut7d: "7일 Timeout", p95StartLatencyMs: "시작 지연 p95", running: "실행 중",
-  runningByComponent: "컴포넌트별 실행", utterancesInFlight: "평가 중 실발화", gpuInUse: "GPU 사용", gpuQuota: "GPU 할당량", avgDurationSec: "평균 실행 시간",
-  succeededToday: "오늘 성공", rowsWrittenToday: "기록 행", csvBytesToday: "CSV 용량", bqTable: "BigQuery 테이블", passRateToday: "오늘 Pass rate", aggregateFile: "집계 CSV",
-  retryWait: "재시도 대기", retriesToday: "오늘 재시도", retryRate: "Retry 비율", nextRetryAt: "다음 재시도", policy: "정책", pendingReview: "검토 대기", total: "누적",
-  byStatus: "상태별", byCategory: "유형별", replays: "Replay",
-};
 const STAGE_SVC: Record<StageId, string> = {
-  gcs_input: "cloud-storage", event_bus: "eventarc", registry_queue: "firestore", scheduler: "scheduler", workflows: "pipeline-orchestrator",
-  vertex: "vertex-ai-pipelines", results: "result-commit", retry: "retry-controller", dlq: "dlq-manager", ingress: "event-ingress",
+  gcs_input: "cloud-storage",
+  event_bus: "eventarc",
+  registry_queue: "firestore",
+  scheduler: "scheduler",
+  workflows: "pipeline-orchestrator",
+  vertex: "vertex-ai-pipelines",
+  results: "result-commit",
+  retry: "retry-controller",
+  dlq: "dlq-manager",
+  ingress: "event-ingress",
 };
-const ADR: Partial<Record<StageId, string>> = { workflows: "ADR-001", registry_queue: "ADR-003", results: "ADR-004", scheduler: "ADR-002" };
+const ADR: Partial<Record<StageId, string>> = {
+  workflows: "ADR-001",
+  registry_queue: "ADR-003",
+  results: "ADR-004",
+  scheduler: "ADR-002",
+};
+const OBJECTS_LIMIT = 100;
+const TABS = ["wf", "obj", "ev", "log", "met"] as const;
+type Tab = (typeof TABS)[number];
 
-const MQ = "(max-width: 900px)";
-function subscribeMq(cb: () => void) {
-  const m = window.matchMedia(MQ);
-  m.addEventListener("change", cb);
-  return () => m.removeEventListener("change", cb);
-}
+type TI = Translator<MessageKey<Schema["inspector"]>>;
 
-function fmtMetric(k: string, v: unknown, now: number): string {
-  if (v == null || (typeof v === "number" && !Number.isFinite(v))) return /At$/.test(k) ? "대기 없음" : "—";
-  if (Array.isArray(v)) return v.length ? v.join(", ") : "없음";
-  if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([a, b]) => `${a} ${typeof b === "object" ? JSON.stringify(b) : b}`).join(" · ");
+function fmtMetric(
+  k: string,
+  v: unknown,
+  now: number,
+  f: LocaleFmt,
+  t: TI,
+): string {
+  if (v == null || (typeof v === "number" && !Number.isFinite(v)))
+    return /At$/.test(k) ? t("metric.none") : "—";
+  if (Array.isArray(v)) return v.length ? v.join(", ") : t("metric.emptyList");
+  if (typeof v === "object") return JSON.stringify(v);
   if (typeof v === "string") return v;
+  if (typeof v === "boolean") return String(v);
   const n = v as number;
-  if (/At$/.test(k)) return `${fmt.dateTime(n)} (${fmt.relative(n, now)})`;
-  if (/Ms$/.test(k)) return fmt.duration(n, { style: "short" });
-  if (/Sec$/.test(k)) return fmt.duration(n * 1000, { style: "short" });
-  if (/Bytes|bytes/.test(k)) return fmt.bytes(n);
-  if (/Rate|rate/.test(k)) return fmt.pct(n, 1);
-  return fmt.number(n);
+  if (/At$/.test(k)) return `${f.dateTimeLabel(n)} · ${f.relative(n, now)}`;
+  if (/Ms$/.test(k)) return f.duration(n, { style: "short" });
+  if (/Sec$/.test(k)) return f.duration(n * 1000, { style: "short" });
+  if (/Bytes|bytes/.test(k)) return f.bytes(n);
+  if (/Rate|rate/.test(k)) return f.pct(n, 1);
+  return f.number(n);
 }
 
 function stageLogMatch(stage: StageId, l: LogEntry): boolean {
-  if (stage === "gcs_input" || stage === "event_bus") return l.service === "event-ingress" && l.event_type === "EVENT_RECEIVED";
-  if (stage === "retry") return l.service === "pipeline-orchestrator" && /retry|RETRY|backoff/.test(l.message);
-  if (stage === "workflows") return l.service === "dispatcher" || l.service === "pipeline-orchestrator";
+  if (stage === "gcs_input" || stage === "event_bus")
+    return l.service === "event-ingress" && l.event_type === "EVENT_RECEIVED";
+  if (stage === "retry")
+    return (
+      l.service === "pipeline-orchestrator" &&
+      /retry|RETRY|backoff/.test(l.message)
+    );
+  if (stage === "workflows")
+    return l.service === "dispatcher" || l.service === "pipeline-orchestrator";
   return STAGE_BY_ID[stage].services.includes(l.service);
 }
 function eventMatch(stage: StageId, e: WorkflowEvent) {
-  return e.stage === stage || (stage === "event_bus" && e.name === "EVENT_PUBLISHED") || (stage === "gcs_input" && e.name === "GCS_OBJECT_FINALIZED");
+  return (
+    e.stage === stage ||
+    (stage === "event_bus" && e.name === "EVENT_PUBLISHED") ||
+    (stage === "gcs_input" && e.name === "GCS_OBJECT_FINALIZED")
+  );
 }
 interface Line {
   key: string;
@@ -78,46 +134,455 @@ const evLine = (e: WorkflowEvent, fresh?: boolean): Line => ({
   ts: e.ts,
   severity: e.severity || "INFO",
   comp: "event-registry",
-  msg: `${e.name}${e.workflow_id ? " · " + e.workflow_id : ""}${e.label ? " · " + e.label : ""}`,
+  msg: `${e.name}${e.workflow_id ? " · " + e.workflow_id : ""}${e.pipeline_id ? " · " + e.pipeline_id : ""}`,
   fresh,
 });
-const logLine = (l: LogEntry, fresh?: boolean): Line => ({ key: l.log_id, ts: l.ts, severity: l.severity, comp: l.component || l.service, msg: l.message, fresh });
+const logLine = (l: LogEntry, fresh?: boolean): Line => ({
+  key: l.log_id,
+  ts: l.ts,
+  severity: l.severity,
+  comp: l.component || l.service,
+  msg: l.message,
+  fresh,
+});
 
-function EventRow({ e, fresh }: { e: WorkflowEvent; fresh?: boolean }) {
+/** Render `text` with <mark> over the server's match ranges for one field. */
+export function Highlight({
+  text,
+  ranges,
+  field,
+  offset = 0,
+}: {
+  text: string;
+  ranges: FileSearchHit["match_ranges"];
+  field: FileSearchHit["match_ranges"][number]["field"];
+  offset?: number;
+}) {
+  const rs = ranges
+    .filter((r) => r.field === field)
+    .sort((a, b) => a.start - b.start);
+  if (!rs.length) return <>{text}</>;
+  const out: ReactNode[] = [];
+  let last = 0;
+  rs.forEach((r, i) => {
+    const s = Math.max(last, r.start + offset);
+    const e = Math.min(text.length, r.end + offset);
+    if (e <= s) return;
+    if (s > last) out.push(text.slice(last, s));
+    out.push(<mark key={i}>{text.slice(s, e)}</mark>);
+    last = e;
+  });
+  if (last < text.length) out.push(text.slice(last));
+  return <>{out}</>;
+}
+
+function EventRow({
+  e,
+  fresh,
+  t,
+  f,
+}: {
+  e: WorkflowEvent;
+  fresh?: boolean;
+  t: TI;
+  f: LocaleFmt;
+}) {
   const [open, setOpen] = useState(false);
   const msg = {
     message: {
       messageId: e.event_id,
       publishTime: e.timestamp,
-      attributes: { event_type: e.name, stage: e.stage, source: e.source, language: e.language, correlation_id: e.correlation_id, trace_id: e.trace_id },
+      attributes: {
+        event_type: e.name,
+        stage: e.stage,
+        source: e.source,
+        language: e.language,
+        pipeline_id: e.pipeline_id,
+        pipeline_job_id: e.pipeline_job_id,
+        node_path: e.node_path,
+        correlation_id: e.correlation_id,
+        trace_id: e.trace_id,
+      },
       data: e.payload,
     },
     subscription: "projects/bixby-eval-prod/subscriptions/ops-event-registry",
   };
   return (
-    <div className={clsx("evrow")} style={fresh ? { animation: "at-rowflash 1.4s ease-out" } : undefined}>
-      <button aria-expanded={open} onClick={() => setOpen((x) => !x)}>
-        <span className="et">{fmt.time(e.ts)}</span>
+    <div
+      className="evrow"
+      style={fresh ? { animation: "at-rowflash 1.4s ease-out" } : undefined}
+    >
+      <button
+        aria-expanded={open}
+        onClick={() => setOpen((x) => !x)}
+        aria-label={t(open ? "events.collapse" : "events.expand", {
+          name: e.name,
+        })}
+      >
+        <span className="et">{f.time(e.ts)}</span>
         <span className={`en sev-${e.severity}`}>{e.name}</span>
-        <span className="ew">{fmt.shortWorkflowId(e.workflow_id ?? "system")}</span>
+        <span className="ew">
+          {f.shortWorkflowId(e.workflow_id ?? "system")}
+        </span>
       </button>
       {open ? <JsonView value={msg} className="wrap" /> : null}
     </div>
   );
 }
 
-export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose: () => void; onWidth: (w: number) => void }) {
-  const st = STAGE_BY_ID[stage];
+/* ─────────────────────────────── metrics ── */
+const PIPE_COLS = [
+  "running",
+  "runs",
+  "succeeded",
+  "failed",
+  "successRate",
+  "avgDurationSec",
+] as const;
+function MetricTable({
+  k,
+  v,
+  t,
+  f,
+  locale,
+}: {
+  k: string;
+  v: Record<string, Record<string, unknown>>;
+  t: TI;
+  f: LocaleFmt;
+  locale: Locale;
+}) {
+  const rows = Object.entries(v).sort(([, a], [, b]) =>
+    a.kind === b.kind
+      ? Number(b.runs ?? 0) - Number(a.runs ?? 0)
+      : a.kind === "root"
+        ? -1
+        : 1,
+  );
+  return (
+    <div className="bd-mt">
+      <div className="bd-mt-h">{t.dynamic(`metrics.${k}`, undefined, k)}</div>
+      <div className="tbl-wrap">
+        <table className="t bd-mt-t">
+          <thead>
+            <tr>
+              <th>{t("metric.pipeline")}</th>
+              {PIPE_COLS.map((c) => (
+                <th key={c} className="r">
+                  {t(`metric.col.${c}`)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([id, r]) => {
+              const def = PIPELINE_BY_ID[id];
+              const sr =
+                typeof r.successRate === "number" ? r.successRate : null;
+              const byNode = (r.runningByNode ?? {}) as Record<string, number>;
+              return (
+                <tr key={id}>
+                  <td>
+                    <span
+                      className={clsx("bd-kind", r.kind === "sub" && "sub")}
+                    >
+                      {r.kind === "sub" ? "SUB" : "ROOT"}
+                    </span>{" "}
+                    <span
+                      className="idc"
+                      title={
+                        def ? (locale === "ko" ? def.labelKo : def.label) : id
+                      }
+                    >
+                      {id}
+                    </span>
+                    {Object.keys(byNode).length ? (
+                      <div className="bd-mt-nodes">
+                        {Object.entries(byNode).map(([n, c]) => (
+                          <span key={n}>
+                            {n} <b>{c}</b>
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="r mono">{f.number(Number(r.running ?? 0))}</td>
+                  <td className="r mono">{f.number(Number(r.runs ?? 0))}</td>
+                  <td className="r mono">
+                    {f.number(Number(r.succeeded ?? 0))}
+                  </td>
+                  <td
+                    className={clsx("r mono", Number(r.failed) > 0 && "bd-bad")}
+                  >
+                    {f.number(Number(r.failed ?? 0))}
+                  </td>
+                  <td className="r mono">
+                    {sr == null ? "—" : f.pct(sr, 0)}
+                    {sr != null ? (
+                      <span className="bd-mt-bar" aria-hidden>
+                        <i style={{ width: `${sr * 100}%` }} />
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className="r mono">
+                    {typeof r.avgDurationSec === "number" &&
+                    r.avgDurationSec > 0
+                      ? f.duration(r.avgDurationSec * 1000, { style: "short" })
+                      : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function MetricBars({
+  k,
+  v,
+  t,
+  f,
+  locale,
+}: {
+  k: string;
+  v: Record<string, number>;
+  t: TI;
+  f: LocaleFmt;
+  locale: Locale;
+}) {
+  const rows = Object.entries(v).sort((a, b) => b[1] - a[1]);
+  const max = Math.max(1, ...rows.map(([, n]) => n));
+  const name = (key: string) =>
+    k === "byLanguage" ? `${languageName(key, locale)} · ${key}` : key;
+  return (
+    <div className="bd-mt">
+      <div className="bd-mt-h">{t.dynamic(`metrics.${k}`, undefined, k)}</div>
+      {rows.length ? (
+        <ul className="bd-mbars">
+          {rows.map(([key, n]) => (
+            <li key={key}>
+              <span className="nm" title={key}>
+                {name(key)}
+              </span>
+              <span className="br" aria-hidden>
+                <i style={{ width: `${(n / max) * 100}%` }} />
+              </span>
+              <b>{f.number(n)}</b>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="muted bd-small">{t("metric.emptyList")}</div>
+      )}
+    </div>
+  );
+}
+
+function Metrics({
+  metrics,
+  now,
+  t,
+  f,
+  locale,
+}: {
+  metrics: Record<string, unknown>;
+  now: number;
+  t: TI;
+  f: LocaleFmt;
+  locale: Locale;
+}) {
+  const scalars: [string, unknown][] = [];
+  const blocks: [string, ReactNode][] = [];
+  for (const [k, v] of Object.entries(metrics)) {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const vals = Object.values(v as Record<string, unknown>);
+      if (
+        vals.length &&
+        vals.every((x) => x && typeof x === "object" && !Array.isArray(x))
+      )
+        blocks.push([
+          k,
+          <MetricTable
+            key={k}
+            k={k}
+            v={v as Record<string, Record<string, unknown>>}
+            t={t}
+            f={f}
+            locale={locale}
+          />,
+        ]);
+      else if (vals.every((x) => typeof x === "number"))
+        blocks.push([
+          k,
+          <MetricBars
+            key={k}
+            k={k}
+            v={v as Record<string, number>}
+            t={t}
+            f={f}
+            locale={locale}
+          />,
+        ]);
+      else
+        blocks.push([
+          k,
+          <div className="bd-mt" key={k}>
+            <div className="bd-mt-h">
+              {t.dynamic(`metrics.${k}`, undefined, k)}
+            </div>
+            <JsonView value={v} className="wrap" />
+          </div>,
+        ]);
+    } else scalars.push([k, v]);
+  }
+  // the pipeline breakdown is the headline for the vertex stage; show it first
+  blocks.sort(
+    (a, b) => Number(b[0] === "byPipeline") - Number(a[0] === "byPipeline"),
+  );
+  return (
+    <>
+      <div className="mgrid">
+        {scalars.map(([k, v]) => (
+          <div key={k}>
+            <div className="k">{t.dynamic(`metrics.${k}`, undefined, k)}</div>
+            <div
+              className={clsx(
+                "v",
+                typeof v === "string" && v.length > 24 && "obj-v",
+              )}
+            >
+              {fmtMetric(k, v, now, f, t)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {blocks.map(([, n]) => n)}
+    </>
+  );
+}
+
+/* ─────────────────────────────── objects ── */
+function ObjectRow({
+  o,
+  t,
+  f,
+  href,
+}: {
+  o: FileSearchHit;
+  t: TI;
+  f: LocaleFmt;
+  href: (p: string) => string;
+}) {
+  const prefix = `gs://${o.bucket}/`;
+  return (
+    <div className="obj bd-obj">
+      <span className="bd-obj-top">
+        <span className={`bd-okind k-${o.kind}`}>
+          {t(`objects.kind.${o.kind}`)}
+        </span>
+        {o.language ? <LangBadge lang={o.language} /> : null}
+        {o.current_status ? (
+          <StatusPill status={o.current_status} size="xs" />
+        ) : null}
+      </span>
+      <span className="on">
+        <span className="muted">{prefix}</span>
+        <Highlight text={o.object} ranges={o.match_ranges} field="object" />
+      </span>
+      <span className="om">
+        {o.generation ? <span>gen {o.generation}</span> : null}
+        {o.size > 0 ? <span>{f.bytes(o.size)}</span> : null}
+        <span>{f.dateTimeLabel(o.updated, { seconds: true })}</span>
+        {o.ref ? <span title={t("objects.ref")}>{o.ref}</span> : null}
+      </span>
+      {o.workflow_id || o.batch_id ? (
+        <span className="om">
+          {o.workflow_id ? (
+            <Link href={href(`/workflows/${o.workflow_id}`)}>
+              <Highlight
+                text={o.workflow_id}
+                ranges={o.match_ranges}
+                field="workflow_id"
+              />
+            </Link>
+          ) : null}
+          {o.batch_id ? (
+            <span>
+              <Highlight
+                text={o.batch_id}
+                ranges={o.match_ranges}
+                field="batch_id"
+              />
+            </span>
+          ) : null}
+          {o.pipeline_job_id && o.pipeline_job_id.includes(".") ? (
+            <span title="pipeline_job_id">
+              {o.pipeline_job_id.split(".").slice(1).join(".")}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/* ─────────────────────────────── panel ── */
+interface PanelProps {
+  stage: StageId;
+  onClose: () => void;
+  onWidth?: (w: number) => void;
+  /** stages that share the host's column (board) → segmented switcher in the head */
+  siblings?: StageId[];
+  onStage?: (s: StageId) => void;
+  /** drawer host (board) instead of the canvas grid column */
+  floating?: boolean;
+}
+
+function InspectorPanel({
+  stage,
+  onClose,
+  onWidth,
+  siblings,
+  onStage,
+  floating,
+}: PanelProps) {
+  const t = useT("inspector");
+  const f = useFmt();
+  const locale = useLocale();
   const now = useSimNow();
   const reduced = useReducedMotionSafe();
-  const q = useApi(["stage-detail", stage], () => api.stage(stage, { limit: 60 }), { revalidateOn: ["tick"], throttleMs: 3000 });
-  const d = q.data?.stage.id === stage ? q.data : undefined;
+  const tr = useTimeRange();
+  const rangeLabel = useRangeLabel(tr.spec, tr.resolved);
+  const href = useRangeHref();
+  const [tab, setTab] = useState<Tab>("wf");
+  const [qIn, setQIn] = useState("");
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    const h = setTimeout(() => setQ(qIn.trim()), 250);
+    return () => clearTimeout(h);
+  }, [qIn]);
+
+  const st = STAGE_BY_ID[stage];
+  const qr = useApi(
+    ["stage-detail", stage, tr.key, q],
+    () =>
+      api.stage(stage, {
+        ...tr.params,
+        limit: 60,
+        q: q || undefined,
+        objects_limit: OBJECTS_LIMIT,
+      }),
+    { revalidateOn: ["tick"], throttleMs: 3000 },
+  );
+  const d = qr.data?.stage.id === stage ? qr.data : undefined;
   const [liveEv, setLiveEv] = useState<WorkflowEvent[]>([]);
   const [liveLines, setLiveLines] = useState<Line[]>([]);
   const lastLog = useRef(0);
   const logBox = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
-  const mobile = useSyncExternalStore(subscribeMq, () => window.matchMedia(MQ).matches, () => false);
 
   useStreamEvent("log", (l) => {
     if (!stageLogMatch(stage, l)) return;
@@ -138,14 +603,23 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
     const within = m.stage === stage && fromStage === stage;
     if (!enters && !leaves && !within) return;
     lastLog.current = Date.now();
-    const dir = enters ? "진입" : leaves ? `이탈 → ${STAGE_BY_ID[m.stage].label.en}` : "상태 변경";
+    const dir = enters
+      ? t("log.enter")
+      : leaves
+        ? t("log.leave", { stage: stageLabel(m.stage, locale) })
+        : t("log.change");
     setLiveLines((x) =>
       [
         ...x,
         {
           key: `tr:${m.workflow_id}:${m.to}:${m.at}`,
           ts: m.at,
-          severity: m.to === "DEAD_LETTERED" || m.to === "TIMED_OUT" ? "ERROR" : m.to === "RETRY_WAIT" ? "WARNING" : "INFO",
+          severity:
+            m.to === "DEAD_LETTERED" || m.to === "TIMED_OUT"
+              ? "ERROR"
+              : m.to === "RETRY_WAIT"
+                ? "WARNING"
+                : "INFO",
           comp: `${STAGE_SVC[stage]}/state`,
           msg: `${m.workflow_id} ${m.from ?? "∅"} → ${m.to} · ${dir} · attempt ${m.workflow.attempt}`,
           fresh: true,
@@ -153,25 +627,69 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
       ].slice(-200),
     );
   });
-  useStreamEvent("tick", (t) => {
+  useStreamEvent("job", (j) => {
+    if (stage !== "vertex" || j.depth === 0) return;
+    lastLog.current = Date.now();
+    setLiveLines((x) =>
+      [
+        ...x,
+        {
+          key: `job:${j.job_id}:${j.to}:${j.at}`,
+          ts: j.at,
+          severity:
+            j.to === "FAILED"
+              ? "ERROR"
+              : j.to === "CANCELLED"
+                ? "WARNING"
+                : "INFO",
+          comp: `${j.pipeline_id}@${j.pipeline_version}`,
+          msg: `${j.job_id.split(".").slice(1).join(".")} ${j.from ?? "∅"} → ${j.to}${j.error_code ? " · " + j.error_code : ""} · ${j.workflow_id}`,
+          fresh: true,
+        },
+      ].slice(-200),
+    );
+  });
+  useStreamEvent("tick", (tk) => {
     if (Date.now() - lastLog.current < 2500 || !d) return;
     lastLog.current = Date.now();
     const pick = Object.entries(d.metrics)
-      .filter(([, v]) => v == null || typeof v !== "object" || Array.isArray(v))
+      .filter(([, v]) => v == null || typeof v !== "object")
       .slice(0, 3)
-      .map(([k, v]) => `${k}=${fmtMetric(k, v, t.now)}`)
+      .map(([k, v]) => `${k}=${fmtMetric(k, v, tk.now, f, t)}`)
       .join(" · ");
-    setLiveLines((x) => [...x, { key: "hb:" + t.tick, ts: t.now, severity: "DEBUG", comp: `${STAGE_SVC[stage]}/monitor`, msg: `상태 점검 OK · ${pick || "변화 없음"}`, fresh: true }].slice(-200));
+    setLiveLines((x) =>
+      [
+        ...x,
+        {
+          key: "hb:" + tk.tick,
+          ts: tk.now,
+          severity: "DEBUG",
+          comp: `${STAGE_SVC[stage]}/monitor`,
+          msg: t("log.heartbeat", { metrics: pick || t("log.noChange") }),
+          fresh: true,
+        },
+      ].slice(-200),
+    );
   });
 
   const events = useMemo(() => {
     const seen = new Set<string>();
-    return [...liveEv, ...(d?.events ?? [])].filter((e) => (seen.has(e.event_id) ? false : (seen.add(e.event_id), true))).slice(0, 60);
+    return [...liveEv, ...(d?.events ?? [])]
+      .filter((e) =>
+        seen.has(e.event_id) ? false : (seen.add(e.event_id), true),
+      )
+      .slice(0, 60);
   }, [liveEv, d]);
-  const freshEv = useMemo(() => new Set(liveEv.map((e) => e.event_id)), [liveEv]);
+  const freshEv = useMemo(
+    () => new Set(liveEv.map((e) => e.event_id)),
+    [liveEv],
+  );
   const lines = useMemo(() => {
     const seen = new Set<string>();
-    const base = [...(d?.logs ?? []).map((l) => logLine(l)), ...(d?.events ?? []).slice(0, 30).map((e) => evLine(e))];
+    const base = [
+      ...(d?.logs ?? []).map((l) => logLine(l)),
+      ...(d?.events ?? []).slice(0, 30).map((e) => evLine(e)),
+    ];
     return [...base, ...liveLines]
       .filter((l) => (seen.has(l.key) ? false : (seen.add(l.key), true)))
       .sort((a, b) => a.ts - b.ts)
@@ -181,43 +699,42 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
   useLayoutEffect(() => {
     const b = logBox.current;
     if (b && atBottom.current) b.scrollTop = b.scrollHeight;
-  }, [lines]);
+  }, [lines, tab]);
 
   const order = STAGES.findIndex((s) => s.id === stage) + 1;
   const wfs = useMemo(
-    () => (d ? (stage === "results" || stage === "dlq" ? d.workflows.slice().sort((a, b) => (b.completed_at ?? 0) - (a.completed_at ?? 0)).slice(0, 14) : d.workflows.slice(0, 30)) : []),
+    () =>
+      d
+        ? stage === "results" || stage === "dlq"
+          ? d.workflows
+              .slice()
+              .sort((a, b) => (b.completed_at ?? 0) - (a.completed_at ?? 0))
+              .slice(0, 30)
+          : d.workflows.slice(0, 40)
+        : [],
     [d, stage],
   );
-  // Control-plane stages (event_bus … retry) never write GCS objects themselves. Resolve the input
-  // objects (bucket · object · generation) of the batches they carry from the input bucket — or,
-  // when the stage is idle, show the most recent uploads so the section is never a dead end.
-  const ownObjs = useMemo(() => d?.gcsObjects ?? [], [d]);
-  const needInput = !!d && ownObjs.length === 0;
-  const inputQ = useApi(
-    needInput ? ["gcs-objects", INPUT_BUCKET, "all"] : null,
-    () => api.gcsObjects({ bucket: INPUT_BUCKET, delimiter: "|", limit: 5000 }), // "|" never occurs → flat listing
-    { revalidateOn: ["transition"], throttleMs: 4000 },
-  );
-  const { objs, objMode } = useMemo(() => {
-    if (ownObjs.length) return { objs: ownObjs.slice(-40).reverse(), objMode: "own" as const };
-    const all = inputQ.data?.objects ?? [];
-    if (!all.length) return { objs: [], objMode: "own" as const };
-    const ids = new Set(wfs.map((w) => w.workflow_id));
-    const uris = new Set(wfs.map((w) => w.input.uri));
-    const carried = all.filter((o) => (o.workflow_id && ids.has(o.workflow_id)) || uris.has(o.uri));
-    if (carried.length) return { objs: carried.sort((a, b) => b.timeCreated - a.timeCreated), objMode: "carried" as const };
-    return { objs: all.slice().sort((a, b) => b.timeCreated - a.timeCreated).slice(0, 8), objMode: "recent" as const };
-  }, [ownObjs, inputQ.data, wfs]);
+  const objs = d?.objects ?? [];
+  const searching = q !== qIn.trim();
 
-  // resizable grip
+  // resizable grip (both hosts)
   const gripRef = useRef<HTMLDivElement>(null);
   const [gripOn, setGripOn] = useState(false);
   useEffect(() => {
     const g = gripRef.current;
-    if (!g) return;
+    if (!g || !onWidth) return;
     let sx = 0;
     let sw = 0;
-    const mv = (e: PointerEvent) => onWidth(Math.max(340, Math.min(780, sw + (sx - e.clientX))));
+    const mv = (e: PointerEvent) =>
+      onWidth(
+        Math.max(
+          340,
+          Math.min(
+            Math.min(860, window.innerWidth - 40),
+            sw + (sx - e.clientX),
+          ),
+        ),
+      );
     const up = () => {
       setGripOn(false);
       window.removeEventListener("pointermove", mv);
@@ -235,61 +752,139 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
     return () => g.removeEventListener("pointerdown", down);
   }, [onWidth]);
 
+  const counts: Record<Tab, ReactNode> = {
+    wf: d ? d.workflows.length : "…",
+    obj: d ? `${objs.length}${objs.length >= OBJECTS_LIMIT ? "+" : ""}` : "…",
+    ev: events.length,
+    log: lines.length,
+    met: d ? Object.keys(d.metrics).length : "…",
+  };
+
   return (
     <motion.aside
-      className="insp"
+      className={clsx("insp", floating && "bd-floating")}
       id="atlas-inspector"
-      aria-label={`단계 인스펙터: ${st.label.ko}`}
+      aria-label={t("aria.panel", { stage: stageLabel(stage, locale) })}
       initial={reduced ? false : { opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
     >
-      <div
-        ref={gripRef}
-        className={clsx("insp-grip", gripOn && "on")}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="인스펙터 너비 조절 (← → 키)"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          const cur = gripRef.current?.parentElement?.getBoundingClientRect().width ?? 440;
-          if (e.key === "ArrowLeft") onWidth(Math.min(780, cur + 24));
-          else if (e.key === "ArrowRight") onWidth(Math.max(340, cur - 24));
-        }}
-      />
+      {onWidth ? (
+        <div
+          ref={gripRef}
+          className={clsx("insp-grip", gripOn && "on")}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t("aria.resize")}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            const cur =
+              gripRef.current?.parentElement?.getBoundingClientRect().width ??
+              440;
+            if (e.key === "ArrowLeft") onWidth(Math.min(860, cur + 24));
+            else if (e.key === "ArrowRight") onWidth(Math.max(340, cur - 24));
+          }}
+        />
+      ) : null}
       <div className="insp-head">
         <div className="eyebrow">
           <span>
-            STAGE {String(order).padStart(2, "0")} · {st.kind === "branch" ? "BRANCH" : "MAIN"} · {ADR[stage] ?? "§3.1"}
+            STAGE {String(order).padStart(2, "0")} ·{" "}
+            {st.kind === "branch" ? "BRANCH" : "MAIN"} · {ADR[stage] ?? "§3.1"}
           </span>
-          <button className="btn sm ghost icon" onClick={onClose} aria-label="인스펙터 닫기">
+          <button
+            className="btn sm ghost icon"
+            onClick={onClose}
+            aria-label={t("aria.close")}
+          >
             <X />
           </button>
         </div>
+        {siblings && siblings.length > 1 && onStage ? (
+          <div
+            className="seg bd-sib"
+            role="tablist"
+            aria-label={t("aria.siblings")}
+          >
+            {siblings.map((s) => (
+              <button
+                key={s}
+                type="button"
+                role="tab"
+                aria-selected={s === stage}
+
+                onClick={() => onStage(s)}
+              >
+                {stageService(s, locale)}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <h2>
-          {st.label.ko} <small>{st.label.en}</small>
+          {stageLabel(stage, locale)}{" "}
+          <small>{stageService(stage, locale)}</small>
         </h2>
         <div className="res">
           {st.gcpService} · {st.resource}
         </div>
-        <p className="desc">{st.description}</p>
+        <p className="desc">{stageDescription(stage, locale)}</p>
+        <div className="bd-insp-range">
+          <span className="k">{t("range")}</span> {rangeLabel}
+        </div>
       </div>
-      <div className="insp-body">
-        <details className="isec" open>
-          <summary>
-            <span className="ix">00</span>이 단계의 배치<span className="cnt">{d ? d.workflows.length : "…"}</span>
-          </summary>
+      <div className="bd-itabs" role="tablist" aria-label={t("aria.tabs")}>
+        {TABS.map((k, i) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            id={`insp-tab-${k}`}
+            aria-selected={tab === k}
+            aria-controls={`insp-pane-${k}`}
+            onClick={() => setTab(k)}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+              const n =
+                TABS[
+                  (i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) %
+                    TABS.length
+                ];
+              setTab(n);
+              document.getElementById(`insp-tab-${n}`)?.focus();
+            }}
+            tabIndex={tab === k ? 0 : -1}
+          >
+            <span className="ix">{String(i).padStart(2, "0")}</span>
+            {t(`tabs.${k}`)}
+            {k === "log" ? <span className="live-dot" aria-hidden /> : null}
+            <span className="cnt">{counts[k]}</span>
+          </button>
+        ))}
+      </div>
+      <div
+        className="insp-body bd-ipane"
+        role="tabpanel"
+        id={`insp-pane-${tab}`}
+        aria-labelledby={`insp-tab-${tab}`}
+      >
+        {tab === "wf" ? (
           <div className="ib">
             <div className="wfl">
               {wfs.length ? (
                 wfs.map((w) => (
-                  <Link key={w.workflow_id} href={`/workflows/${w.workflow_id}`}>
+                  <Link
+                    key={w.workflow_id}
+                    href={href(`/workflows/${w.workflow_id}`)}
+                  >
                     <LangBadge lang={w.language} />
                     <span style={{ minWidth: 0 }}>
                       <span className="idc">{w.workflow_id}</span>
                       <br />
                       <span className="muted mono" style={{ fontSize: 10.5 }}>
-                        {w.current_node ? `${w.current_node} · ${fmt.pct(w.progress.pct, 0)}` : w.input.object}
+                        {w.pipeline_id}
+                        {w.current_node_path
+                          ? ` · ${w.current_node_path} · ${f.pct(w.progress.pct, 0)}`
+                          : ` · ${w.input.object}`}
                         {w.attempt > 1 ? ` · attempt ${w.attempt}` : ""}
                       </span>
                     </span>
@@ -297,110 +892,198 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
                   </Link>
                 ))
               ) : (
-                <Empty title={d ? "지금 이 단계에 있는 배치가 없습니다" : "불러오는 중…"} />
+                <Empty title={d ? t("wf.empty") : t("loading")} />
               )}
             </div>
           </div>
-        </details>
-        <details className="isec" open={!mobile}>
-          <summary>
-            <span className="ix">01</span>GCS 입력 객체<span className="cnt">{objMode === "recent" ? 0 : objs.length || wfs.length}</span>
-          </summary>
+        ) : null}
+        {tab === "obj" ? (
           <div className="ib">
+            <div className="bd-isearch">
+              <Search aria-hidden />
+              <input
+                type="search"
+                value={qIn}
+                onChange={(e) => setQIn(e.target.value)}
+                placeholder={t("objects.placeholder")}
+                aria-label={t("objects.searchAria", {
+                  stage: stageLabel(stage, locale),
+                })}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              {qIn ? (
+                <button
+                  type="button"
+                  className="btn sm ghost icon"
+                  onClick={() => setQIn("")}
+                  aria-label={t("objects.clear")}
+                >
+                  <X />
+                </button>
+              ) : null}
+            </div>
+            <div className="bd-isearch-meta" aria-live="polite">
+              {!d
+                ? t("loading")
+                : searching
+                  ? t("objects.searching")
+                  : q
+                    ? t("objects.matches", { count: objs.length, q })
+                    : t("objects.all", { count: objs.length })}
+              {objs.length >= OBJECTS_LIMIT ? (
+                <span className="muted">
+                  {" "}
+                  · {t("objects.capped", { limit: OBJECTS_LIMIT })}
+                </span>
+              ) : null}
+            </div>
             {objs.length ? (
-              <>
-                {objMode !== "own" ? (
-                  <div className="muted" style={{ fontSize: 11, paddingBottom: 6 }}>
-                    {objMode === "carried"
-                      ? `이 단계가 처리 중인 배치의 입력 객체 · gs://${INPUT_BUCKET}`
-                      : `지금 이 단계에 머무는 배치가 없어 최근 업로드된 입력 객체를 보여 줍니다 · gs://${INPUT_BUCKET}`}
-                  </div>
-                ) : null}
-                {objs.slice(0, 14).map((o) => (
-                  <div className="obj" key={o.uri + o.generation}>
-                    <span className="on">
-                      gs://{o.bucket}/{o.name}
-                    </span>
-                    <span className="om">
-                      <span>gen {o.generation}</span>
-                      <span>{fmt.bytes(o.size)}</span>
-                      <span>{fmt.dateTime(o.timeCreated)}</span>
-                      {o.workflow_id ? <Link href={`/workflows/${o.workflow_id}`}>{o.workflow_id}</Link> : null}
-                    </span>
-                  </div>
-                ))}
-                {objs.length > 14 ? <div className="muted" style={{ fontSize: 11, paddingTop: 6 }}>외 {objs.length - 14}개 객체</div> : null}
-              </>
-            ) : wfs.length ? (
-              wfs.slice(0, 14).map((w) => (
-                <div className="obj" key={w.workflow_id}>
-                  <span className="on">{w.input.uri}</span>
-                  <span className="om">
-                    <span>{w.input.utteranceCount} utt</span>
-                    <span>{fmt.bytes(w.input.sizeBytes)}</span>
-                    <span>{fmt.dateTime(w.created_at)}</span>
-                    <Link href={`/workflows/${w.workflow_id}`}>{w.workflow_id}</Link>
-                  </span>
-                </div>
+              objs.map((o) => (
+                <ObjectRow
+                  key={`${o.uri}:${o.generation}:${o.ref ?? ""}:${o.workflow_id ?? ""}`}
+                  o={o}
+                  t={t}
+                  f={f}
+                  href={href}
+                />
+              ))
+            ) : d ? (
+              <Empty
+                title={q ? t("objects.noMatch", { q }) : t("objects.empty")}
+              >
+                {q ? t("objects.noMatchHint") : t("objects.emptyHint")}
+              </Empty>
+            ) : null}
+          </div>
+        ) : null}
+        {tab === "ev" ? (
+          <div className="ib">
+            {events.length ? (
+              events.map((e) => (
+                <EventRow
+                  key={e.event_id}
+                  e={e}
+                  fresh={freshEv.has(e.event_id)}
+                  t={t}
+                  f={f}
+                />
               ))
             ) : (
-              <Empty title="이 단계에 머무는 입력 객체가 없습니다">배치가 들어오면 bucket · object · generation이 여기에 쌓입니다.</Empty>
+              <Empty title={t("events.empty")} />
             )}
           </div>
-        </details>
-        <details className="isec" open={!mobile}>
-          <summary>
-            <span className="ix">02</span>누적 이벤트 · Pub/Sub 메시지<span className="cnt">{events.length}</span>
-          </summary>
-          <div className="ib">{events.length ? events.map((e) => <EventRow key={e.event_id} e={e} fresh={freshEv.has(e.event_id)} />) : <Empty title="이벤트가 아직 없습니다" />}</div>
-        </details>
-        <details className="isec" open>
-          <summary>
-            <span className="ix">03</span>평가 진행 로그 <span className="live-dot" style={{ marginLeft: 4 }} />
-            <span className="cnt">LIVE · {lines.length}</span>
-          </summary>
+        ) : null}
+        {tab === "log" ? (
           <div className="ib">
             <div
-              className="logstream"
+              className="logstream bd-logstream"
               ref={logBox}
               role="log"
               aria-live="off"
+              aria-label={t("tabs.log")}
               onScroll={(e) => {
                 const b = e.currentTarget;
-                atBottom.current = b.scrollHeight - b.scrollTop - b.clientHeight < 40;
+                atBottom.current =
+                  b.scrollHeight - b.scrollTop - b.clientHeight < 40;
               }}
             >
               {lines.length ? (
                 lines.map((l) => (
                   <div key={l.key} className={l.fresh ? "new" : undefined}>
-                    <span className="lt">{fmt.timeMs(l.ts)}</span> <span className={`sev-${l.severity}`}>{l.severity.padEnd(7, " ")}</span>{" "}
+                    <span className="lt">{f.timeMs(l.ts)}</span>{" "}
+                    <span className={`sev-${l.severity}`}>
+                      {l.severity.padEnd(7, " ")}
+                    </span>{" "}
                     <span className="muted">[{l.comp}]</span> {l.msg}
                   </div>
                 ))
               ) : (
-                <div className="muted">이 단계의 로그를 기다리는 중…</div>
+                <div className="muted">{t("log.waiting")}</div>
               )}
             </div>
           </div>
-        </details>
-        <details className="isec" open>
-          <summary>
-            <span className="ix">04</span>메트릭
-          </summary>
+        ) : null}
+        {tab === "met" ? (
           <div className="ib">
-            <div className="mgrid">
-              {d
-                ? Object.entries(d.metrics).map(([k, v]) => (
-                    <div key={k}>
-                      <div className="k">{METRIC_KO[k] ?? k}</div>
-                      <div className={clsx("v", typeof v === "object" && "obj-v")}>{fmtMetric(k, v, now)}</div>
-                    </div>
-                  ))
-                : null}
-            </div>
+            {d ? (
+              <Metrics
+                metrics={d.metrics}
+                now={now}
+                t={t}
+                f={f}
+                locale={locale}
+              />
+            ) : (
+              <Empty title={t("loading")} />
+            )}
           </div>
-        </details>
+        ) : null}
       </div>
     </motion.aside>
+  );
+}
+
+/** Canvas host: a resizable grid column (unchanged API). */
+export function Inspector({
+  stage,
+  onClose,
+  onWidth,
+}: {
+  stage: StageId;
+  onClose: () => void;
+  onWidth: (w: number) => void;
+}) {
+  return <InspectorPanel stage={stage} onClose={onClose} onWidth={onWidth} />;
+}
+
+/**
+ * Standalone host: a right-side drawer with scrim, Escape to close and a resizable width.
+ * `siblings` + `onStage` add a stage switcher (e.g. the board's 실행 column = Cloud Workflows + Vertex AI).
+ */
+export function StageInspector({
+  stageId,
+  onClose,
+  siblings,
+  onStage,
+}: {
+  stageId: StageId;
+  onClose: () => void;
+  siblings?: StageId[];
+  onStage?: (s: StageId) => void;
+}) {
+  const t = useT("inspector");
+  const [w, setW] = useState<number | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <>
+      <button
+        type="button"
+        className="bd-insp-scrim"
+        aria-label={t("aria.close")}
+        onClick={onClose}
+        tabIndex={-1}
+      />
+      <div
+        className="drawer bd-insp-host"
+        style={w ? { width: `min(${w}px, 100%)` } : undefined}
+      >
+        <InspectorPanel
+          key={stageId}
+          stage={stageId}
+          onClose={onClose}
+          onWidth={setW}
+          siblings={siblings}
+          onStage={onStage}
+          floating
+        />
+      </div>
+    </>
   );
 }

@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { forbidden, redirect } from "next/navigation";
 import { getConsoleConfig } from "@/config";
+import { getT } from "@/i18n/server";
 import { can, getSession } from "@/server/auth";
 
-export const metadata: Metadata = { title: "Hermes" };
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT("nav");
+  return { title: t("hermes.title") };
+}
 export const dynamic = "force-dynamic";
 
 /**
@@ -21,27 +26,42 @@ export default async function HermesPage() {
   if (!can(session, link.requiredPermission)) forbidden();
   if (link.url) redirect(link.url);
 
+  const t = await getT("hermes");
   return (
-    <div style={{ padding: "48px 24px", display: "grid", placeItems: "center" }}>
-      <section
-        aria-labelledby="hermes-title"
-        style={{ width: "min(560px, 100%)", background: "var(--sheet)", border: "1px solid var(--rule)", borderRadius: "var(--r)", boxShadow: "var(--shadow)" }}
-      >
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--rule-2)" }}>
-          <span className="mono muted" style={{ fontSize: 11, letterSpacing: "0.1em" }}>
-            EXT-01 · HERMES
-          </span>
-          <h1 id="hermes-title" style={{ margin: "6px 0 0", fontSize: "var(--t-lg)", fontWeight: 750 }}>
-            Hermes 대시보드가 아직 연결되지 않았습니다
-          </h1>
-        </div>
-        <div style={{ padding: "16px 20px 20px", display: "grid", gap: 12 }}>
-          <p className="ink2" style={{ margin: 0, fontSize: "var(--t-sm)" }}>
-            Hermes는 별도 URL에서 운영됩니다. 주소가 설정되면 이 페이지는 권한 확인 후 Hermes로 바로 이동합니다.
-          </p>
+    <div className="sheet sheet-in hermes-wrap">
+      <section aria-labelledby="hermes-title" className="plate hermes">
+        <header>
+          <span className="mono muted hermes-dwg">EXT-01 · HERMES</span>
+          <span className="chip">{t("status")}</span>
+        </header>
+        <div className="body hermes-body">
+          <svg className="hermes-art" viewBox="0 0 120 60" aria-hidden="true">
+            <rect x="1" y="1" width="46" height="58" fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <path d="M8 14h32M8 22h24M8 30h28" stroke="currentColor" strokeWidth="1" opacity="0.5" />
+            <path d="M47 30h26" stroke="var(--accent)" strokeWidth="1.4" strokeDasharray="3 3" />
+            <rect x="73" y="1" width="46" height="58" fill="none" stroke="currentColor" strokeWidth="1.2" strokeDasharray="4 3" />
+            <text x="96" y="34" textAnchor="middle" fontSize="9" fontFamily="var(--f-mono)" fill="currentColor" opacity="0.7">
+              ?
+            </text>
+          </svg>
+          <h1 id="hermes-title">{t("title")}</h1>
+          <p className="ink2">{t("lead")}</p>
+          <ol className="hermes-steps">
+            <li>
+              {t("step1")} <code className="mono">HERMES_DASHBOARD_URL</code>
+            </li>
+            <li>{t("step2")}</li>
+            <li>
+              {t("step3")} <code className="mono">{link.requiredPermission}</code>
+            </li>
+          </ol>
           <div className="note">
-            서버 환경 변수 <code className="mono">HERMES_DASHBOARD_URL</code>을 설정하고 서버를 재시작하세요. 접근 권한:{" "}
-            <code className="mono">{link.requiredPermission}</code>
+            {t("access", { name: session.user.name, roles: session.roles.join(", ") || "—" })}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Link className="btn" href="/">
+              {t("back")}
+            </Link>
           </div>
         </div>
       </section>

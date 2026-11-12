@@ -2,6 +2,111 @@
 import type { Messages } from "../../core";
 import type ko from "../ko/orchestration";
 
-const orchestration = {} satisfies Messages<typeof ko>;
+const orchestration = {
+  title: "Orchestration",
+  drawing: {
+    aria: "AIPO logical topology: from event producers to result commit, Retry, DLQ and Manual Replay. Select a stage to open its inspector.",
+    titleBlock: "Drawing info",
+    heading: "Logical layout · Bixby real-utterance evaluation",
+    dwg: "DWG",
+    ref: "REF",
+    scale: "SCALE",
+    live: "LIVE",
+    range: "RANGE",
+    liveHint: "Live batches · virtual clock",
+  },
+  annotations: {
+    adr001: "ADR-001 · Top-level orchestrator = Cloud Workflows",
+    adr002: "ADR-002 · No Cloud Tasks",
+    adr003: "ADR-003 · Firestore = Operational State",
+    adr004: "ADR-004 · State Firestore / history BigQuery / logs Logging",
+    idempotency: "§4.1 Idempotency = SHA256(project+bucket+object+generation+version)",
+    jobId: "PipelineJob ID = {{workflow_id}}-cycle-{{n}}-attempt-{{n}}",
+    slo: "INTAKE → ADMISSION · Event registration p95 SLO 10s · start delay after Capacity p95 SLO 30s",
+    recovery: "RECOVERY LAYER · Pub/Sub · Cloud Run",
+    execution: "EXECUTION LAYER · Vertex AI",
+    retryPolicy: "§4.3 Retry max 2 · 60s→300s",
+  },
+  edges: {
+    objectFinalized: "Object Finalized",
+    cloudEventPush: "CloudEvent push",
+    register: "register",
+    admission: "admission",
+    slotReserved: "slot reserved",
+    pipelineJob: "PipelineJob",
+    success: "SUCCESS",
+    failure: "FAILURE",
+    retryLoop: "attempts < 3",
+    toDlq: "attempts = 3 · non-retryable",
+    approval: "operator approval",
+    manualReplay: "MANUAL REPLAY → re-enqueue on the Language Queue with a new replay_cycle",
+  },
+  legend: {
+    aria: "Legend",
+    title: "BATCH TOKEN · ring = status · line weight/speed = throughput",
+  },
+  ticker: {
+    aria: "Live state transitions",
+    title: "STATE TRANSITIONS",
+    live: "LIVE",
+    paused: "PAUSED",
+  },
+  minimap: {
+    aria: "Minimap (click to move)",
+  },
+  zoom: {
+    group: "Zoom",
+    in: "Zoom in",
+    out: "Zoom out",
+    fit: "Fit the whole drawing",
+    level: "Current zoom",
+  },
+  hint: {
+    title: "Drag to pan · ⤢ shows the whole drawing",
+    drag: "Drag",
+    all: "fit all",
+  },
+  token: {
+    title: "{id} · {status} · {lang} · attempt {attempt}",
+    open: "Click to open the Workflow detail",
+    searchHit: "Search match",
+  },
+  range: {
+    aria: "Period",
+    hint: "Counters and search use the selected period; batch tokens and slots are live.",
+    liveTag: "live",
+  },
+  search: {
+    label: "Search by file name",
+    placeholder: "Search file names · batch-0042, results.csv",
+    shortcut: "⌘/",
+    shortcutHint: "Press ⌘/ or Ctrl+/ to jump to search",
+    clear: "Clear search",
+    searching: "Searching…",
+    resultsAria: "Search results by stage",
+    summary: { one: "# match · {stages} stages", other: "# matches · {stages} stages" },
+    summaryCapped: "Showing {shown} of {total} · {stages} stages",
+    none: "No files match: {q}",
+    noneHint: "Widen the period or search part of a file name (e.g. batch-0042, results.csv, 2026-11-12/ko).",
+    moreInStage: { one: "# more in this stage", other: "# more in this stage" },
+    openAll: "Open all in GCS files",
+    showStage: "Show on drawing",
+    hitCount: { one: "# hit", other: "# hits" },
+    stageBadge: { one: "# match", other: "# matches" },
+    keyboard: "↑↓ move · Enter open · Esc close",
+    error: "Couldn't search.",
+  },
+  nodes: {
+    uploadedObjects: "Objects uploaded · {range}",
+    uploaded: "Uploaded · {range}",
+    delivered: "Delivered · {range}",
+    executions: "Executions · {range}",
+    executionsRun: "Runs · {range}",
+    succeeded: "Succeeded · {range}",
+    retries: "Retries · {range}",
+    passRate: "Pass rate · {range}",
+
+  },
+} satisfies Messages<typeof ko>;
 
 export default orchestration;
