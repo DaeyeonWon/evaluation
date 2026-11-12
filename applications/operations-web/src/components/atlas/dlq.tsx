@@ -99,7 +99,7 @@ function Detail({ id, mode, setMode }: { id: string; mode: null | "replay" | "cl
       <dl className="kv">
         <dt>Workflow</dt>
         <dd>
-          <Link className="mono" href={`/atlas/workflows/${d.workflow_id}`}>
+          <Link className="mono" href={`/workflows/${d.workflow_id}`}>
             {d.workflow_id}
           </Link>
         </dd>
@@ -230,7 +230,7 @@ function Detail({ id, mode, setMode }: { id: string; mode: null | "replay" | "cl
                   {r.replay_id} · {r.pipeline_version_from} → {r.pipeline_version_to} {rw ? <StatusPill status={rw.status} size="xs" /> : <span className="chip">{r.status}</span>}
                 </span>
                 <span className="om">
-                  <span>{rw ? <Link href={`/atlas/workflows/${rw.workflow_id}`}>{rw.workflow_id}</Link> : "—"}</span>
+                  <span>{rw ? <Link href={`/workflows/${rw.workflow_id}`}>{rw.workflow_id}</Link> : "—"}</span>
                   <span>{opName(r.approved_by)}</span>
                   <span>{fmt.dateTime(r.created_at)}</span>
                 </span>
@@ -400,7 +400,7 @@ export function DlqScreen() {
         title="DLQ Operations"
         desc="최종 실패와 재시도 불가 오류가 격리됩니다. 로그를 검토한 뒤 종료하거나, 사유를 남기고 수동 Replay를 승인합니다."
         acts={
-          <Link className="btn" href="/atlas?stage=dlq">
+          <Link className="btn" href="/?stage=dlq">
             <MapIcon />
             DLQ 분기 보기
           </Link>
@@ -663,8 +663,8 @@ export function DlqScreen() {
                       </button>
                     </td>
                     <td className="mono">
-                      <Link href={`/atlas/workflows/${r.original_workflow_id}`}>{r.original_workflow_id}</Link> →{" "}
-                      {r.replay_workflow_id ? <Link href={`/atlas/workflows/${r.replay_workflow_id}`}>{r.replay_workflow_id}</Link> : "—"}
+                      <Link href={`/workflows/${r.original_workflow_id}`}>{r.original_workflow_id}</Link> →{" "}
+                      {r.replay_workflow_id ? <Link href={`/workflows/${r.replay_workflow_id}`}>{r.replay_workflow_id}</Link> : "—"}
                     </td>
                     <td className="mono">
                       {r.pipeline_version_from} → {r.pipeline_version_to}

@@ -202,15 +202,15 @@ const noopSubscribe = () => () => {};
 function readExplorerHref(): string {
   try {
     const q = window.sessionStorage.getItem(EXPLORER_RETURN_KEY);
-    if (q && q.startsWith("?")) return "/atlas/explorer" + q;
+    if (q && q.startsWith("?")) return "/explorer" + q;
   } catch {
     /* storage unavailable */
   }
-  return "/atlas/explorer";
+  return "/explorer";
 }
-/** "/atlas/explorer" + the last explorer filters; the bare path on the server and during hydration. */
+/** "/explorer" + the last explorer filters; the bare path on the server and during hydration. */
 export function useExplorerHref(): string {
-  return useSyncExternalStore(noopSubscribe, readExplorerHref, () => "/atlas/explorer");
+  return useSyncExternalStore(noopSubscribe, readExplorerHref, () => "/explorer");
 }
 
 /* ───────────── toasts ───────────── */

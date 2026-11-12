@@ -31,24 +31,24 @@ import type { DeadLetter, WorkflowSummary } from "@/lib/types";
 import { ToastProvider, useToast, useReducedMotionSafe } from "./ui";
 
 export const TABS = [
-  { href: "/atlas", no: "A-00", label: "오케스트레이션", Icon: MapIcon },
-  { href: "/atlas/overview", no: "S-01", label: "개요", Icon: LayoutGrid },
-  { href: "/atlas/capacity", no: "S-02", label: "Capacity", Icon: Gauge },
-  { href: "/atlas/explorer", no: "S-03", label: "Explorer", Icon: Search },
-  { href: "/atlas/workflows", no: "S-04", label: "Pipeline 상세", Icon: GitBranch },
-  { href: "/atlas/dlq", no: "S-05", label: "DLQ", Icon: ArchiveX },
-  { href: "/atlas/results", no: "U-01", label: "평가 결과", Icon: Table },
-  { href: "/atlas/analytics", no: "S-07", label: "분석", Icon: BarChart3 },
-  { href: "/atlas/config", no: "S-06", label: "설정", Icon: SlidersHorizontal },
+  { href: "/", no: "A-00", label: "오케스트레이션", Icon: MapIcon },
+  { href: "/overview", no: "S-01", label: "개요", Icon: LayoutGrid },
+  { href: "/capacity", no: "S-02", label: "Capacity", Icon: Gauge },
+  { href: "/explorer", no: "S-03", label: "Explorer", Icon: Search },
+  { href: "/workflows", no: "S-04", label: "Pipeline 상세", Icon: GitBranch },
+  { href: "/dlq", no: "S-05", label: "DLQ", Icon: ArchiveX },
+  { href: "/results", no: "U-01", label: "평가 결과", Icon: Table },
+  { href: "/analytics", no: "S-07", label: "분석", Icon: BarChart3 },
+  { href: "/config", no: "S-06", label: "설정", Icon: SlidersHorizontal },
 ] as const;
 
 function isActive(path: string, href: string) {
-  return href === "/atlas" ? path === "/atlas" : path === href || path.startsWith(href + "/");
+  return href === "/" ? path === "/" : path === href || path.startsWith(href + "/");
 }
 
 function Brand() {
   return (
-    <Link className="brand" href="/atlas" aria-label="AIPO Atlas 홈 (오케스트레이션)">
+    <Link className="brand" href="/" aria-label="AIPO Atlas 홈 (오케스트레이션)">
       <svg viewBox="0 0 32 32" aria-hidden="true">
         <rect x="1.5" y="1.5" width="29" height="29" fill="none" stroke="currentColor" strokeWidth="1.5" />
         <path d="M6 24 L13 8 L20 24 M9 18h8" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -181,7 +181,7 @@ function Palette({ onClose }: { onClose: () => void }) {
     });
     STAGES.forEach((s) => {
       if (m(`${s.label.ko} ${s.label.en} ${s.id}`))
-        out.push({ grp: "오케스트레이션 단계", icon: <CatalogIcon name={s.icon} />, label: s.label.ko, sub: s.label.en, href: `/atlas?stage=${s.id}` });
+        out.push({ grp: "오케스트레이션 단계", icon: <CatalogIcon name={s.icon} />, label: s.label.ko, sub: s.label.en, href: `/?stage=${s.id}` });
     });
     remote.wfs.forEach((w) =>
       out.push({
@@ -190,7 +190,7 @@ function Palette({ onClose }: { onClose: () => void }) {
         tone: STATUS_META[w.status].tone,
         label: w.workflow_id,
         sub: `${w.batch_id} · ${STATUS_META[w.status].label} · ${w.pipeline_job_id ?? ""}`,
-        href: `/atlas/workflows/${w.workflow_id}`,
+        href: `/workflows/${w.workflow_id}`,
       }),
     );
     remote.dls.forEach((d) =>
@@ -200,7 +200,7 @@ function Palette({ onClose }: { onClose: () => void }) {
         tone: "dlq",
         label: d.dead_letter_id,
         sub: `${d.workflow_id} · ${d.error_code} · ${DLQ_STATUS_META[d.status].label}`,
-        href: `/atlas/dlq?sel=${d.dead_letter_id}`,
+        href: `/dlq?sel=${d.dead_letter_id}`,
       }),
     );
     return out.slice(0, 60);
@@ -316,7 +316,7 @@ function TopBar({ onPalette }: { onPalette: () => void }) {
             <Link key={t.href} href={t.href} className="tab" aria-current={on ? "page" : undefined}>
               <span className="no">{t.no}</span>
               {t.label}
-              {t.href === "/atlas/dlq" && pend ? (
+              {t.href === "/dlq" && pend ? (
                 <span className="cnt" aria-label={`검토 대기 ${pend}건`}>
                   {pend}
                 </span>

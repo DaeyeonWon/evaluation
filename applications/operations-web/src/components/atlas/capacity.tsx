@@ -383,7 +383,7 @@ export function CapacityScreen() {
           </>
         }
         acts={
-          <Link className="btn" href="/atlas/config">
+          <Link className="btn" href="/config">
             <SlidersHorizontal />
             전체 설정
           </Link>

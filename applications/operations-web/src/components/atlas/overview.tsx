@@ -74,12 +74,12 @@ function AlertRow({ a }: { a: Alert }) {
           </span>
         )}
         {a.dead_letter_id ? (
-          <Link className="btn sm" href={`/atlas/dlq?sel=${a.dead_letter_id}`}>
+          <Link className="btn sm" href={`/dlq?sel=${a.dead_letter_id}`}>
             DLQ
           </Link>
         ) : null}
         {a.workflow_id ? (
-          <Link className="btn sm" href={`/atlas/workflows/${a.workflow_id}`}>
+          <Link className="btn sm" href={`/workflows/${a.workflow_id}`}>
             상세
           </Link>
         ) : null}
@@ -117,11 +117,11 @@ export function OverviewScreen() {
         desc="bixby-eval-prod · asia-northeast3 · 실시간 갱신. 숫자를 누르면 해당 화면으로 이동합니다."
         acts={
           <>
-            <Link className="btn" href="/atlas">
+            <Link className="btn" href="/">
               <MapIcon />
               캔버스에서 보기
             </Link>
-            <Link className="btn" href="/atlas/explorer">
+            <Link className="btn" href="/explorer">
               <Search />
               Pipeline 검색
             </Link>
@@ -129,21 +129,21 @@ export function OverviewScreen() {
         }
       />
       <div className="kpis">
-        <Kpi label="Running" icon="loader" tone="running" value={o?.running} fmtv={n} href="/atlas?stage=vertex" sub={dist ? `Dispatching ${dist.DISPATCHING ?? 0} · Reserved ${dist.RESERVED ?? 0}` : ""} />
-        <Kpi label="Pending" icon="clock" tone="queued" value={o?.pending} fmtv={n} href="/atlas/capacity" sub={o && dist ? `Queued ${o.queued} · 수신/검증 ${(dist.RECEIVED ?? 0) + (dist.VALIDATED ?? 0)}` : ""} />
-        <Kpi label="Completed (오늘)" icon="check-circle" tone="success" value={o?.completedToday} fmtv={n} href="/atlas/results" sub={o ? `실발화 ${fmt.number(o.utterancesEvaluatedToday)} 건 평가` : ""} />
-        <Kpi label="Failed (오늘)" icon="x-circle" tone="failed" value={o?.failedToday} fmtv={n} href="/atlas/explorer?status=DEAD_LETTERED,TIMED_OUT" sub={o ? `취소 ${o.cancelledToday} 별도` : ""} />
-        <Kpi label="Retry Waiting" icon="rotate-ccw" tone="retry" value={o?.retryWaiting} fmtv={n} href="/atlas/explorer?status=RETRY_WAIT" sub="backoff 60s → 300s" />
-        <Kpi label="DLQ Pending Review" icon="archive-x" tone="dlq" value={o?.dlqPendingReview} fmtv={n} href="/atlas/dlq?status=PENDING_REVIEW" sub={o ? `누적 ${o.dlqTotal}` : ""} />
+        <Kpi label="Running" icon="loader" tone="running" value={o?.running} fmtv={n} href="/?stage=vertex" sub={dist ? `Dispatching ${dist.DISPATCHING ?? 0} · Reserved ${dist.RESERVED ?? 0}` : ""} />
+        <Kpi label="Pending" icon="clock" tone="queued" value={o?.pending} fmtv={n} href="/capacity" sub={o && dist ? `Queued ${o.queued} · 수신/검증 ${(dist.RECEIVED ?? 0) + (dist.VALIDATED ?? 0)}` : ""} />
+        <Kpi label="Completed (오늘)" icon="check-circle" tone="success" value={o?.completedToday} fmtv={n} href="/results" sub={o ? `실발화 ${fmt.number(o.utterancesEvaluatedToday)} 건 평가` : ""} />
+        <Kpi label="Failed (오늘)" icon="x-circle" tone="failed" value={o?.failedToday} fmtv={n} href="/explorer?status=DEAD_LETTERED,TIMED_OUT" sub={o ? `취소 ${o.cancelledToday} 별도` : ""} />
+        <Kpi label="Retry Waiting" icon="rotate-ccw" tone="retry" value={o?.retryWaiting} fmtv={n} href="/explorer?status=RETRY_WAIT" sub="backoff 60s → 300s" />
+        <Kpi label="DLQ Pending Review" icon="archive-x" tone="dlq" value={o?.dlqPendingReview} fmtv={n} href="/dlq?status=PENDING_REVIEW" sub={o ? `누적 ${o.dlqTotal}` : ""} />
         <Kpi
           label="Overall Success Rate"
           tone={o && (o.successRateToday ?? 1) < 0.995 ? "retry" : "success"}
           value={o?.successRateToday}
           fmtv={pct}
-          href="/atlas/analytics"
+          href="/analytics"
           sub={o ? `7일 ${fmt.pct(o.successRate7d, 1)} · 목표 99.5%` : ""}
         />
-        <Kpi label="Avg / p95 처리 시간" value={o?.avgProcessingMs} fmtv={dur} href="/atlas/analytics" sub={o ? `p95 ${dur(o.p95ProcessingMs)} · 대기 ${dur(o.avgWaitMs)}` : ""} />
+        <Kpi label="Avg / p95 처리 시간" value={o?.avgProcessingMs} fmtv={dur} href="/analytics" sub={o ? `p95 ${dur(o.p95ProcessingMs)} · 대기 ${dur(o.avgWaitMs)}` : ""} />
       </div>
       <div className="split s-64">
         <Plate title="Pipeline Throughput" refText="오늘 00:00~ · 5분 단위 완료 Pipeline · BigQuery 집계 · LIVE">
@@ -164,7 +164,7 @@ export function OverviewScreen() {
           <EChart
             className="chart"
             ariaLabel="Workflow 상태 분포"
-            onEvents={{ click: (p) => router.push(`/atlas/explorer?status=${keys[(p as { dataIndex: number }).dataIndex]}`) }}
+            onEvents={{ click: (p) => router.push(`/explorer?status=${keys[(p as { dataIndex: number }).dataIndex]}`) }}
             option={(t) =>
               opt({
                 ...baseOpt(t, reduced, { grid: { left: 92, right: 34, top: 8, bottom: 22 } }),
@@ -201,7 +201,7 @@ export function OverviewScreen() {
           <EChart
             className="chart"
             ariaLabel="오류 유형별 분포"
-            onEvents={{ click: (p) => router.push(`/atlas/explorer?error_category=${errList[(p as { dataIndex: number }).dataIndex]?.[0]}`) }}
+            onEvents={{ click: (p) => router.push(`/explorer?error_category=${errList[(p as { dataIndex: number }).dataIndex]?.[0]}`) }}
             option={(t) =>
               opt({
                 ...baseOpt(t, reduced, { grid: { left: 132, right: 34, top: 8, bottom: 22 } }),
@@ -237,7 +237,7 @@ export function OverviewScreen() {
                       initial={reduced ? false : { opacity: 0, backgroundColor: "rgba(13,135,166,0.18)" }}
                       animate={{ opacity: 1, backgroundColor: "rgba(13,135,166,0)" }}
                       transition={{ duration: 1.1 }}
-                      onClick={() => e.workflow_id && router.push(`/atlas/workflows/${e.workflow_id}`)}
+                      onClick={() => e.workflow_id && router.push(`/workflows/${e.workflow_id}`)}
                     >
                       <td className="mono muted">{fmt.time(e.ts)}</td>
                       <td>

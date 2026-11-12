@@ -260,7 +260,7 @@ function UttDrawer({ id, rows, onNav, onClose }: { id: string; rows: ResultRow[]
                 <dd className="mono">{r.pipeline_job_id}</dd>
                 <dt>Workflow</dt>
                 <dd>
-                  <Link className="mono" href={`/atlas/workflows/${r.workflow_id}?node=aggregate`}>
+                  <Link className="mono" href={`/workflows/${r.workflow_id}?node=aggregate`}>
                     {r.workflow_id} →
                   </Link>
                 </dd>

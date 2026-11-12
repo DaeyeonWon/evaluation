@@ -283,7 +283,7 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
             <div className="wfl">
               {wfs.length ? (
                 wfs.map((w) => (
-                  <Link key={w.workflow_id} href={`/atlas/workflows/${w.workflow_id}`}>
+                  <Link key={w.workflow_id} href={`/workflows/${w.workflow_id}`}>
                     <LangBadge lang={w.language} />
                     <span style={{ minWidth: 0 }}>
                       <span className="idc">{w.workflow_id}</span>
@@ -325,7 +325,7 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
                       <span>gen {o.generation}</span>
                       <span>{fmt.bytes(o.size)}</span>
                       <span>{fmt.dateTime(o.timeCreated)}</span>
-                      {o.workflow_id ? <Link href={`/atlas/workflows/${o.workflow_id}`}>{o.workflow_id}</Link> : null}
+                      {o.workflow_id ? <Link href={`/workflows/${o.workflow_id}`}>{o.workflow_id}</Link> : null}
                     </span>
                   </div>
                 ))}
@@ -339,7 +339,7 @@ export function Inspector({ stage, onClose, onWidth }: { stage: StageId; onClose
                     <span>{w.input.utteranceCount} utt</span>
                     <span>{fmt.bytes(w.input.sizeBytes)}</span>
                     <span>{fmt.dateTime(w.created_at)}</span>
-                    <Link href={`/atlas/workflows/${w.workflow_id}`}>{w.workflow_id}</Link>
+                    <Link href={`/workflows/${w.workflow_id}`}>{w.workflow_id}</Link>
                   </span>
                 </div>
               ))

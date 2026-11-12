@@ -441,7 +441,7 @@ export function CanvasScreen() {
     if (!hit) return;
     if (hit.closest('[data-toggle="vertex"]')) return setExpanded((x) => !x);
     const tok = hit.closest<SVGGElement>("[data-tok]");
-    if (tok?.dataset.tok) return router.push(`/atlas/workflows/${tok.dataset.tok}`);
+    if (tok?.dataset.tok) return router.push(`/workflows/${tok.dataset.tok}`);
     const node = hit.closest<SVGGElement>("[data-stage]");
     if (node?.dataset.stage) selectStage(node.dataset.stage as StageId);
   };
@@ -451,7 +451,7 @@ export function CanvasScreen() {
     const tok = t.closest<SVGGElement>("[data-tok]");
     if (tok?.dataset.tok) {
       e.preventDefault();
-      return router.push(`/atlas/workflows/${tok.dataset.tok}`);
+      return router.push(`/workflows/${tok.dataset.tok}`);
     }
     const node = t.closest<SVGGElement>(".node");
     if (node?.dataset.stage) {

@@ -9,7 +9,6 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test:e2e": "playwright test",
-    "oracle": "node scripts/oracle.mjs",
     "gen:catalog": "node scripts/gen-catalog.mjs"
   },
   "dependencies": {

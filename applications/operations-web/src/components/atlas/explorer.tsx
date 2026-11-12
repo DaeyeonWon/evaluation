@@ -101,7 +101,7 @@ export function ExplorerScreen() {
     } catch {
       /* storage unavailable — crumb falls back to the bare explorer */
     }
-    router.push(`/atlas/workflows/${id}`);
+    router.push(`/workflows/${id}`);
   };
   const anyFilter = TEXT_KEYS.some((k) => f[k]) || f.status.length || f.language.length || f.version || f.event_type || f.error_code || f.error_category || f.from || f.to || f.has_retries || f.replay;
 
@@ -116,7 +116,7 @@ export function ExplorerScreen() {
             className="btn"
             onClick={() => {
               setDraft({});
-              router.replace("/atlas/explorer", { scroll: false });
+              router.replace("/explorer", { scroll: false });
             }}
           >
             <X />

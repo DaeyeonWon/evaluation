@@ -677,7 +677,7 @@ export function ConfigScreen() {
               flush
               title="Language · Global Capacity"
               right={
-                <Link className="btn sm" href="/atlas/capacity">
+                <Link className="btn sm" href="/capacity">
                   <SlidersHorizontal />
                   Capacity 화면에서 변경
                 </Link>

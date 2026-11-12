@@ -25,7 +25,7 @@ export function WorkflowsIndex() {
       try {
         const r = await api.workflows({ status: ["RUNNING"], pageSize: 1, sort: "updated_desc" });
         const any = r.items[0] ?? (await api.workflows({ pageSize: 1 })).items[0];
-        if (alive && any) router.replace(`/atlas/workflows/${any.workflow_id}`);
+        if (alive && any) router.replace(`/workflows/${any.workflow_id}`);
         else if (alive) setErr("표시할 Workflow가 없습니다.");
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
@@ -182,7 +182,7 @@ function NodeDetail({ n, wf, onLogs }: { n: DagNode | undefined; wf: Workflow; o
               <Search />이 노드 오류 로그
             </button>
             {wf.dead_letter_id ? (
-              <Link className="btn sm primary" href={`/atlas/dlq?sel=${wf.dead_letter_id}`}>
+              <Link className="btn sm primary" href={`/dlq?sel=${wf.dead_letter_id}`}>
                 <RefreshCw />
                 DLQ에서 Replay
               </Link>
@@ -452,9 +452,9 @@ function History({ wf, replays }: { wf: Workflow; replays: { replay_id: string; 
             <dt>replay_cycle</dt>
             <dd className="mono">{wf.replay_cycle}</dd>
             <dt>replay_of</dt>
-            <dd>{wf.replay_of ? <Link className="mono" href={`/atlas/workflows/${wf.replay_of}`}>{wf.replay_of}</Link> : "—"}</dd>
+            <dd>{wf.replay_of ? <Link className="mono" href={`/workflows/${wf.replay_of}`}>{wf.replay_of}</Link> : "—"}</dd>
             <dt>replayed_by</dt>
-            <dd>{wf.replayed_by ? <Link className="mono" href={`/atlas/workflows/${wf.replayed_by}`}>{wf.replayed_by}</Link> : "—"}</dd>
+            <dd>{wf.replayed_by ? <Link className="mono" href={`/workflows/${wf.replayed_by}`}>{wf.replayed_by}</Link> : "—"}</dd>
           </dl>
           {replays.length ? (
             replays.map((r) => (
@@ -616,23 +616,23 @@ export function DetailScreen() {
             ) : null}
             {wf.dead_letter_id ? (
               dlClosed ? (
-                <Link className="btn" href={`/atlas/dlq?sel=${wf.dead_letter_id}`} title="DLQ 기록이 종료되어 Replay 대상이 아닙니다">
+                <Link className="btn" href={`/dlq?sel=${wf.dead_letter_id}`} title="DLQ 기록이 종료되어 Replay 대상이 아닙니다">
                   <Archive />
                   DLQ 기록 (종료됨)
                 </Link>
               ) : (
-                <Link className="btn primary" href={`/atlas/dlq?sel=${wf.dead_letter_id}`}>
+                <Link className="btn primary" href={`/dlq?sel=${wf.dead_letter_id}`}>
                   <RefreshCw />
                   DLQ · Replay
                 </Link>
               )
             ) : null}
             {wf.result ? (
-              <Link className="btn" href={`/atlas/results?workflow_id=${wf.workflow_id}`}>
+              <Link className="btn" href={`/results?workflow_id=${wf.workflow_id}`}>
                 <Table />이 배치 평가 결과
               </Link>
             ) : null}
-            <Link className="btn" href={`/atlas?stage=${STATE_TO_STAGE[wf.status]}`}>
+            <Link className="btn" href={`/?stage=${STATE_TO_STAGE[wf.status]}`}>
               <MapIcon />
               캔버스 위치
             </Link>
@@ -940,7 +940,7 @@ export function DetailScreen() {
               {attQ.data.replayChain.map((w, i) => (
                 <span key={w.workflow_id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                   {i ? <span className="muted">→</span> : null}
-                  <Link className="chip" href={`/atlas/workflows/${w.workflow_id}`} aria-current={w.workflow_id === wf.workflow_id ? "page" : undefined}>
+                  <Link className="chip" href={`/workflows/${w.workflow_id}`} aria-current={w.workflow_id === wf.workflow_id ? "page" : undefined}>
                     {w.workflow_id} · c{w.replay_cycle}
                   </Link>
                   <StatusPill status={w.status} size="xs" />
@@ -952,7 +952,7 @@ export function DetailScreen() {
       </Plate>
       {dl && !dlClosed ? (
         <div className="note">
-          DLQ 상태 <b>{DLQ_STATUS_META[dl.status].label}</b> · <Link href={`/atlas/dlq?sel=${dl.dead_letter_id}`}>{dl.dead_letter_id}</Link>에서 로그 검토 후 Replay를 승인할 수 있습니다.
+          DLQ 상태 <b>{DLQ_STATUS_META[dl.status].label}</b> · <Link href={`/dlq?sel=${dl.dead_letter_id}`}>{dl.dead_letter_id}</Link>에서 로그 검토 후 Replay를 승인할 수 있습니다.
         </div>
       ) : null}
     </Sheet>
