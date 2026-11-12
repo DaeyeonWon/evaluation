@@ -3,7 +3,9 @@ import { LANG_CODES, PIPELINE_VERSIONS } from "@/lib/catalog";
 import type { FailureReason, ResultDetail, ResultFileMeta, ResultRow, ResultsPage } from "@/lib/types";
 import { Query, notFound, paginate } from "../http";
 import { getEngine } from "../mock/runtime";
-import { resultsAggregates, toSummary } from "../mock/projections";
+import { countBy, resultsAggregates, toSummary } from "../mock/projections";
+import { readRange } from "../range";
+import type { LangCode, ResolvedRange } from "@/lib/types";
 
 const REASONS: FailureReason[] = ["INTENT_MISMATCH", "SLOT_ERROR", "RESPONSE_QUALITY", "TIMEOUT", "ASR_ERROR", "POLICY_VIOLATION"];
 const SORTS = ["eval_desc", "eval_asc", "score_asc", "score_desc", "latency_desc", "latency_asc", "id_asc"] as const;
@@ -15,15 +17,24 @@ function stripFile<T extends { filter?: unknown }>(f: T): Omit<T, "filter"> {
 }
 
 /** Shared filter for GET /results and GET /results/csv. */
-export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query } {
+export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query; range: ResolvedRange } {
   const e = getEngine();
   const q = Query.of(req);
   const ids = q.list("ids");
-  let rows = e.results.rows;
+  const range = readRange(req);
+  let rows: ResultRow[];
   if (ids) {
+    // explicit selection ignores the range (rows may come from any day)
     const set = new Set(ids);
-    rows = rows.filter((r) => set.has(r.utterance_id));
-  }
+    const wfIds = new Set(ids.map((id) => "wf-" + id.replace(/^utt-/, "").replace(/-\d{4}$/, "")));
+    rows = [];
+    for (const wid of wfIds) {
+      const w = e.getWorkflow(wid);
+      if (w) for (const r of e.results.rowsFor(w)) if (set.has(r.utterance_id)) rows.push(r);
+    }
+  } else rows = e.results.rowsInRange(range.from, range.to);
+  const models = q.list("model_version") ?? q.list("model");
+  const pids = q.list("pipeline_id") ?? q.list("pipeline");
   const langs = q.enumList("language", LANG_CODES);
   const caps = q.list("capsule");
   const intents = q.list("intent");
@@ -37,10 +48,10 @@ export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query }
   const maxScore = q.num("max_score", { min: 0, max: 1 });
   const minLat = q.num("min_latency", { min: 0 });
   const maxLat = q.num("max_latency", { min: 0 });
-  const from = q.time("from");
-  const to = q.time("to");
   const text = q.str("q")?.toLowerCase();
   rows = rows.filter((r) => {
+    if (models && !models.includes(r.model_version)) return false;
+    if (pids && !pids.includes(r.pipeline_id)) return false;
     if (langs && !langs.includes(r.language)) return false;
     if (caps && !caps.includes(r.capsule_id) && !caps.includes(r.capsule)) return false;
     if (intents && !intents.includes(r.intent_expected)) return false;
@@ -54,8 +65,6 @@ export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query }
     if (maxScore != null && r.judge_score > maxScore) return false;
     if (minLat != null && r.latency_ms < minLat) return false;
     if (maxLat != null && r.latency_ms > maxLat) return false;
-    if (from != null && r.eval_ts < from) return false;
-    if (to != null && r.eval_ts > to) return false;
     if (text) {
       const hay = (
         r.utterance_id + " " + r.utterance_text + " " + r.asr_text + " " + r.actual_response + " " + r.expected_response + " " +
@@ -76,27 +85,37 @@ export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query }
     id_asc: (a, b) => (a.utterance_id < b.utterance_id ? -1 : a.utterance_id > b.utterance_id ? 1 : 0),
   };
   rows = [...rows].sort(sorters[sort]);
-  return { rows, q };
+  return { rows, q, range };
 }
 
 export function resultsPage(req: NextRequest): ResultsPage {
   const e = getEngine();
-  const { rows, q } = filterResults(req);
+  const { rows, q, range } = filterResults(req);
   const { page, pageSize } = q.page(50, 1000);
   const p = paginate(rows, page, pageSize);
-  return { rows: p.items, total: p.total, page, pageSize, aggregates: resultsAggregates(e, rows), file: stripFile(e.results.file) };
+  return {
+    rows: p.items,
+    total: p.total,
+    page,
+    pageSize,
+    aggregates: resultsAggregates(e, rows),
+    file: stripFile(e.results.file),
+    range,
+    facets: {
+      model_version: countBy(rows, (r) => r.model_version),
+      pipeline_id: countBy(rows, (r) => r.pipeline_id),
+      version: countBy(rows, (r) => r.pipeline_version),
+      language: countBy(rows, (r) => r.language) as Partial<Record<LangCode, number>>,
+    },
+  };
 }
 
 export function resultDetail(id: string): ResultDetail {
   const e = getEngine();
-  let row = e.results.rows.find((r) => r.utterance_id === id);
-  if (!row) {
-    // also look at per-workflow results outside "today"
-    for (const rows of Object.values(e._internal.RESULTS_BY_WF)) {
-      row = rows.find((r) => r.utterance_id === id);
-      if (row) break;
-    }
-  }
+  // utt-{date}-{lang}-{seq}-{nnnn} → wf-{date}-{lang}-{seq}
+  const wfId = "wf-" + id.replace(/^utt-/, "").replace(/-\d{4}$/, "");
+  const owner = e.getWorkflow(wfId);
+  const row = owner ? e.results.rowsFor(owner).find((r) => r.utterance_id === id) : undefined;
   if (!row) throw notFound(`발화 결과를 찾을 수 없습니다: ${id}`);
   const wf = e.getWorkflow(row.workflow_id);
   let inputLine: string | null = null;
@@ -114,17 +133,17 @@ export function resultFileMeta(): ResultFileMeta {
     file: stripFile(e.results.file),
     files: e.results.files.map(stripFile),
     columns: e.results.columns,
-    bigquery: { table: e.config.bigquery.resultsTable, rows: e.results.rows.length },
+    bigquery: { table: e.config.bigquery.resultsTable, rows: e.results.file.rowCount },
   };
 }
 
 export function resultsCsv(req: NextRequest): Response {
   const e = getEngine();
-  const { rows, q } = filterResults(req);
+  const { rows, q, range } = filterResults(req);
   const cols = q.list("columns");
   const csv = e.results.toCSV(rows, { bom: true, ...(cols ? { columns: cols } : {}) });
   const date = e._internal.kstDate(e.now());
-  const suffix = [q.list("language")?.join("-"), q.list("version")?.join("-"), q.str("result")?.toLowerCase(), q.list("ids") ? "selected" : null]
+  const suffix = [range.preset !== "today" ? range.preset : null, q.list("language")?.join("-"), q.list("version")?.join("-"), q.list("model_version")?.join("-"), q.str("result")?.toLowerCase(), q.list("ids") ? "selected" : null]
     .filter(Boolean)
     .join("_");
   const custom = q.str("filename")?.replace(/[^\w.\-가-힣]/g, "_");
@@ -137,6 +156,9 @@ export function resultsCsv(req: NextRequest): Response {
       "content-disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
       "cache-control": "no-store",
       "x-row-count": String(rows.length),
+      "x-range-from": range.fromIso,
+      "x-range-to": range.toIso,
+      "x-range-label": encodeURIComponent(range.label),
     },
   });
 }

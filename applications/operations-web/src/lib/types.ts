@@ -325,8 +325,16 @@ export interface WorkflowError {
   code: string;
   category: FailureCategory;
   message: string;
+  /** LEGACY six-phase id */
   node: ComponentId | null;
   attempt: number;
+  /** pipeline-id path of the failing leaf, e.g. "response-judge/policy-guard/pii_scan" (null for timeouts/cancel) */
+  path?: string | null;
+  /** node-id path, e.g. "response_judge/safety_check/pii_scan" */
+  node_path?: string | null;
+  component?: string | null;
+  /** job (root or child) where the failure originated */
+  pipeline_job_id?: string | null;
 }
 
 export interface Artifact {
@@ -359,6 +367,8 @@ export interface DagNode {
   outputs: Artifact[];
   error: { code: string; category: FailureCategory; message: string } | null;
   description: string;
+  /** root pipeline node ids mapped onto this legacy phase (new pipelines; may be empty → SKIPPED) */
+  mapped_nodes?: string[];
 }
 
 export interface Attempt {
@@ -378,7 +388,19 @@ export interface Attempt {
   failed_node: ComponentId | null;
   backoffSec: number | null;
   retry_at: EpochMs | null;
+  /** LEGACY six-phase projection of the root PipelineJob DAG (use GET /pipeline-jobs/[jobId] for the real DAG). */
   dag: DagNode[];
+  /** root pipeline id of this attempt (e.g. bixby-eval-full) */
+  pipeline_id: string;
+  /** pipeline-id path of the failing leaf, e.g. "response-judge/policy-guard/pii_scan" */
+  failed_path: string | null;
+  /** node-id path of the failing leaf, e.g. "response_judge/safety_check/pii_scan" */
+  failed_node_path: string | null;
+  failed_component: string | null;
+  /** PipelineJob id (root or child) where the failure originated */
+  failed_job_id: string | null;
+  /** root job id + every child job id of this attempt (depth-first) */
+  job_ids: string[];
 }
 
 /** GET /api/v1/workflows/[id] (full document). */
@@ -388,7 +410,11 @@ export interface Workflow {
   language: LangCode;
   status: WorkflowStatus;
   stage: StageId;
+  /** root pipeline from the registry (src/config/domain.ts), e.g. bixby-eval-full */
+  pipeline_id: string;
   pipeline_version: PipelineVersion;
+  /** model under test, e.g. bixby-nlu-2026.10 (independent of pipeline_version) */
+  model_version: string;
   replay_cycle: number;
   replay_of: string | null;
   replayed_by: string | null;
@@ -413,9 +439,14 @@ export interface Workflow {
   totalMs: number | null;
   attempt: number;
   attempts: Attempt[];
-  /** DAG of the latest attempt */
+  /** LEGACY six-phase DAG of the latest attempt */
   dag: DagNode[];
+  /** LEGACY six-phase id of the running/failed root node */
   current_node: ComponentId | null;
+  /** node-id path of the deepest running (or failed) leaf, e.g. "nlu_eval/slot_fill" */
+  current_node_path: string | null;
+  /** job id (root or child) that owns current_node_path */
+  current_job_id: string | null;
   progress: { processed: number; total: number; pct: number };
   reservation_id: string | null;
   workflow_execution_id: string | null;
@@ -435,7 +466,9 @@ export interface WorkflowSummary {
   language: LangCode;
   status: WorkflowStatus;
   stage: StageId;
+  pipeline_id: string;
   pipeline_version: PipelineVersion;
+  model_version: string;
   priority: number;
   event_type: Workflow["event_type"];
   replay_cycle: number;
@@ -449,6 +482,7 @@ export interface WorkflowSummary {
   attemptsCount: number;
   retries: number;
   current_node: ComponentId | null;
+  current_node_path: string | null;
   progress: Workflow["progress"];
   error: WorkflowError | null;
   lastErrorCode: string | null;
@@ -492,7 +526,16 @@ export interface WorkflowEvent {
   batch_id: string | null;
   language: LangCode | null;
   attempt: number | null;
+  /** job that emitted the event (child job id for sub-pipeline components) */
   pipeline_job_id: string | null;
+  /** root PipelineJob of the attempt ({workflow_id}-cycle-{c}-attempt-{a}) */
+  root_pipeline_job_id: string | null;
+  /** pipeline id of the emitting job */
+  pipeline_id: string | null;
+  /** leaf component id for TASK_* events, else null */
+  component: string | null;
+  /** node-id path inside the root job, e.g. "response_judge/safety_check/pii_scan" */
+  node_path: string | null;
   correlation_id: string | null;
   trace_id: string | null;
   payload: Record<string, unknown>;
@@ -508,7 +551,11 @@ export interface LogEntry {
   component: string;
   event_type: string | null;
   workflow_id: string | null;
+  /** job that emitted the log (child job id for sub-pipeline components) */
   pipeline_job_id: string | null;
+  root_pipeline_job_id: string | null;
+  pipeline_id: string | null;
+  node_path: string | null;
   execution_id: string | null;
   language: LangCode | null;
   attempt: number | null;
@@ -579,8 +626,14 @@ export interface DeadLetter {
   error_code: string;
   failure_reason: string;
   failed_node: ComponentId | null;
+  /** pipeline-id path of the failing leaf (e.g. "response-judge/policy-guard/pii_scan") */
+  failed_path: string | null;
+  failed_component: string | null;
+  failed_job_id: string | null;
   attempts: number;
+  pipeline_id: string;
   pipeline_version: PipelineVersion;
+  model_version: string;
   input_uri: string;
   utterance_count: number;
   last_execution_id: string;
@@ -717,7 +770,8 @@ export interface GlobalCapacityPatch {
 }
 
 // ─────────────────────────────────────────────── overview ──
-export interface Overview {
+/** Live KPI block (always "today" in KST + live gauges). Carried by SSE `tick.kpis`. */
+export interface OverviewKpis {
   at: EpochMs;
   running: number;
   pending: number;
@@ -735,10 +789,48 @@ export interface Overview {
   avgWaitMs: number;
   utterancesEvaluatedToday: number;
   utterancePassRateToday: number | null;
-  statusDistribution: Record<WorkflowStatus, number>;
   errorDistribution7d: Record<FailureCategory, number>;
   openAlerts: number;
+}
+
+/** KPIs computed over the requested range (GET /overview?range=…). */
+export interface RangeKpis {
+  /** workflows whose lifetime overlaps the range */
+  workflows: number;
+  created: number;
+  completed: number;
+  succeeded: number;
+  /** DEAD_LETTERED + TIMED_OUT completed in range */
+  failed: number;
+  deadLettered: number;
+  timedOut: number;
+  cancelled: number;
+  successRate: number | null;
+  retries: number;
+  /** share of workflows created in range with ≥2 attempts */
+  retryRate: number | null;
+  avgProcessingMs: number;
+  p95ProcessingMs: number;
+  avgWaitMs: number;
+  utterancesEvaluated: number;
+  utterancePassRate: number | null;
+  /** attempt-level failures (completed in range) by category */
+  errorDistribution: Record<FailureCategory, number>;
+  /** current status of workflows overlapping the range */
+  statusDistribution: Record<WorkflowStatus, number>;
+  byLanguage: Partial<Record<LangCode, { created: number; succeeded: number; failed: number; successRate: number | null }>>;
+  byPipeline: Record<string, { runs: number; succeeded: number; failed: number; running: number; successRate: number | null }>;
+  dlqCreated: number;
+  alertsOpened: number;
+}
+
+/** GET /api/v1/overview — legacy "today" KPIs + live state + ranged KPIs. */
+export interface Overview extends OverviewKpis {
+  /** LIVE status distribution of the whole registry (not ranged) */
+  statusDistribution: Record<WorkflowStatus, number>;
   capacity: CapacitySnapshot;
+  range: ResolvedRange;
+  inRange: RangeKpis;
 }
 
 // ─────────────────────────────────────────────── metrics / analytics ──
@@ -798,11 +890,14 @@ export interface DurationStat {
   n: number;
 }
 export interface ComponentDuration extends DurationStat {
-  component: ComponentId;
+  /** leaf component id from the registry (preprocess, intent_classify, llm_judge, pii_scan, …) */
+  component: string;
   label: string;
   labelKo: string;
   byLanguage: Partial<Record<LangCode, DurationStat>>;
   byVersion: Record<PipelineVersion, DurationStat>;
+  /** by root pipeline id */
+  byPipeline?: Record<string, DurationStat>;
 }
 
 export interface RateStat {
@@ -843,9 +938,11 @@ export interface LanguageSummary {
   deadLettered: number;
   avgDurationSec: number;
   p95DurationSec: number;
+  /** utterances evaluated in range (legacy name) */
   utterancesToday: number;
   passRateToday: number | null;
   capacity: LanguageCapacity;
+  /** pipelines completed in range per hourly metrics (legacy name) */
   throughput7d: number;
 }
 
@@ -859,6 +956,7 @@ export interface ThroughputSeries {
   total: number[];
   queueDepth?: Record<LangCode, number[]>;
   active?: Record<LangCode, number[]>;
+  range?: ResolvedRange;
 }
 
 /** GET /api/v1/analytics/quality (success & retry rates + durations, hourly) */
@@ -868,6 +966,7 @@ export interface QualitySeries {
   retryRate: number[];
   avgDurationSec: number[];
   p95DurationSec: number[];
+  range?: ResolvedRange;
 }
 
 /** GET /api/v1/analytics/errors */
@@ -875,14 +974,17 @@ export interface ErrorAnalytics {
   top: ErrorCategoryCount[];
   hourly: { ts: EpochMs[]; byCategory: Record<FailureCategory, number[]> };
   /** attempt-level error codes from the workflow registry, most frequent first */
-  topErrorCodes: { code: string; category: FailureCategory; count: number; lastAt: EpochMs }[];
+  topErrorCodes: { code: string; category: FailureCategory; count: number; lastAt: EpochMs; paths?: Record<string, number> }[];
+  range?: ResolvedRange;
 }
 
 /** GET /api/v1/analytics/cost */
 export interface CostAnalytics {
   daily: { date: string; partial: boolean; costUsd: DailyMetrics["costUsd"] }[];
+  /** total over the days intersecting the range (legacy name) */
   total7d: number;
   byComponent7d: Record<Exclude<keyof DailyMetrics["costUsd"], "total">, number>;
+  range?: ResolvedRange;
 }
 
 /** GET /api/v1/analytics/summary — everything S7 needs in one call */
@@ -894,6 +996,8 @@ export interface AnalyticsSummary {
   componentDurations: ComponentDuration[];
   versionComparison: VersionComparison[];
   languageSummary: LanguageSummary[];
+  range?: ResolvedRange;
+  pipelineSummary?: PipelineSummary[];
 }
 
 // ─────────────────────────────────────────────── alerts / audit ──
@@ -966,6 +1070,7 @@ export interface ResultRow {
   latency_ms: number;
   device_type: string;
   model_version: string;
+  pipeline_id: string;
   pipeline_version: PipelineVersion;
   eval_timestamp: string;
   eval_ts: EpochMs;
@@ -1000,6 +1105,8 @@ export interface ResultsAggregates extends ResultsSummary {
    * `edgesMs` are lower bounds of each bucket; the last bucket is open-ended (8s+ = TIMEOUT).
    */
   latencyHistogramFine?: { edgesMs: number[]; counts: number[] };
+  byModelVersion: Record<string, RateStat>;
+  byPipeline: Record<string, RateStat>;
 }
 
 /** GET /api/v1/results */
@@ -1010,6 +1117,14 @@ export interface ResultsPage {
   pageSize: number;
   aggregates: ResultsAggregates;
   file: ResultFile;
+  range: ResolvedRange;
+  /** facet counts over rows in range BEFORE the facet's own filter is applied is NOT done — counts are over the filtered set */
+  facets: {
+    model_version: Record<string, number>;
+    pipeline_id: Record<string, number>;
+    version: Record<string, number>;
+    language: Partial<Record<LangCode, number>>;
+  };
 }
 
 export interface ResultFile {
@@ -1042,6 +1157,7 @@ export interface ResultDetail {
 /** GET /api/v1/stages — one row per stage */
 export interface StageSummary {
   stage: Stage;
+  range?: ResolvedRange;
   count: number;
   counts: Partial<Record<WorkflowStatus, number>>;
   byLanguage: Partial<Record<LangCode, number>>;
@@ -1055,8 +1171,11 @@ export interface StageDetail {
   gcsObjects: GcsObject[];
   events: WorkflowEvent[];
   logs: LogEntry[];
-  /** stage-specific KPI bag (see FOUNDATION.md for keys per stage) */
+  /** stage-specific KPI bag (see docs/data-contract.md; "…Today" keys are computed over the range) */
   metrics: Record<string, unknown>;
+  /** stage-relevant objects for the workflows in this stage within range (filtered by ?q=) */
+  objects: FileSearchHit[];
+  range: ResolvedRange;
 }
 
 // ─────────────────────────────────────────────── simulator / stream ──
@@ -1098,7 +1217,7 @@ export interface TickSnapshot {
   running: boolean;
   counts: Record<WorkflowStatus, number>;
   stageCounts: Record<StageId, number>;
-  kpis: Omit<Overview, "capacity" | "statusDistribution">;
+  kpis: OverviewKpis;
   capacity: CapacitySnapshot;
   active: ActiveWorkflowPos[];
   /** number of workflows in the registry */
@@ -1127,6 +1246,8 @@ export interface StreamEventMap {
   audit: AuditEntry;
   dlq: DeadLetter;
   sim: SimState;
+  /** root or child PipelineJob status change */
+  job: PipelineJobTransition;
   hello: { sim: SimState; serverTime: number };
 }
 export type StreamEventType = keyof StreamEventMap;
@@ -1175,6 +1296,12 @@ export interface MetaCatalog {
   devices: string[];
   resultColumns: ResultColumn[];
   operators: Operator[];
+  /** available data window: earliest seeded data .. virtual now */
+  dataWindow: { earliest: EpochMs; now: EpochMs; earliestIso: string; nowIso: string; historyDays: number };
+  rangePresets: RangePresetInfo[];
+  pipelines: PipelineDefinition[];
+  models: ModelVersionInfo[];
+  components: Record<string, ComponentSpec>;
 }
 
 // ─────────────────────────────────────────────── API response shapes (endpoint-specific) ──
@@ -1185,7 +1312,10 @@ export interface WorkflowListResponse extends Paginated<WorkflowSummary> {
     status: Partial<Record<WorkflowStatus, number>>;
     language: Partial<Record<LangCode, number>>;
     version: Record<string, number>;
+    pipeline_id: Record<string, number>;
+    model_version: Record<string, number>;
   };
+  range: ResolvedRange;
 }
 
 /** GET /api/v1/workflows/[id]/attempts */
@@ -1205,6 +1335,8 @@ export interface LogPage {
   /** distinct components / services in the (unfiltered) workflow log, for filter chips */
   components: string[];
   services: string[];
+  /** present on GET /logs (ranged); absent on per-workflow logs */
+  range?: ResolvedRange;
 }
 
 /** GET /api/v1/dead-letters */
@@ -1214,6 +1346,9 @@ export interface DeadLetterList extends Paginated<DeadLetter> {
     category: Partial<Record<FailureCategory, number>>;
     language: Partial<Record<LangCode, number>>;
   };
+  range: ResolvedRange;
+  /** DLQ items NOT in range that still need attention */
+  outsideRange: { pendingReview: number; approved: number; replaying: number };
 }
 
 /** POST /api/v1/dead-letters/replay-batch */
@@ -1265,4 +1400,398 @@ export interface ConfigUpdateResult {
 export interface MeInfo {
   operator: Operator;
   permissions: Record<string, boolean>;
+}
+
+// ═══════════════════════════════════════════════ time range (see src/lib/time-range.ts) ══
+export type RangePreset = "today" | "yesterday" | "1h" | "6h" | "24h" | "7d" | "30d";
+/** A range request. `last` = any "last N hours/days" (e.g. legacy 12h / 48h). */
+export type RangeSpec =
+  | { kind: "preset"; preset: RangePreset }
+  | { kind: "last"; amount: number; unit: "h" | "d" }
+  | { kind: "custom"; from: EpochMs; to: EpochMs };
+/** Resolved against the VIRTUAL clock; inclusive bounds (from ≤ ts ≤ to). */
+export interface ResolvedRange {
+  from: EpochMs;
+  to: EpochMs;
+  /** Korean label, e.g. "오늘 (11월 12일)", "최근 7일", "2026-11-10 09:00 ~ 2026-11-12 14:30" */
+  label: string;
+  /** "today" | … | "custom" | "12h" (last-N) */
+  preset: string;
+  fromIso: string;
+  toIso: string;
+}
+export interface RangePresetInfo {
+  id: RangePreset;
+  label: string;
+  labelEn: string;
+}
+/** Envelope used by every ranged endpoint whose payload is a list. */
+export interface RangedList<T> {
+  items: T[];
+  total: number;
+  range: ResolvedRange;
+}
+
+// ═══════════════════════════════════════════════ domain config (src/config/domain.ts) ══
+export interface ComponentOutputSpec {
+  name: string;
+  /** file name under pipeline_root/{jobId}/{nodeId}/ */
+  file: string;
+  type: string;
+  /** size model: bytesPerUtterance × n + fixedBytes */
+  bytesPerUtterance?: number;
+  fixedBytes?: number;
+}
+export type ComponentMetric = "none" | "intent" | "slot" | "response" | "latency" | "asr" | "safety" | "pass";
+export interface ComponentSpec {
+  id: string;
+  label: string;
+  labelKo: string;
+  /** event name stem: TASK_<ev>_STARTED / _COMPLETED / _FAILED */
+  ev: string;
+  /** relative nominal duration (critical-path weight) */
+  weight: number;
+  machineType: string;
+  cpu: number;
+  gpu: { type: string; count: number } | null;
+  memGb: number;
+  image: string;
+  description: string;
+  /** which utterance rate drives pass/fail progress counters */
+  metric: ComponentMetric;
+  outputs: ComponentOutputSpec[];
+  /** true → writes results.csv to the results bucket + BigQuery (instead of artifacts) */
+  persists?: boolean;
+}
+export type PipelineNodeDef =
+  | { id: string; kind: "component"; component: string; deps: string[]; label?: string; legacyPhase?: ComponentId }
+  | { id: string; kind: "subpipeline"; ref: { pipeline: string; version: string }; deps: string[]; label?: string; legacyPhase?: ComponentId };
+export interface PipelineVersionDef {
+  version: string;
+  status: "STABLE" | "CANARY" | "DEPRECATED";
+  /** ISO-8601 */
+  releasedAt: string;
+  notes: string;
+  nodes: PipelineNodeDef[];
+}
+export interface PipelineDef {
+  id: string;
+  label: string;
+  labelKo: string;
+  /** root = can be scheduled as a workflow; sub = only called from other pipelines */
+  kind: "root" | "sub";
+  description: string;
+  /** relative pipeline runtime factor vs bixby-eval-full (root only) */
+  durationFactor?: number;
+  /** assignment weight for new batches (root only) */
+  mixWeight?: number;
+  /** languages allowed (root only; default: all) */
+  languages?: LangCode[];
+  versions: PipelineVersionDef[];
+}
+export interface ModelVersionInfo {
+  id: string;
+  label: string;
+  status: "PRODUCTION" | "CANDIDATE" | "RETIRED";
+  releasedAt: string;
+  /** pass-probability adjustment */
+  passAdj: number;
+  /** share of new batches once released (relative weights among released models) */
+  weight: number;
+  notes: string;
+}
+export interface DomainLanguage extends LanguageConfig {
+  /** base PASS probability */
+  basePass: number;
+  /** avg JSONL bytes per utterance */
+  bytesPerUtterance: number;
+  /** nominal pipeline minutes for a full batch */
+  baseMinutes: number;
+  /** peak pipelines/hour (metrics generator) */
+  peakPerHour: number;
+  costPerRunUsd: number;
+  /** relative share of new batches */
+  mixWeight: number;
+}
+export interface PipelineReleaseInfo {
+  version: string;
+  status: "DEPRECATED" | "STABLE" | "CANARY";
+  trafficPct: number;
+  releasedAt: string;
+  imageTag: string;
+  judgeModel: string;
+  modelUnderTest: string;
+  notes: string;
+  /** pass-probability adjustment of this pipeline release */
+  passAdj: number;
+  costPerRunUsd: number;
+}
+export interface DomainConfig {
+  id: string;
+  name: string;
+  project: { id: string; number: string; region: string; environment: string; console: string };
+  timezone: string;
+  /** seed "now" of the demo scenario (ISO, KST); the day-loop re-anchors to HH:MM of the next day */
+  baseNow: string;
+  /** days of seeded history (30d preset) */
+  historyDays: number;
+  buckets: { input: string; artifacts: string; results: string };
+  bigquery: { dataset: string; resultsTable: string; eventsTable: string };
+  languages: DomainLanguage[];
+  capacity: {
+    global: { maxConcurrent: number; maxStartsPerMinute: number };
+    /** Terraform-declared defaults (flattened keys) → config drift */
+    terraformDefaults: Record<string, unknown>;
+    gpuQuota: number;
+  };
+  stages: Stage[];
+  stageEdges: StageEdge[];
+  capsules: Capsule[];
+  devices: { id: string; weight: number; adj: number; lat: [number, number] }[];
+  models: ModelVersionInfo[];
+  /** release train shared by root pipelines (v1.0 / v1.1 / v1.2-rc) */
+  releases: PipelineReleaseInfo[];
+  defaultRelease: string;
+  components: Record<string, ComponentSpec>;
+  pipelines: PipelineDef[];
+}
+
+// ═══════════════════════════════════════════════ pipelines / jobs ══
+export type JobStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | "SKIPPED";
+export interface PipelineEdge {
+  from: string;
+  to: string;
+}
+/** A registry definition with its DAG (GET /pipelines, /meta). */
+export interface PipelineDefinition {
+  id: string;
+  label: string;
+  labelKo: string;
+  kind: "root" | "sub";
+  description: string;
+  versions: {
+    version: string;
+    status: string;
+    releasedAt: EpochMs;
+    notes: string;
+    nodes: (PipelineNodeDef & { label: string; labelKo: string })[];
+    edges: PipelineEdge[];
+    /** distinct leaf component ids reachable (incl. nested sub-pipelines) */
+    leafComponents: string[];
+    /** sub-pipeline references "id@version" (direct children) */
+    subpipelines: string[];
+    templateUri: string;
+  }[];
+  /** root pipelines that call this one (sub only) */
+  usedBy: string[];
+}
+export interface DurationStats {
+  n: number;
+  avgMs: number;
+  p50Ms: number;
+  p95Ms: number;
+}
+/** GET /pipelines row */
+export interface PipelineSummary {
+  id: string;
+  label: string;
+  labelKo: string;
+  kind: "root" | "sub";
+  versions: string[];
+  latestVersion: string;
+  /** runs (root jobs, or child-job invocations for sub pipelines) overlapping the range */
+  runs: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  successRate: number | null;
+  avgDurationMs: number;
+  p95DurationMs: number;
+  byVersion: Record<string, { runs: number; succeeded: number; failed: number; successRate: number | null }>;
+  lastRunAt: EpochMs | null;
+}
+export interface NodeAggregate {
+  node_id: string;
+  kind: "component" | "subpipeline";
+  component: string | null;
+  ref: { pipeline_id: string; version: string } | null;
+  label: string;
+  labelKo: string;
+  deps: string[];
+  counts: Record<JobStatus, number>;
+  duration: DurationStats;
+  topError: { code: string; count: number; path: string | null } | null;
+}
+/** GET /pipelines/[id]?version= */
+export interface PipelineDetail {
+  definition: PipelineDefinition;
+  version: string;
+  nodes: PipelineDefinition["versions"][number]["nodes"];
+  edges: PipelineEdge[];
+  nodeStats: NodeAggregate[];
+  summary: PipelineSummary;
+  recentRuns: PipelineRun[];
+  range: ResolvedRange;
+}
+/** A run of a pipeline = one job (root job for root pipelines; child job for sub pipelines). */
+export interface PipelineRun {
+  job_id: string;
+  root_job_id: string;
+  parent_job_id: string | null;
+  workflow_id: string;
+  attempt: number;
+  language: LangCode;
+  pipeline_id: string;
+  pipeline_version: string;
+  model_version: string;
+  status: JobStatus;
+  start_at: EpochMs | null;
+  end_at: EpochMs | null;
+  duration_ms: number | null;
+  error: { code: string; category: FailureCategory; path: string | null; message: string } | null;
+}
+export interface PipelineRunsPage extends Paginated<PipelineRun> {
+  range: ResolvedRange;
+  facets: { status: Partial<Record<JobStatus, number>>; version: Record<string, number>; language: Partial<Record<LangCode, number>> };
+}
+/** Node of a concrete PipelineJob DAG. */
+export interface JobNode {
+  id: string;
+  kind: "component" | "subpipeline";
+  /** leaf component id (component nodes) */
+  component: string | null;
+  /** referenced definition (subpipeline nodes) */
+  ref: { pipeline_id: string; version: string } | null;
+  /** child job id = {thisJobId}.{node id} (subpipeline nodes) */
+  child_job_id: string | null;
+  /** node-id path inside the ROOT job */
+  node_path: string;
+  label: string;
+  labelKo: string;
+  deps: string[];
+  status: JobStatus;
+  start_at: EpochMs | null;
+  end_at: EpochMs | null;
+  duration_ms: number | null;
+  task_id: string;
+  progress: { processed: number; total: number; pct: number; pass: number; fail: number };
+  resources: DagNode["resources"];
+  image: string | null;
+  inputs: Artifact[];
+  outputs: Artifact[];
+  error: { code: string; category: FailureCategory; message: string; path: string | null } | null;
+  description: string;
+  legacy_phase: ComponentId | null;
+}
+export interface PipelineJobRef {
+  job_id: string;
+  pipeline_id: string;
+  pipeline_version: string;
+  node_id: string;
+  status: JobStatus;
+}
+/** GET /pipeline-jobs/[jobId] (also nodes of the run tree) */
+export interface PipelineJob {
+  job_id: string;
+  root_job_id: string;
+  parent_job_id: string | null;
+  /** node id in the parent job (null for root) */
+  parent_node_id: string | null;
+  depth: number;
+  workflow_id: string;
+  attempt: number;
+  language: LangCode;
+  pipeline_id: string;
+  pipeline_version: string;
+  model_version: string;
+  vertex_resource: string;
+  status: JobStatus;
+  start_at: EpochMs | null;
+  end_at: EpochMs | null;
+  duration_ms: number | null;
+  progress: { processed: number; total: number; pct: number };
+  nodes: JobNode[];
+  edges: PipelineEdge[];
+  children: PipelineJobRef[];
+  error: JobNode["error"];
+}
+export interface PipelineJobTree extends Omit<PipelineJob, "children"> {
+  children: PipelineJobTree[];
+}
+/** GET /pipeline-jobs/[jobId] */
+export interface PipelineJobDetail extends PipelineJob {
+  /** ready-made filters for GET /logs and GET /events scoped to this job */
+  filters: { logs: { pipeline_job_id: string; job_scope: "self" | "tree" }; events: { pipeline_job_id: string; job_scope: "self" | "tree" } };
+  recentLogs: LogEntry[];
+  recentEvents: WorkflowEvent[];
+  ancestors: PipelineJobRef[];
+}
+/** GET /workflows/[id]/pipeline-runs */
+export interface WorkflowPipelineRuns {
+  workflow_id: string;
+  pipeline_id: string;
+  pipeline_version: string;
+  attempts: { attempt: number; status: AttemptStatus; root: PipelineJobTree }[];
+}
+/** SSE `job` */
+export interface PipelineJobTransition {
+  job_id: string;
+  root_job_id: string;
+  parent_job_id: string | null;
+  workflow_id: string;
+  language: LangCode;
+  pipeline_id: string;
+  pipeline_version: string;
+  node_path: string | null;
+  depth: number;
+  from: JobStatus | null;
+  to: JobStatus;
+  at: EpochMs;
+  error_code: string | null;
+  error_path: string | null;
+}
+
+// ═══════════════════════════════════════════════ file search ══
+export type FileHitKind = "gcs_object" | "pubsub_message" | "firestore_doc" | "reservation" | "execution" | "dlq_entry";
+export interface FileSearchHit {
+  stage: StageId;
+  kind: FileHitKind;
+  bucket: string;
+  /** object name (relative to bucket) */
+  object: string;
+  uri: string;
+  generation: string;
+  size: number;
+  updated: EpochMs;
+  workflow_id: string | null;
+  batch_id: string | null;
+  language: LangCode | null;
+  pipeline_job_id: string | null;
+  /** current workflow status (null for objects without a workflow) */
+  current_status: WorkflowStatus | null;
+  /** non-GCS reference (Pub/Sub message id, Firestore doc path, reservation id, execution id, DLQ id) */
+  ref: string | null;
+  match_ranges: { field: "object" | "workflow_id" | "batch_id"; start: number; end: number }[];
+}
+export interface FileSearchResult {
+  q: string;
+  items: FileSearchHit[];
+  total: number;
+  limit: number;
+  byStage: Partial<Record<StageId, number>>;
+  range: ResolvedRange;
+}
+
+// ═══════════════════════════════════════════════ capacity history ══
+export interface CapacityHistory {
+  granularity: "5m" | "1h" | "6h";
+  ts: EpochMs[];
+  active: Record<LangCode, number[]>;
+  queue: Record<LangCode, number[]>;
+  /** current configured limit (constant series) */
+  limit: Record<LangCode, number>;
+  globalActive: number[];
+  globalLimit: number;
+  range: ResolvedRange;
 }

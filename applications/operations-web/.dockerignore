@@ -1,0 +1,23 @@
+# keep the build context small and secret-free
+node_modules
+.next
+.next-*
+out
+build
+coverage
+test-results
+playwright-report
+e2e
+*.tsbuildinfo
+next-env.d.ts
+.git
+.gitignore
+.DS_Store
+npm-debug.log*
+.env
+.env.*
+!.env.example
+Dockerfile
+.dockerignore
+docs
+*.md

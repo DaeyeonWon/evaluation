@@ -6,10 +6,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const KEEPALIVE_MS = 15_000;
-const ALL: StreamEventType[] = ["tick", "transition", "event", "log", "alert", "audit", "dlq", "sim"];
+const ALL: StreamEventType[] = ["tick", "transition", "event", "log", "alert", "audit", "dlq", "sim", "job"];
 
 /**
- * GET /api/v1/stream?types=tick,transition,event,log,alert,audit,dlq,sim
+ * GET /api/v1/stream?types=tick,transition,event,log,alert,audit,dlq,sim,job
  *
  * Server-Sent Events. Each message is `event: <type>\ndata: <json>\n\n` where the payload type is
  * StreamEventMap[type] (src/lib/types.ts). On connect the server sends `hello` (sim state) and an

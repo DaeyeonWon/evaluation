@@ -1,10 +1,18 @@
 /**
  * Route-handler helpers: JSON responses, Korean 4xx errors, query parsing, operator/RBAC,
  * idempotency. Server-only.
+ *
+ * Identity: the acting operator comes from the SERVER-SIDE session (src/server/auth — signed cookie in
+ * mock mode, IAP / trusted OIDC header otherwise). The legacy client `x-operator` header is ignored.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { NextRequest } from "next/server";
-import { DEFAULT_OPERATOR_ID, ROLE_PERMISSIONS } from "@/lib/catalog";
-import type { ApiErrorBody, Operator } from "@/lib/types";
+import { ROLE_PERMISSIONS } from "@/lib/catalog";
+import type { ApiErrorBody, Operator, Role } from "@/lib/types";
+import { BUILTIN_PERMISSIONS, canonicalPermission, hasPermission, legacyRoleOf } from "@/config/schema";
+import { sessionFromRequest } from "./auth/core";
+import type { Session } from "./auth/types";
+import { OPERATIONAL_PERMISSIONS } from "./auth/policy";
 import { getRuntime } from "./mock/runtime";
 
 export class ApiError extends Error {
@@ -22,6 +30,7 @@ export const badRequest = (message: string, details?: unknown) => new ApiError(4
 export const notFound = (message: string) => new ApiError(404, "NOT_FOUND", message);
 export const conflict = (message: string, details?: unknown) => new ApiError(409, "CONFLICT", message, details);
 export const forbidden = (message: string) => new ApiError(403, "FORBIDDEN", message);
+export const unauthorized = (message = "로그인이 필요합니다.") => new ApiError(401, "UNAUTHENTICATED", message);
 
 const NO_STORE = { "cache-control": "no-store" };
 
@@ -36,12 +45,15 @@ export function errorResponse(e: ApiError): Response {
 
 type Ctx<P> = { params: Promise<P> };
 
+/** Current request for helpers that only receive an Operator (see requirePermission). */
+const requestScope = new AsyncLocalStorage<{ req: NextRequest }>();
+
 /** Wrap a handler: marks simulator activity, converts ApiError → JSON, hides internals on 500. */
 export function handle<P = Record<string, never>>(fn: (req: NextRequest, ctx: Ctx<P>) => Promise<Response> | Response) {
   return async (req: NextRequest, ctx: Ctx<P>): Promise<Response> => {
     try {
       getRuntime();
-      return await fn(req, ctx);
+      return await requestScope.run({ req }, () => fn(req, ctx));
     } catch (e) {
       if (e instanceof ApiError) return errorResponse(e);
       console.error("[api]", req.method, req.nextUrl.pathname, e);
@@ -168,39 +180,82 @@ export const V = {
 };
 
 // ───────────────────────────────────────── operator / RBAC ──
+/** Session behind each Operator object handed out by resolveOperator (for requirePermission). */
+const sessionOf = new WeakMap<Operator, Session>();
+
+const legacyRole = (s: Session): Role => legacyRoleOf(s.permissions);
+
+/** Session for this request, or 401. */
+export function requireSession(req: NextRequest): Session {
+  const s = sessionFromRequest(req);
+  if (!s) throw unauthorized();
+  return s;
+}
+
 /**
- * Resolve the acting operator from the `x-operator` header (operator id, name or email;
- * may be URI-encoded because browsers cannot send raw Korean header values).
- * Defaults to 김서연 (op-kim-sy, Admin).
+ * Resolve the acting operator from the server-side session (401 if none). Mock users map to the
+ * engine's own operator; IAP/OIDC users become a synthetic operator (id = email). Either way the
+ * operator is registered in the engine's operator index so audit entries record the session user's
+ * name and role (not "System").
  */
 export function resolveOperator(req: NextRequest): Operator {
+  const s = requireSession(req);
   const e = getRuntime().engine;
-  const raw = req.headers.get("x-operator");
-  if (!raw) return e._internal.OP[DEFAULT_OPERATOR_ID];
-  let v = raw.trim();
-  try {
-    v = decodeURIComponent(v);
-  } catch {
-    /* keep raw */
-  }
-  const op = e.operators.find((o) => o.id === v || o.name === v || o.email === v);
-  if (!op) throw badRequest(`알 수 없는 운영자입니다: ${v}`, { header: "x-operator" });
+  const role = legacyRole(s);
+  const base = e.operators.find((o) => o.id === s.user.id) ?? e.operators.find((o) => o.email.toLowerCase() === s.user.email.toLowerCase());
+  const op: Operator = base
+    ? { ...base, role }
+    : { id: s.user.id, name: s.user.name, email: s.user.email, role, team: s.user.team ?? "", lastActiveAt: e.now() };
+  const known = e._internal.OP[op.id];
+  if (!known || known.role !== op.role || known.name !== op.name) e._internal.OP[op.id] = op;
+  sessionOf.set(op, s);
   return op;
 }
 
+function currentPath(): string {
+  return requestScope.getStore()?.req.nextUrl.pathname ?? "";
+}
+
+/**
+ * Throws 403 unless the operator holds `key`. Accepts console permissions (`capacity:write`, …) and
+ * legacy catalog keys (`config.write`, `cancel`, … — mapped via LEGACY_PERMISSION_ALIASES). On the
+ * capacity endpoints the legacy `config.write` key means `capacity:write`.
+ */
 export function requirePermission(op: Operator, key: string): void {
-  const p = ROLE_PERMISSIONS.find((r) => r.key === key);
-  if (!p) return;
-  if (!p[op.role]) throw forbidden(`'${p.permission}' 권한이 없습니다 (${op.name} · ${op.role}).`);
+  let perm = canonicalPermission(key);
+  if (key === "config.write" && /^\/api\/v1\/(languages\/[^/]+\/capacity|capacity\/global)$/.test(currentPath())) perm = "capacity:write";
+  const perms = permissionsOfOperator(op);
+  if (hasPermission(perms, perm)) return;
+  const label = ROLE_PERMISSIONS.find((r) => r.key === key)?.permission ?? perm;
+  throw forbidden(`'${label}' 권한이 없습니다 (${op.name} · ${op.role}). 필요 권한: ${perm}`);
 }
 
-/** Alert ack/resolve and other operational actions without a catalog permission key: Operator or Admin. */
+/** Alert ack/resolve and other operational actions without a catalog permission key: any operational write permission. */
 export function requireOperatorRole(op: Operator, what: string): void {
-  if (op.role === "Viewer") throw forbidden(`'${what}' 권한이 없습니다 (${op.name} · ${op.role}). Operator 이상 필요합니다.`);
+  const perms = permissionsOfOperator(op);
+  if (OPERATIONAL_PERMISSIONS.some((p) => hasPermission(perms, p))) return;
+  throw forbidden(`'${what}' 권한이 없습니다 (${op.name} · ${op.role}). Operator 이상 필요합니다.`);
 }
 
+function permissionsOfOperator(op: Operator): string[] {
+  const s = sessionOf.get(op);
+  if (s) return s.permissions;
+  // Operator object not from resolveOperator (should not happen in handlers): derive from legacy role.
+  if (op.role === "Admin") return [...BUILTIN_PERMISSIONS];
+  if (op.role === "Operator") return ["view", "capacity:write", "dlq:replay", "workflow:cancel"];
+  return ["view"];
+}
+
+/**
+ * Permission map for MeInfo: legacy catalog keys (read, cancel, config.write, …) as used by the UI,
+ * plus every console permission key (view, capacity:write, hermes:access, …).
+ */
 export function permissionsOf(op: Operator): Record<string, boolean> {
-  return Object.fromEntries(ROLE_PERMISSIONS.map((p) => [p.key, !!p[op.role]]));
+  const perms = permissionsOfOperator(op);
+  const out: Record<string, boolean> = Object.fromEntries(ROLE_PERMISSIONS.map((p) => [p.key, hasPermission(perms, p.key)]));
+  for (const p of BUILTIN_PERMISSIONS) out[p] = hasPermission(perms, p);
+  for (const p of perms) out[p] = true;
+  return out;
 }
 
 // ───────────────────────────────────────── idempotency ──

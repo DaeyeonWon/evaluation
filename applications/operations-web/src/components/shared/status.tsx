@@ -1,3 +1,4 @@
+"use client";
 /**
  * Standardized status presentation (plan §6.4 "Visual Consistency").
  * Colors come ONLY from CSS tokens --st-<tone> (globals.css; light/dark aware), so each variant
@@ -10,24 +11,25 @@
  *   <TonePill tone="retry" icon="rotate-ccw">Backoff 60s</TonePill>
  *   <SeverityBadge severity="ERROR" />   <LangBadge lang="ko" />   <LangDot lang="en" />
  *
+ * Labels are localized through the i18n `status` namespace (useLocale(); works without a provider →
+ * "ko"). Policy: status names are English system terms in every locale ("Running"); the tooltip adds
+ * the localized explanation ("Running · 실행 중 · Vertex AI Pipeline이 실행되고 있습니다").
+ * Pure helpers (statusInfo, toneVar, langVar) live in ./status-meta.ts so server code can call them.
+ *
  * Rendered markup: <span class="st-pill" data-tone="running" data-status="RUNNING" style="--tone: var(--st-running)">.
  * Base styles for .st-pill / .st-icon / .lang-badge live in globals.css (minimal; override freely
  * under your [data-variant] scope) — or pass `unstyled` to drop the base class.
  */
 import clsx from "clsx";
 import type { CSSProperties, ReactNode } from "react";
-import {
-  ATTEMPT_STATUS_META,
-  DLQ_STATUS_META,
-  LANGUAGE_BY_CODE,
-  NODE_STATUS_META,
-  SEVERITY_META,
-  STATUS_META,
-} from "@/lib/catalog";
-import type { AttemptStatus, DlqStatus, LangCode, MetaEntry, NodeStatus, Severity, Tone, WorkflowStatus } from "@/lib/types";
+import { SEVERITY_META } from "@/lib/catalog";
+import type { AttemptStatus, DlqStatus, LangCode, NodeStatus, Severity, Tone, WorkflowStatus } from "@/lib/types";
+import { useLocale } from "@/i18n/client";
+import { languageName, statusHelp, statusLabel } from "@/i18n/static";
 import { CatalogIcon } from "./icons";
+import { langVar, statusInfo, toneVar, type StatusKind } from "./status-meta";
 
-export type StatusKind = "workflow" | "node" | "attempt" | "dlq";
+export type { StatusKind } from "./status-meta";
 
 type StatusByKind = {
   workflow: WorkflowStatus;
@@ -36,25 +38,15 @@ type StatusByKind = {
   dlq: DlqStatus;
 };
 
-/** Resolve tone/label/icon for any status kind. */
-export function statusInfo(kind: StatusKind, status: string): MetaEntry & { labelEn?: string } {
-  const table: Record<string, MetaEntry & { labelEn?: string }> =
-    kind === "node" ? NODE_STATUS_META : kind === "attempt" ? ATTEMPT_STATUS_META : kind === "dlq" ? DLQ_STATUS_META : STATUS_META;
-  return table[status] ?? { label: status, tone: "queued", icon: "circle-dashed" };
-}
-
-export const toneVar = (tone: Tone) => `var(--st-${tone})`;
-export const langVar = (lang: LangCode) => `var(--lang-${lang})`;
-
 /** Statuses whose icon should spin (running / dispatching). */
 const SPIN = new Set(["RUNNING", "DISPATCHING", "REPLAYING"]);
 
 export interface StatusPillProps<K extends StatusKind = "workflow"> {
   status: StatusByKind[K];
   kind?: K;
-  /** override the Korean label */
+  /** override the label */
   label?: ReactNode;
-  /** show English label instead (workflow kind only) */
+  /** force the English label regardless of the UI locale */
   english?: boolean;
   showIcon?: boolean;
   /** spin the icon for in-progress statuses (default true; disabled under prefers-reduced-motion by CSS) */
@@ -79,18 +71,19 @@ export function StatusPill<K extends StatusKind = "workflow">({
   style,
   title,
 }: StatusPillProps<K>) {
-  const info = statusInfo(kind ?? "workflow", status);
+  const locale = useLocale();
+  const info = statusInfo(kind ?? "workflow", status, locale);
   return (
     <span
       className={clsx(!unstyled && "st-pill", className)}
       data-tone={info.tone}
       data-status={status}
       data-size={size}
-      title={title ?? (info.labelEn ? `${info.label} · ${info.labelEn}` : info.label)}
+      title={title ?? (info.help ? `${info.label} · ${info.help}` : info.label)}
       style={{ ["--tone" as string]: toneVar(info.tone), ...style }}
     >
       {showIcon && <CatalogIcon name={info.icon} className={clsx("st-icon", spin && SPIN.has(status) && "st-spin")} aria-hidden />}
-      <span className="st-label">{label ?? (english && info.labelEn ? info.labelEn : info.label)}</span>
+      <span className="st-label">{label ?? (english ? info.labelEn : info.label)}</span>
     </span>
   );
 }
@@ -101,12 +94,12 @@ export interface StatusIconProps<K extends StatusKind = "workflow"> {
   size?: number;
   spin?: boolean;
   className?: string;
-  /** accessible label (defaults to the Korean status label) */
+  /** accessible label (defaults to the localized status label) */
   title?: string;
 }
 
 export function StatusIcon<K extends StatusKind = "workflow">({ status, kind, size = 14, spin = true, className, title }: StatusIconProps<K>) {
-  const info = statusInfo(kind ?? "workflow", status);
+  const info = statusInfo(kind ?? "workflow", status, useLocale());
   return (
     <CatalogIcon
       name={info.icon}
@@ -144,16 +137,20 @@ export function TonePill({
 }
 
 export function SeverityBadge({ severity, className, unstyled }: { severity: Severity; className?: string; unstyled?: boolean }) {
-  const m = SEVERITY_META[severity] ?? { label: severity, tone: "queued" as Tone };
+  const locale = useLocale();
+  const tone = SEVERITY_META[severity]?.tone ?? ("queued" as Tone);
+  const label = statusLabel("severity", severity, locale);
+  const help = statusHelp("severity", severity, locale);
   return (
     <span
       className={clsx(!unstyled && "st-pill st-sev", className)}
-      data-tone={m.tone}
+      data-tone={tone}
       data-severity={severity}
       data-size="xs"
-      style={{ ["--tone" as string]: toneVar(m.tone) }}
+      title={help && help !== label ? `${label} · ${help}` : undefined}
+      style={{ ["--tone" as string]: toneVar(tone) }}
     >
-      <span className="st-label">{m.label}</span>
+      <span className="st-label">{label}</span>
     </span>
   );
 }
@@ -176,17 +173,17 @@ export function LangBadge({
   unstyled,
 }: {
   lang: LangCode;
-  /** "code" → KO · "name" → 한국어 · "both" → KO 한국어 */
+  /** "code" → KO · "name" → 한국어 / Korean (UI locale) · "both" → KO 한국어 */
   display?: "code" | "name" | "both";
   className?: string;
   unstyled?: boolean;
 }) {
-  const l = LANGUAGE_BY_CODE[lang];
+  const name = languageName(lang, useLocale());
   return (
-    <span className={clsx(!unstyled && "lang-badge", className)} data-lang={lang} style={{ ["--lang" as string]: langVar(lang) }} title={l?.name}>
+    <span className={clsx(!unstyled && "lang-badge", className)} data-lang={lang} style={{ ["--lang" as string]: langVar(lang) }} title={name}>
       <LangDot lang={lang} />
       {display !== "name" && <span className="lang-code">{lang.toUpperCase()}</span>}
-      {display !== "code" && <span className="lang-name">{l?.name ?? lang}</span>}
+      {display !== "code" && <span className="lang-name">{name}</span>}
     </span>
   );
 }

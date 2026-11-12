@@ -65,7 +65,19 @@ import type {
   WorkflowEvent,
   WorkflowListResponse,
   WorkflowSummary,
+  CapacityHistory,
+  FileSearchResult,
+  PipelineDefinition,
+  PipelineDetail,
+  PipelineJobDetail,
+  PipelineRunsPage,
+  PipelineSummary,
+  RangedList,
+  ResolvedRange,
+  WorkflowPipelineRuns,
 } from "@/lib/types";
+import { serializeRange } from "@/lib/time-range";
+import type { RangeSpec } from "@/lib/time-range";
 import { getOperatorId } from "./operator";
 
 /**
@@ -92,11 +104,18 @@ export class ApiClientError extends Error {
 type QV = string | number | boolean | null | undefined | (string | number)[];
 export type QueryParams = Record<string, QV>;
 
-/** Build "?a=1&b=x,y" — arrays are comma-joined; null/undefined/''/[] are skipped. */
-export function qs(params?: QueryParams): string {
+/**
+ * Build "?a=1&b=x,y" — arrays are comma-joined; null/undefined/''/[] are skipped,
+ * EXCEPT keys listed in `opts.keepEmpty` (e.g. GCS `delimiter=""` = flat listing).
+ */
+export function qs(params?: QueryParams, opts: { keepEmpty?: string[] } = {}): string {
   if (!params) return "";
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
+    if (v === "" && opts.keepEmpty?.includes(k)) {
+      sp.set(k, "");
+      continue;
+    }
     if (v == null || v === "" || (Array.isArray(v) && !v.length)) continue;
     sp.set(k, Array.isArray(v) ? v.join(",") : String(v));
   }
@@ -148,10 +167,26 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
 
 const enc = encodeURIComponent;
 const get = <T>(path: string, params?: QueryParams, signal?: AbortSignal) => request<T>(path + qs(params), { signal });
+const items = <T>(p: Promise<RangedList<T>>) => p.then((r) => r.items);
 const post = <T>(path: string, body?: unknown) => request<T>(path, { method: "POST", body: body ?? {} });
 const patch = <T>(path: string, body: unknown, params?: QueryParams) => request<T>(path + qs(params), { method: "PATCH", body });
 
 // ───────────────────────────────────────── query param shapes ──
+/**
+ * Time-range params accepted by every ranged endpoint (see src/lib/time-range.ts).
+ * `range` = today (default) | yesterday | 1h | 6h | 24h | 7d | 30d | <N>h | <N>d; or custom from/to.
+ */
+export interface RangeQuery extends QueryParams {
+  range?: string;
+  /** epoch ms or ISO-8601 (prefer `Z`; `+09:00` must be URL-encoded — qs() does that) */
+  from?: number | string;
+  to?: number | string;
+}
+/** RangeSpec → RangeQuery (spread into any query): `{ ...rangeParams(spec), language: "ko" }` */
+export function rangeParams(spec: RangeSpec): RangeQuery {
+  return serializeRange(spec);
+}
+
 export interface WorkflowQuery extends QueryParams {
   q?: string;
   workflow_id?: string;
@@ -159,9 +194,14 @@ export interface WorkflowQuery extends QueryParams {
   language?: LangCode | LangCode[];
   status?: string | string[];
   version?: string | string[];
+  pipeline_id?: string | string[];
+  model_version?: string | string[];
   stage?: StageId;
   batch_id?: string;
   event_type?: string;
+  range?: string;
+  /** which timestamp the range applies to: lifetime overlap (default) | created_at | updated_at */
+  range_by?: "active" | "created" | "updated";
   error_code?: string;
   error_category?: string;
   /** epoch ms or ISO */
@@ -195,7 +235,12 @@ export interface GlobalLogQuery extends LogQuery {
   system?: boolean;
   workflow_id?: string;
   language?: LangCode;
+  /** job id — matches the job and (job_scope=tree, default) its child jobs */
   pipeline_job_id?: string;
+  job_scope?: "self" | "tree";
+  pipeline_id?: string;
+  node_path?: string;
+  range?: string;
 }
 
 export interface DeadLetterQuery extends QueryParams {
@@ -204,7 +249,9 @@ export interface DeadLetterQuery extends QueryParams {
   category?: string | string[];
   error_code?: string;
   operator?: string;
+  pipeline_id?: string | string[];
   q?: string;
+  range?: string;
   from?: number | string;
   to?: number | string;
   sort?: "created_desc" | "created_asc" | "updated_desc" | "attempts_desc";
@@ -218,6 +265,10 @@ export interface ResultQuery extends QueryParams {
   intent?: string | string[];
   device?: string | string[];
   version?: string | string[];
+  /** model under test, e.g. bixby-nlu-2026.10 (alias `model`) */
+  model_version?: string | string[];
+  pipeline_id?: string | string[];
+  range?: string;
   result?: "PASS" | "FAIL";
   failure_reason?: string | string[];
   workflow_id?: string;
@@ -240,18 +291,63 @@ export interface AuditQuery extends QueryParams {
   action?: string | string[];
   target?: string;
   q?: string;
+  range?: string;
   from?: number | string;
   to?: number | string;
   page?: number;
   pageSize?: number;
 }
 
-export type Range = "6h" | "12h" | "24h" | "48h" | "7d";
+/** Legacy analytics range values; any RangePreset / "<N>h" / "<N>d" is accepted now. */
+export type Range = "today" | "yesterday" | "1h" | "6h" | "12h" | "24h" | "48h" | "7d" | "30d" | (string & {});
+
+export interface EventQuery extends RangeQuery {
+  limit?: number;
+  stage?: StageId;
+  language?: LangCode;
+  severity?: string | string[];
+  name?: string | string[];
+  workflow_id?: string;
+  pipeline_id?: string;
+  component?: string;
+  pipeline_job_id?: string;
+  job_scope?: "self" | "tree";
+}
+export interface AlertQuery extends RangeQuery {
+  status?: string | string[];
+  severity?: string | string[];
+  language?: LangCode;
+}
+export interface PipelineRunsQuery extends RangeQuery {
+  status?: string | string[];
+  version?: string | string[];
+  language?: LangCode | LangCode[];
+  workflow_id?: string;
+  sort?: "start_desc" | "start_asc" | "duration_desc";
+  page?: number;
+  pageSize?: number;
+}
+export interface FileSearchQuery extends RangeQuery {
+  q?: string;
+  stage?: StageId | StageId[];
+  bucket?: string;
+  language?: LangCode | LangCode[];
+  limit?: number;
+}
+export interface StageQuery extends RangeQuery {
+  limit?: number;
+  /** filter `objects` by name (also workflow_id / batch_id) */
+  q?: string;
+  objects_limit?: number;
+}
+
+export type PipelineListItem = PipelineSummary & { definition: PipelineDefinition };
 
 // ───────────────────────────────────────── endpoints ──
 export const api = {
   // overview / meta
-  overview: (signal?: AbortSignal) => get<Overview>("/overview", undefined, signal),
+  overview: (q?: RangeQuery | AbortSignal, signal?: AbortSignal) =>
+    q instanceof AbortSignal ? get<Overview>("/overview", undefined, q) : get<Overview>("/overview", q, signal),
   meta: () => get<MetaCatalog>("/meta"),
   me: () => get<MeInfo>("/me"),
   operators: () => get<{ operators: Operator[]; rolePermissions: RolePermission[] }>("/operators"),
@@ -287,24 +383,49 @@ export const api = {
   replayBatch: (body: { ids: string[]; reason: string; pipeline_version?: string }) => post<BatchReplayResult>("/dead-letters/replay-batch", body),
   closeDeadLetter: (id: string, body: { resolution: string }) => post<DeadLetter>(`/dead-letters/${enc(id)}/close`, body),
   assignDeadLetter: (id: string, body: { operator_id: string | null; reason?: string }) => post<DeadLetter>(`/dead-letters/${enc(id)}/assign`, body),
-  replays: (q?: { dead_letter_id?: string; status?: string | string[] }) => get<Replay[]>("/replays", q),
+  /** @deprecated unwraps the envelope — prefer replaysPage (carries `range`) */
+  replays: (q?: { dead_letter_id?: string; status?: string | string[] } & RangeQuery) => items(get<RangedList<Replay>>("/replays", q)),
+  replaysPage: (q?: { dead_letter_id?: string; status?: string | string[] } & RangeQuery) => get<RangedList<Replay>>("/replays", q),
 
   // analytics
-  throughput: (q?: { granularity?: "hour" | "5m"; range?: Range }) => get<ThroughputSeries>("/analytics/throughput", q),
-  quality: (q?: { range?: Range }) => get<QualitySeries>("/analytics/quality", q),
-  errors: (q?: { range?: Range; top?: number }) => get<ErrorAnalytics>("/analytics/errors", q),
-  components: () => get<ComponentDuration[]>("/analytics/components"),
-  versions: () => get<VersionComparison[]>("/analytics/versions"),
-  languages: () => get<LanguageSummary[]>("/analytics/languages"),
-  cost: () => get<CostAnalytics>("/analytics/cost"),
-  daily: () => get<DailyMetrics[]>("/analytics/daily"),
-  analyticsSummary: () => get<AnalyticsSummary>("/analytics/summary"),
+  throughput: (q?: { granularity?: "auto" | "hour" | "5m"; range?: Range } & RangeQuery) => get<ThroughputSeries>("/analytics/throughput", q),
+  quality: (q?: { range?: Range } & RangeQuery) => get<QualitySeries>("/analytics/quality", q),
+  errors: (q?: { range?: Range; top?: number } & RangeQuery) => get<ErrorAnalytics>("/analytics/errors", q),
+  /** @deprecated unwraps — prefer componentsPage */
+  components: (q?: RangeQuery) => items(get<RangedList<ComponentDuration>>("/analytics/components", q)),
+  componentsPage: (q?: RangeQuery) => get<RangedList<ComponentDuration>>("/analytics/components", q),
+  /** @deprecated unwraps — prefer versionsPage */
+  versions: (q?: RangeQuery) => items(get<RangedList<VersionComparison>>("/analytics/versions", q)),
+  versionsPage: (q?: RangeQuery) => get<RangedList<VersionComparison>>("/analytics/versions", q),
+  /** @deprecated unwraps — prefer languagesPage */
+  languages: (q?: RangeQuery) => items(get<RangedList<LanguageSummary>>("/analytics/languages", q)),
+  languagesPage: (q?: RangeQuery) => get<RangedList<LanguageSummary>>("/analytics/languages", q),
+  cost: (q?: RangeQuery) => get<CostAnalytics>("/analytics/cost", q),
+  /** @deprecated unwraps — prefer dailyPage */
+  daily: (q?: RangeQuery) => items(get<RangedList<DailyMetrics>>("/analytics/daily", q)),
+  dailyPage: (q?: RangeQuery) => get<RangedList<DailyMetrics>>("/analytics/daily", q),
+  analyticsSummary: (q?: RangeQuery) => get<AnalyticsSummary>("/analytics/summary", q),
+  capacityHistory: (q?: { granularity?: "auto" | "5m" | "1h" | "6h" } & RangeQuery) => get<CapacityHistory>("/capacity/history", q),
+
+  // pipelines (registry + jobs)
+  pipelines: (q?: { kind?: "root" | "sub" } & RangeQuery) => get<RangedList<PipelineListItem>>("/pipelines", q),
+  pipeline: (id: string, q?: { version?: string } & RangeQuery) => get<PipelineDetail>(`/pipelines/${enc(id)}`, q),
+  pipelineRuns: (id: string, q?: PipelineRunsQuery) => get<PipelineRunsPage>(`/pipelines/${enc(id)}/runs`, q),
+  workflowPipelineRuns: (id: string) => get<WorkflowPipelineRuns>(`/workflows/${enc(id)}/pipeline-runs`),
+  pipelineJob: (jobId: string, q?: { job_scope?: "self" | "tree"; limit?: number }) => get<PipelineJobDetail>(`/pipeline-jobs/${enc(jobId)}`, q),
+
+  // file-name search across stages
+  fileSearch: (q: FileSearchQuery) => get<FileSearchResult>("/files/search", q),
 
   // stages / gcs
-  stages: () => get<StageSummary[]>("/stages"),
-  stage: (id: StageId, q?: { limit?: number }) => get<StageDetail>(`/stages/${id}`, q),
+  /** @deprecated unwraps — prefer stagesPage */
+  stages: (q?: RangeQuery) => items(get<RangedList<StageSummary>>("/stages", q)),
+  stagesPage: (q?: RangeQuery) => get<RangedList<StageSummary>>("/stages", q),
+  stage: (id: StageId, q?: StageQuery) => get<StageDetail>(`/stages/${id}`, q),
   buckets: () => get<GcsBucket[]>("/gcs/buckets"),
-  gcsObjects: (q: { bucket: string; prefix?: string; delimiter?: string; limit?: number }) => get<GcsListing>("/gcs/objects", q),
+  /** `delimiter: ""` → flat listing (kept by qs); `range: "all"` disables the time filter */
+  gcsObjects: (q: { bucket: string; prefix?: string; delimiter?: string; limit?: number; q?: string } & RangeQuery) =>
+    request<GcsListing & { range: ResolvedRange | null }>("/gcs/objects" + qs(q, { keepEmpty: ["delimiter"] })),
   gcsObject: (q: { bucket: string; name: string; limit?: number }) => get<GcsObjectContent>("/gcs/object", q),
 
   // results
@@ -315,15 +436,20 @@ export const api = {
   // config / audit / alerts
   config: () => get<AppConfig>("/config"),
   patchConfig: (body: ConfigPatch & { reason: string }) => patch<ConfigUpdateResult>("/config", body),
-  audit: (q?: AuditQuery) => get<Paginated<AuditEntry>>("/audit", q),
-  alerts: (q?: { status?: string | string[]; severity?: string | string[]; language?: LangCode }) => get<Alert[]>("/alerts", q),
+  audit: (q?: AuditQuery) => get<Paginated<AuditEntry> & { range: ResolvedRange }>("/audit", q),
+  /** @deprecated unwraps — prefer alertsPage (carries range + openOutsideRange) */
+  alerts: (q?: AlertQuery) => items(get<RangedList<Alert>>("/alerts", q)),
+  alertsPage: (q?: AlertQuery) => get<RangedList<Alert> & { openOutsideRange: number }>("/alerts", q),
   ackAlert: (id: string, body: { note?: string } = {}) => post<Alert>(`/alerts/${enc(id)}/ack`, body),
   resolveAlert: (id: string, body: { note?: string } = {}) => post<Alert>(`/alerts/${enc(id)}/resolve`, body),
-  incidents: () => get<Incident[]>("/incidents"),
+  /** @deprecated unwraps — prefer incidentsPage */
+  incidents: (q?: RangeQuery) => items(get<RangedList<Incident>>("/incidents", q)),
+  incidentsPage: (q?: RangeQuery) => get<RangedList<Incident>>("/incidents", q),
 
   // global event / log feeds
-  events: (q?: { limit?: number; stage?: StageId; language?: LangCode; severity?: string | string[]; name?: string | string[] }) =>
-    get<WorkflowEvent[]>("/events", q),
+  /** @deprecated unwraps — prefer eventsPage */
+  events: (q?: EventQuery) => items(get<RangedList<WorkflowEvent>>("/events", q)),
+  eventsPage: (q?: EventQuery) => get<RangedList<WorkflowEvent>>("/events", q),
   logs: (q?: GlobalLogQuery) => get<LogPage>("/logs", q),
 
   // simulator

@@ -1,9 +1,7 @@
 import { handle, ok } from "@/server/http";
-import { getEngine } from "@/server/mock/runtime";
-import type { Incident } from "@/lib/types";
-
+import { incidents } from "@/server/services/misc";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** GET /api/v1/incidents → Incident[] */
-export const GET = handle(() => ok<Incident[]>(getEngine().incidents));
+/** GET /api/v1/incidents?range= → RangedList<Incident> (incidents overlapping the range) */
+export const GET = handle((req) => ok(incidents(req)));

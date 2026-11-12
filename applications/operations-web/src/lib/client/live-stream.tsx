@@ -19,7 +19,7 @@ export type StreamStatus = "idle" | "connecting" | "open" | "reconnecting" | "cl
 
 type Handler<K extends StreamEventType> = (data: StreamEventMap[K]) => void;
 
-const STREAM_TYPES: StreamEventType[] = ["hello", "tick", "transition", "event", "log", "alert", "audit", "dlq", "sim"];
+const STREAM_TYPES: StreamEventType[] = ["hello", "tick", "transition", "event", "log", "alert", "audit", "dlq", "sim", "job"];
 
 class LiveStreamStore {
   private es: EventSource | null = null;

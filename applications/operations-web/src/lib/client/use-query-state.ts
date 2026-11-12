@@ -15,6 +15,9 @@
  */
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";
+import type { RangeSpec, ResolvedRange } from "@/lib/time-range";
+import { DEFAULT_RANGE, applyRangeToSearchParams, parseRange, rangeKey, resolveRange, serializeRange } from "@/lib/time-range";
+import { useSimNow } from "./live-stream";
 
 export interface Parser<T> {
   parse(raw: string | null): T;
@@ -121,4 +124,51 @@ export function useQueryStates<P extends Record<string, Parser<unknown>>>(
     [parsers, write],
   );
   return [values, set];
+}
+
+// ───────────────────────────────────────── time range (URL: ?range= | ?from=&to=) ──
+
+/**
+ * Page-level period selector state, synced to the URL (`?range=7d` or `?from=…&to=…`; default
+ * "today" is omitted from the URL).
+ *
+ *   const tr = useTimeRange();
+ *   useApi(["results", tr.key, q], () => api.results({ ...tr.params, ...q }));
+ *   <RangePicker value={tr.spec} onChange={tr.setSpec} label={tr.resolved.label} />
+ *
+ * - `spec`: parsed RangeSpec (invalid URL values fall back to today)
+ * - `params`: query params to spread into any api.* call (server resolves against the virtual clock)
+ * - `resolved`: client-side resolution against useSimNow() — for labels only; the server's
+ *   `response.range` is authoritative.
+ * - `key`: stable string for useApi keys ("today", "7d", "custom:…")
+ */
+export function useTimeRange(): {
+  spec: RangeSpec;
+  setSpec: (s: RangeSpec, opts?: History) => void;
+  params: Record<string, string>;
+  resolved: ResolvedRange;
+  key: string;
+  isDefault: boolean;
+} {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const spStr = sp.toString();
+  const spec = useMemo(() => parseRange(new URLSearchParams(spStr)), [spStr]);
+  const now = useSimNow();
+  const resolved = useMemo(() => resolveRange(spec, now), [spec, now]);
+  const setSpec = useCallback(
+    (s: RangeSpec, opts?: History) => {
+      const next = applyRangeToSearchParams(new URLSearchParams(spStr), s);
+      next.delete("page");
+      const str = next.toString();
+      const url = pathname + (str ? "?" + str : "") + (typeof window !== "undefined" ? window.location.hash : "");
+      if (opts?.history === "push") router.push(url, { scroll: false });
+      else router.replace(url, { scroll: false });
+    },
+    [spStr, pathname, router],
+  );
+  const key = rangeKey(spec);
+  const params = useMemo(() => serializeRange(spec), [spec]);
+  return { spec, setSpec, params, resolved, key, isDefault: key === rangeKey(DEFAULT_RANGE) };
 }

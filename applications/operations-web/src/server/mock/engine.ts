@@ -1,18 +1,19 @@
 /* eslint-disable */
 // @ts-nocheck
 /**
- * AIPO mock engine — verbatim port of designs/mock-data.js (do not hand-edit the body).
+ * AIPO mock engine — originally a port of designs/mock-data.js, now the evolving mock backend.
  *
- * The statement order, closures and RNG consumption are identical to the prototype, so every ID,
- * timestamp and value matches the approved designs. Type-checking is disabled for this file only;
- * the typed boundary is src/server/mock/index.ts (facade) + src/lib/types.ts.
+ * Type-checking is disabled for this file only; the typed boundary is ./engine-types.ts +
+ * src/lib/types.ts. The oracle was retired, so the data model may change.
  *
- * Differences from the prototype:
- *  - wrapped in createMockEngine() (fresh state per call) instead of assigning window.MOCK
- *  - the UTF-8 BOM literal is written as an escape
- *  - an "AIPO web extensions" block (updateConfig, setGlobalStartsPerMinute, _internal) is appended
- *    before the export; it never runs during the static build.
- * Edit only the extensions block; the prototype body is frozen (verify with `npm run oracle` — see FOUNDATION.md).
+ *  - createMockEngine(root, { domain, baseNow }) — `domain` is src/config/domain.ts (passed in so this
+ *    file stays importable by scripts/gen-catalog.mjs as plain JS); `baseNow` re-anchors the scenario
+ *    (used by the runtime day-loop).
+ *  - Pipelines: a versioned registry with sub-pipelines. Every attempt has a root PipelineJob
+ *    `{workflow_id}-cycle-{c}-attempt-{a}` and child jobs `{parentJobId}.{nodeId}` per sub-pipeline node.
+ *    Attempt.dag / Workflow.dag stay a LEGACY six-phase projection.
+ *  - 30 days of history (lower density before day 8). Result rows are derived lazily per workflow
+ *    (seeded by workflow_id) through a bounded LRU cache.
  */
 /*!
  * mock-data.js — 빅스비 실발화 평가 / AIPO (AI Pipeline Orchestration Platform) 공용 Mock 데이터
@@ -35,11 +36,16 @@
  *   MOCK.results {columns, rows, file, files, byWorkflow(id), forWorkflow(id), summary(rows), toCSV(rows, opts)},
  *   MOCK.actions {...}, MOCK.on(evt, cb), MOCK.off(evt, cb), MOCK.createSimulator(opts), MOCK.fmt {...}
  */
-export function createMockEngine(root) {
+export function createMockEngine(root, opts) {
   'use strict';
+  opts = opts || {};
+  if (!opts.domain) throw new Error('createMockEngine: opts.domain (src/config/domain.ts) is required');
+  function clone(x) { return JSON.parse(JSON.stringify(x)); }
+  var DOMAIN = clone(opts.domain);
+  var HISTORY_DAYS = DOMAIN.historyDays || 30;
 
   // ───────────────────────────────────────────── utils ──
-  var BASE_NOW = Date.parse('2026-11-12T14:30:00+09:00');
+  var BASE_NOW = opts.baseNow != null ? opts.baseNow : Date.parse(DOMAIN.baseNow);
   var clock = { now: BASE_NOW };
   var SEC = 1000, MIN = 60 * SEC, HOUR = 60 * MIN, DAY = 24 * HOUR, KST = 9 * HOUR;
 
@@ -160,16 +166,11 @@ export function createMockEngine(root) {
   };
 
   // ───────────────────────────────────────────── config ──
-  var PROJECT = 'bixby-eval-prod', PROJECT_NUM = '418027761953', REGION = 'asia-northeast3';
-  var BUCKET_IN = 'bixby-utterance-input', BUCKET_ART = 'bixby-pipeline-artifacts', BUCKET_RES = 'bixby-eval-results';
-  var BQ_TABLE = PROJECT + '.bixby_eval.utterance_results';
+  var PROJECT = DOMAIN.project.id, PROJECT_NUM = DOMAIN.project.number, REGION = DOMAIN.project.region;
+  var BUCKET_IN = DOMAIN.buckets.input, BUCKET_ART = DOMAIN.buckets.artifacts, BUCKET_RES = DOMAIN.buckets.results;
+  var BQ_TABLE = DOMAIN.bigquery.resultsTable;
 
-  var LANGS = [
-    { code: 'ko', name: '한국어', nameEn: 'Korean', locale: 'ko-KR', flag: 'KR', maxConcurrent: 10, batchSize: 100, priorityWeight: 3, maxStartsPerMinute: 4, enabled: true, paused: false, backlogAlertThreshold: 8, p95WaitSloSec: 900 },
-    { code: 'en', name: '영어', nameEn: 'English', locale: 'en-US', flag: 'US', maxConcurrent: 25, batchSize: 200, priorityWeight: 5, maxStartsPerMinute: 8, enabled: true, paused: false, backlogAlertThreshold: 20, p95WaitSloSec: 600 },
-    { code: 'ja', name: '일본어', nameEn: 'Japanese', locale: 'ja-JP', flag: 'JP', maxConcurrent: 5, batchSize: 50, priorityWeight: 2, maxStartsPerMinute: 2, enabled: true, paused: false, backlogAlertThreshold: 6, p95WaitSloSec: 900 },
-    { code: 'es', name: '스페인어', nameEn: 'Spanish', locale: 'es-ES', flag: 'ES', maxConcurrent: 4, batchSize: 50, priorityWeight: 1, maxStartsPerMinute: 2, enabled: true, paused: false, backlogAlertThreshold: 5, p95WaitSloSec: 1200 }
-  ];
+  var LANGS = DOMAIN.languages;
   var LANG = {}; LANGS.forEach(function (l) { LANG[l.code] = l; });
   var LANG_CODES = LANGS.map(function (l) { return l.code; });
 
@@ -195,12 +196,19 @@ export function createMockEngine(root) {
     { permission: '운영자 권한 관리', key: 'iam', Viewer: false, Operator: false, Admin: true }
   ];
 
-  var PIPELINE_VERSIONS = [
-    { version: 'v1.0', status: 'DEPRECATED', trafficPct: 0, releasedAt: Date.parse('2026-09-28T10:00:00+09:00'), image: REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/bixby-eval:1.0.4', templateUri: 'gs://' + BUCKET_ART + '/templates/bixby-eval-v1.0.yaml', judgeModel: 'gemini-2.0-flash', modelUnderTest: 'bixby-agent-3.4.2', notes: '초기 버전. 11/08 이후 신규 배치에 사용하지 않음' },
-    { version: 'v1.1', status: 'STABLE', trafficPct: 50, releasedAt: Date.parse('2026-11-05T11:00:00+09:00'), image: REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/bixby-eval:1.1.2', templateUri: 'gs://' + BUCKET_ART + '/templates/bixby-eval-v1.1.yaml', judgeModel: 'gemini-2.5-flash', modelUnderTest: 'bixby-agent-3.5.0', notes: '기본(default) 버전' },
-    { version: 'v1.2-rc', status: 'CANARY', trafficPct: 50, releasedAt: Date.parse('2026-11-11T09:30:00+09:00'), image: REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/bixby-eval:1.2.0-rc2', templateUri: 'gs://' + BUCKET_ART + '/templates/bixby-eval-v1.2-rc.yaml', judgeModel: 'gemini-2.5-pro', modelUnderTest: 'bixby-agent-3.6.0-rc2', notes: '응답 평가 프롬프트 개선, 기기제어(SmartThings) slot 파서 교체(회귀 조사 중)' }
-  ];
-  var MODEL_BY_VERSION = { 'v1.0': 'bixby-agent-3.4.2', 'v1.1': 'bixby-agent-3.5.0', 'v1.2-rc': 'bixby-agent-3.6.0-rc2' };
+  var PIPELINE_VERSIONS = DOMAIN.releases.map(function (r) {
+    return { version: r.version, status: r.status, trafficPct: r.trafficPct, releasedAt: Date.parse(r.releasedAt), image: REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/bixby-eval:' + r.imageTag,
+      templateUri: 'gs://' + BUCKET_ART + '/templates/bixby-eval-full/' + r.version + '.yaml', judgeModel: r.judgeModel, modelUnderTest: r.modelUnderTest, notes: r.notes };
+  });
+  var MODELS = DOMAIN.models.map(function (m) { return Object.assign({}, m, { releasedTs: Date.parse(m.releasedAt) }); });
+  var MODEL_ADJ = {}; MODELS.forEach(function (m) { MODEL_ADJ[m.id] = m.passAdj; });
+  function modelFor(created, rng) {
+    var el = MODELS.filter(function (m) { return m.releasedTs <= created; });
+    if (!el.length) return MODELS[0].id;
+    var w = el.filter(function (m) { return m.weight > 0; });
+    if (!w.length) return el[el.length - 1].id;
+    return rng.weighted(w.map(function (m) { return [m.id, m.weight]; }));
+  }
 
   var SERVICES = [
     { id: 'event-ingress', name: 'Event Ingress', runtime: 'Cloud Run', enabled: true, status: 'HEALTHY', version: '1.4.2', revision: 'event-ingress-00042-xaq', instances: 2, minInstances: 1, maxInstances: 20, region: REGION, serviceAccount: 'sa-event-ingress@' + PROJECT + '.iam.gserviceaccount.com', lastDeployAt: Date.parse('2026-11-10T16:12:00+09:00'), errorRate: 0.0011, p95LatencyMs: 184 },
@@ -223,9 +231,9 @@ export function createMockEngine(root) {
   ];
 
   var config = {
-    project: { id: PROJECT, number: PROJECT_NUM, region: REGION, environment: 'production', console: 'AIPO Operations Console' },
+    project: DOMAIN.project,
     languages: LANGS,
-    global: { maxConcurrent: 36, maxStartsPerMinute: 12 },
+    global: DOMAIN.capacity.global,
     retry: { maxRetries: 2, maxAttempts: 3, backoffSeconds: [60, 300], nonRetryable: ['INPUT_SCHEMA', 'AUTH_PERMISSION'], limitedRetry: { CODE_DEFECT: 1 } },
     workflowTimeoutMin: 90,
     pipelineTimeoutMin: 60,
@@ -233,22 +241,14 @@ export function createMockEngine(root) {
     queuePolicy: { mode: 'PRIORITY_THEN_FIFO', aging: { enabled: true, boostPerMinutes: 10, maxBoost: 3 }, crossLanguage: 'WEIGHTED_ROUND_ROBIN' },
     pipelineVersions: PIPELINE_VERSIONS.map(function (v) { return v.version; }),
     pipelineVersionDetails: PIPELINE_VERSIONS,
-    defaultPipelineVersion: 'v1.1',
+    defaultPipelineVersion: DOMAIN.defaultRelease,
     services: SERVICES,
     alertPolicies: ALERT_POLICIES,
     operators: OPERATORS,
     rolePermissions: ROLE_PERMISSIONS,
     buckets: { input: BUCKET_IN, artifacts: BUCKET_ART, results: BUCKET_RES },
     bigquery: { dataset: PROJECT + '.bixby_eval', resultsTable: BQ_TABLE, eventsTable: PROJECT + '.aipo_ops.workflow_events' },
-    terraformDefaults: {
-      'languages.ko.maxConcurrent': 8, 'languages.en.maxConcurrent': 25, 'languages.ja.maxConcurrent': 5, 'languages.es.maxConcurrent': 4,
-      'languages.ko.maxStartsPerMinute': 4, 'languages.en.maxStartsPerMinute': 10, 'languages.ja.maxStartsPerMinute': 2, 'languages.es.maxStartsPerMinute': 2,
-      'languages.ko.priorityWeight': 3, 'languages.en.priorityWeight': 5, 'languages.ja.priorityWeight': 2, 'languages.es.priorityWeight': 1,
-      'global.maxConcurrent': 32, 'global.maxStartsPerMinute': 12,
-      'retry.maxRetries': 2, 'retry.backoffSeconds': [60, 300],
-      'workflowTimeoutMin': 60, 'pipelineTimeoutMin': 60,
-      'defaultPipelineVersion': 'v1.1'
-    },
+    terraformDefaults: DOMAIN.capacity.terraformDefaults,
     runtimeConfig: null, // filled below (flattened view of live values)
     drift: null          // function below
   };
@@ -274,6 +274,9 @@ export function createMockEngine(root) {
     'global.maxConcurrent': { changedBy: 'op-kim-sy', changedAt: Date.parse('2026-11-10T09:13:00+09:00'), reason: 'ko 증설에 맞춰 Global 확장 (32→36)' },
     'workflowTimeoutMin': { changedBy: 'op-han-dy', changedAt: Date.parse('2026-11-08T13:30:00+09:00'), reason: 'en 대형 배치(200건) LLM Judge 지연으로 Workflow timeout 상향 (60→90)' }
   };
+  function noteDrift(keys, by, reason) {
+    keys.forEach(function (k) { DRIFT_NOTES[k] = { changedBy: by, changedAt: clock.now, reason: reason || null }; });
+  }
   config.drift = function () {
     var rt = flattenRuntime(), out = [];
     Object.keys(config.terraformDefaults).forEach(function (k) {
@@ -288,32 +291,9 @@ export function createMockEngine(root) {
   config.runtimeConfig = flattenRuntime();
 
   // ───────────────────────────────────────────── stages ──
-  var STAGES = [
-    { id: 'gcs_input', order: 1, kind: 'main', label: { ko: '실발화 입력 업로드', en: 'GCS Input' }, gcpService: 'Cloud Storage', resource: 'gs://' + BUCKET_IN, trigger: 'google.cloud.storage.object.v1.finalized', icon: 'upload-cloud', states: [], services: ['cloud-storage'], description: '언어별로 배치된 실발화 JSONL이 gs://' + BUCKET_IN + '/{date}/{lang}/batch-NNNN.jsonl 로 업로드되면 Object Finalized 이벤트가 발생한다.' },
-    { id: 'event_bus', order: 2, kind: 'main', label: { ko: '이벤트 전달', en: 'Eventarc / Pub/Sub' }, gcpService: 'Eventarc · Pub/Sub', resource: 'projects/' + PROJECT + '/topics/pipeline-batch-requested', icon: 'radio', states: [], services: ['eventarc', 'pubsub'], description: 'Eventarc 트리거가 GCS 이벤트를 CloudEvent로 감싸 Pub/Sub를 통해 비동기로 Event Ingress에 전달한다 (at-least-once).' },
-    { id: 'ingress', order: 3, kind: 'main', label: { ko: '이벤트 수신·검증', en: 'Cloud Run Event Ingress' }, gcpService: 'Cloud Run', resource: 'event-ingress', icon: 'shield-check', states: ['RECEIVED', 'VALIDATED'], services: ['event-ingress'], description: '스키마 검증, 중복 제거, SHA256 Idempotency Key 계산 후 Firestore에 이벤트와 Workflow를 등록한다.' },
-    { id: 'registry_queue', order: 4, kind: 'main', label: { ko: '등록·언어별 대기열', en: 'Firestore Registry & Pending Queue' }, gcpService: 'Firestore', resource: 'pending_jobs/{lang}', icon: 'list-ordered', states: ['QUEUED'], services: ['firestore'], description: 'Event Registry · Workflow State · 언어별 Pending Queue. Priority → 대기시간 → FIFO 순으로 정렬된다.' },
-    { id: 'scheduler', order: 5, kind: 'main', label: { ko: '언어별 스케줄러', en: 'Language-aware Scheduler' }, gcpService: 'Cloud Run + Firestore Transaction', resource: 'scheduler', icon: 'gauge', states: ['RESERVED'], services: ['scheduler'], description: 'language_active < language_limit AND global_active < global_limit 일 때 Slot Reservation(fencing token)을 발급한다.' },
-    { id: 'workflows', order: 6, kind: 'main', label: { ko: '워크플로 오케스트레이션', en: 'Cloud Workflows' }, gcpService: 'Cloud Workflows', resource: 'pipeline-orchestrator', icon: 'workflow', states: ['DISPATCHING', 'CANCELLED', 'TIMED_OUT'], services: ['dispatcher', 'pipeline-orchestrator'], description: 'PipelineJob 생성({workflow_id}-cycle-{c}-attempt-{a}), 완료 모니터링, 오류 분류, 취소/Timeout 처리, 최종 실패 라우팅.' },
-    { id: 'vertex', order: 7, kind: 'main', label: { ko: '평가 파이프라인', en: 'Vertex AI Pipeline' }, gcpService: 'Vertex AI Pipelines', resource: 'bixby-eval pipeline', icon: 'cpu', states: ['RUNNING'], services: ['vertex-ai-pipelines'], components: ['preprocess', 'intent_eval', 'response_eval', 'latency_check', 'aggregate', 'persist'], description: 'Preprocessing → Agent Evaluation(의도·응답(LLM Judge)·지연) → Result Aggregation → Output Persistence.' },
-    { id: 'results', order: 8, kind: 'main', label: { ko: '결과 저장', en: 'Result CSV + BigQuery' }, gcpService: 'Cloud Storage · BigQuery', resource: 'gs://' + BUCKET_RES + ' · ' + BQ_TABLE, icon: 'file-check', states: ['SUCCEEDED'], services: ['result-commit'], description: '발화별 PASS/FAIL 결과 CSV를 GCS에 업로드하고 BigQuery에 Commit한 뒤 완료 이벤트를 발행한다.' },
-    { id: 'retry', order: 9, kind: 'branch', branchFrom: 'vertex', returnsTo: 'vertex', label: { ko: '재시도 제어', en: 'Retry Controller' }, gcpService: 'Cloud Workflows', resource: 'pipeline-orchestrator (retry policy)', icon: 'rotate-ccw', states: ['RETRY_WAIT'], services: ['pipeline-orchestrator'], description: 'Attempts < 3 이고 재시도 가능한 오류면 Backoff(60s → 300s) 후 Admission을 다시 거쳐 재실행한다.' },
-    { id: 'dlq', order: 10, kind: 'branch', branchFrom: 'retry', returnsTo: 'registry_queue', label: { ko: 'DLQ·수동 Replay', en: 'DLQ Manager / Replay' }, gcpService: 'Pub/Sub · Cloud Run', resource: 'projects/' + PROJECT + '/topics/pipeline-dead-letter', icon: 'archive-x', states: ['DEAD_LETTERED'], services: ['dlq-manager'], description: '최종 실패 및 비복구성 오류를 격리하고, 운영자 검토 후 새 Replay Cycle로 대기열에 재등록한다.' }
-  ];
+  var STAGES = DOMAIN.stages;
   var STAGE = {}; STAGES.forEach(function (s) { STAGE[s.id] = s; });
-  var STAGE_EDGES = [
-    { from: 'gcs_input', to: 'event_bus', label: 'Object Finalized' },
-    { from: 'event_bus', to: 'ingress', label: 'CloudEvent push' },
-    { from: 'ingress', to: 'registry_queue', label: 'register + enqueue' },
-    { from: 'registry_queue', to: 'scheduler', label: 'admission' },
-    { from: 'scheduler', to: 'workflows', label: 'slot reserved' },
-    { from: 'workflows', to: 'vertex', label: 'create PipelineJob' },
-    { from: 'vertex', to: 'results', label: 'SUCCESS', tone: 'success' },
-    { from: 'vertex', to: 'retry', label: 'FAILURE', tone: 'failed' },
-    { from: 'retry', to: 'vertex', label: 'attempts < 3', tone: 'retry' },
-    { from: 'retry', to: 'dlq', label: 'attempts = 3 / non-retryable', tone: 'dlq' },
-    { from: 'dlq', to: 'registry_queue', label: 'Manual Replay', tone: 'retry', dashed: true }
-  ];
+  var STAGE_EDGES = DOMAIN.stageEdges;
   var STATE_TO_STAGE = {
     RECEIVED: 'ingress', VALIDATED: 'ingress', QUEUED: 'registry_queue', RESERVED: 'scheduler', DISPATCHING: 'workflows',
     RUNNING: 'vertex', RETRY_WAIT: 'retry', SUCCEEDED: 'results', DEAD_LETTERED: 'dlq', CANCELLED: 'workflows', TIMED_OUT: 'workflows'
@@ -430,8 +410,19 @@ export function createMockEngine(root) {
     WORKFLOW_CANCELLED: { stage: 'workflows', source: 'cloud-workflows', label: 'Workflow 취소' },
     WORKFLOW_TIMED_OUT: { stage: 'workflows', source: 'cloud-workflows', label: 'Workflow 시간 초과' },
     CONFIG_UPDATED: { stage: 'scheduler', source: 'operations-api', label: '운영 설정 변경' },
-    SLOT_RECONCILED: { stage: 'scheduler', source: 'reconciler', label: 'Slot 정합성 복구' }
+    SLOT_RECONCILED: { stage: 'scheduler', source: 'reconciler', label: 'Slot 정합성 복구' },
+    CHILD_PIPELINE_STARTED: { stage: 'vertex', source: 'vertex-ai', label: '하위 Pipeline 시작' },
+    CHILD_PIPELINE_SUCCEEDED: { stage: 'vertex', source: 'vertex-ai', label: '하위 Pipeline 성공' },
+    CHILD_PIPELINE_FAILED: { stage: 'vertex', source: 'vertex-ai', label: '하위 Pipeline 실패' },
+    CHILD_PIPELINE_CANCELLED: { stage: 'vertex', source: 'vertex-ai', label: '하위 Pipeline 취소' }
   };
+  Object.keys(DOMAIN.components).forEach(function (id) {
+    var c = DOMAIN.components[id];
+    [['STARTED', '시작'], ['COMPLETED', '완료'], ['FAILED', '실패']].forEach(function (x) {
+      var k = 'TASK_' + c.ev + '_' + x[0];
+      if (!EVENT_CATALOG[k]) EVENT_CATALOG[k] = { stage: 'vertex', source: 'vertex-ai', label: c.labelKo + ' ' + x[1] };
+    });
+  });
 
   // ───────────────────────────────────────────── DAG template ──
   var DAG_TEMPLATE = [
@@ -447,63 +438,51 @@ export function createMockEngine(root) {
   // ───────────────────────────────────────────── error catalog ──
   var ERRORS = {
     PIPELINE_EXECUTION: [
-      { code: 'COMPONENT_OOM', node: 'intent_eval', frac: [0.4, 0.8], message: 'The replica workerpool0-0 exited with a non-zero status of 137 (OOMKilled). Memory limit 32Gi exceeded.',
+      { code: 'PII_SCANNER_CRASH', components: ['pii_scan'], frac: [0.3, 0.7], message: 'pii_scan worker exited with code 139 (SIGSEGV) in presidio analyzer at row {line}.',
+        trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/pii_scan/main.py", line 64, in <module>\n    main()\n  File "/opt/pipeline/components/pii_scan/scan.py", line 102, in scan_rows\n    findings = analyzer.analyze(text=row.actual_response, language=lang)\n[kubelet] Container pii-scan terminated: Error (exit code 139)' },
+      { code: 'COMPONENT_OOM', components: ['intent_classify', 'noise_robustness', 'slot_fill'], frac: [0.4, 0.8], message: 'The replica workerpool0-0 exited with a non-zero status of 137 (OOMKilled). Memory limit 32Gi exceeded.',
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/intent_eval/main.py", line 211, in <module>\n    main()\n  File "/opt/pipeline/components/intent_eval/main.py", line 188, in main\n    preds = runner.replay_batch(utterances, concurrency=args.concurrency)\n  File "/opt/pipeline/components/intent_eval/runner.py", line 94, in replay_batch\n    results.extend(self._collect(futures))\n  File "/opt/pipeline/components/intent_eval/runner.py", line 131, in _collect\n    payload = json.loads(f.result().content)\nMemoryError\n[kubelet] Container intent-eval terminated: OOMKilled (exit code 137)' },
-      { code: 'PIPELINE_FAILED', node: 'aggregate', frac: [0.3, 0.7], message: 'Task aggregate failed: upstream artifact intent_predictions.jsonl row count mismatch (expected {n}, got {m}).',
+      { code: 'PIPELINE_FAILED', components: ['aggregate', 'compare_baseline'], frac: [0.3, 0.7], message: 'Task aggregate failed: upstream artifact intent_predictions.jsonl row count mismatch (expected {n}, got {m}).',
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/aggregate/main.py", line 142, in <module>\n    main()\n  File "/opt/pipeline/components/aggregate/main.py", line 101, in main\n    df = join_artifacts(intent_df, judge_df, latency_df)\n  File "/opt/pipeline/components/aggregate/join.py", line 48, in join_artifacts\n    raise RowCountMismatch(f"expected {len(intent_df)}, got {len(judge_df)}")\naggregate.errors.RowCountMismatch: expected {n}, got {m}' }
     ],
     MODEL_TRANSIENT: [
-      { code: 'LLM_JUDGE_UNAVAILABLE', node: 'response_eval', frac: [0.25, 0.85], message: '503 ServiceUnavailable from judge endpoint (gemini) after 5 client retries.',
+      { code: 'SAFETY_CLASSIFIER_UNAVAILABLE', components: ['toxicity'], frac: [0.2, 0.8], message: '503 from safety-classifier endpoint (policy-guard/toxicity) after 3 retries.',
+        trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/toxicity/main.py", line 88, in <module>\n    main()\n  File "/opt/pipeline/components/toxicity/classify.py", line 41, in classify_batch\n    resp = client.predict(instances=batch)\ngoogle.api_core.exceptions.ServiceUnavailable: 503 safety-classifier endpoint unavailable' },
+      { code: 'LLM_JUDGE_UNAVAILABLE', components: ['llm_judge', 'toxicity', 'mos_predict'], frac: [0.25, 0.85], message: '503 ServiceUnavailable from judge endpoint (gemini) after 5 client retries.',
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/response_eval/main.py", line 176, in <module>\n    main()\n  File "/opt/pipeline/components/response_eval/main.py", line 152, in main\n    scores = judge.score_batch(pairs, rubric=RUBRIC_V3)\n  File "/opt/pipeline/components/response_eval/judge.py", line 88, in score_batch\n    resp = self._client.generate_content(prompt, generation_config=self._cfg)\n  File "/usr/local/lib/python3.11/site-packages/google/api_core/retry/retry_unary.py", line 293, in retry_wrapped_func\n    return retry_target(\ngoogle.api_core.exceptions.ServiceUnavailable: 503 The model is overloaded. Please try again later.' },
-      { code: 'BIXBY_AGENT_5XX', node: 'intent_eval', frac: [0.2, 0.7], message: 'Bixby Agent staging endpoint returned HTTP 502 for 37% of requests in 60s window (threshold 20%).',
+      { code: 'BIXBY_AGENT_5XX', components: ['intent_classify', 'slot_fill'], frac: [0.2, 0.7], message: 'Bixby Agent staging endpoint returned HTTP 502 for 37% of requests in 60s window (threshold 20%).',
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/intent_eval/runner.py", line 131, in _collect\n    payload = json.loads(f.result().content)\n  File "/opt/pipeline/components/intent_eval/client.py", line 57, in post\n    resp.raise_for_status()\n  File "/usr/local/lib/python3.11/site-packages/httpx/_models.py", line 763, in raise_for_status\n    raise HTTPStatusError(message, request=request, response=self)\nhttpx.HTTPStatusError: Server error \'502 Bad Gateway\' for url \'https://agent-staging.bixby.internal/v3/understand\'' }
     ],
     QUOTA: [
-      { code: 'VERTEX_QUOTA_EXCEEDED', node: 'response_eval', frac: [0.0, 0.04], message: 'Quota exceeded for aiplatform.googleapis.com/custom_model_training_nvidia_l4_gpus in region ' + REGION + ' (limit 16, requested 1, in use 16).',
+      { code: 'VERTEX_QUOTA_EXCEEDED', components: ['llm_judge', 'toxicity', 'noise_robustness', 'mos_predict', 'tts_synthesize'], frac: [0.0, 0.04], message: 'Quota exceeded for aiplatform.googleapis.com/custom_model_training_nvidia_l4_gpus in region ' + REGION + ' (limit 16, requested 1, in use 16).',
         trace: 'google.api_core.exceptions.ResourceExhausted: 429 The following quota metrics exceed quota limits: aiplatform.googleapis.com/custom_model_training_nvidia_l4_gpus\n  at PipelineJob task response-eval (CustomJob projects/' + PROJECT_NUM + '/locations/' + REGION + '/customJobs/{job})' }
     ],
     TIMEOUT: [
-      { code: 'COMPONENT_HEARTBEAT_TIMEOUT', node: 'response_eval', frac: [0.5, 0.9], message: 'No heartbeat from task response_eval for 900s; task marked failed by orchestrator.',
-        trace: 'pipeline-orchestrator: task response_eval heartbeat stale (last=900s ago, limit=900s)\n  workflow step: monitor_pipeline -> check_heartbeat -> raise HeartbeatTimeout' }
+      { code: 'COMPONENT_HEARTBEAT_TIMEOUT', components: ['llm_judge', 'mos_predict', 'intent_classify'], frac: [0.5, 0.9], message: 'No heartbeat from task {component} for 900s; task marked failed by orchestrator.',
+        trace: 'pipeline-orchestrator: task {component} heartbeat stale (last=900s ago, limit=900s)\n  workflow step: monitor_pipeline -> check_heartbeat -> raise HeartbeatTimeout' }
     ],
     INPUT_SCHEMA: [
-      { code: 'INPUT_SCHEMA_INVALID', node: 'preprocess', frac: [0.1, 0.35], message: "JSONL line {line}: 'expected_intent' is a required property (schema bixby-utterance/2.3).",
+      { code: 'INPUT_SCHEMA_INVALID', components: ['preprocess'], frac: [0.1, 0.35], message: "JSONL line {line}: 'expected_intent' is a required property (schema bixby-utterance/2.3).",
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/preprocess/main.py", line 77, in <module>\n    main()\n  File "/opt/pipeline/components/preprocess/main.py", line 59, in main\n    for rec in validate_stream(reader, SCHEMA_V2_3):\n  File "/opt/pipeline/components/preprocess/validate.py", line 33, in validate_stream\n    raise InputSchemaError(line_no, err.message) from err\npreprocess.errors.InputSchemaError: line {line}: \'expected_intent\' is a required property' }
     ],
     AUTH_PERMISSION: [
-      { code: 'PERMISSION_DENIED', node: 'preprocess', frac: [0.01, 0.05], message: "403 Permission 'storage.objects.get' denied on resource gs://" + BUCKET_IN + "/... for sa-vertex-pipeline@" + PROJECT + '.iam.gserviceaccount.com.',
+      { code: 'PERMISSION_DENIED', components: ['preprocess'], frac: [0.01, 0.05], message: "403 Permission 'storage.objects.get' denied on resource gs://" + BUCKET_IN + "/... for sa-vertex-pipeline@" + PROJECT + '.iam.gserviceaccount.com.',
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/preprocess/io.py", line 21, in open_input\n    blob.download_to_filename(local_path)\n  File "/usr/local/lib/python3.11/site-packages/google/cloud/storage/blob.py", line 1304, in download_to_filename\n    self._handle_filename_and_download(\ngoogle.api_core.exceptions.Forbidden: 403 GET https://storage.googleapis.com/download/storage/v1/b/' + BUCKET_IN + '/o/...: sa-vertex-pipeline@' + PROJECT + ".iam.gserviceaccount.com does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource (or it may not exist)." }
     ],
     CODE_DEFECT: [
-      { code: 'COMPONENT_CODE_ERROR', node: 'aggregate', frac: [0.2, 0.6], message: "KeyError: 'smartthings.scene_run' — capsule weight map missing new intent.",
+      { code: 'COMPONENT_CODE_ERROR', components: ['aggregate', 'compare_baseline'], frac: [0.2, 0.6], message: "KeyError: 'smartthings.scene_run' — capsule weight map missing new intent.",
         trace: 'Traceback (most recent call last):\n  File "/opt/pipeline/components/aggregate/main.py", line 142, in <module>\n    main()\n  File "/opt/pipeline/components/aggregate/main.py", line 118, in main\n    summary = build_summary(df, capsule_map)\n  File "/opt/pipeline/components/aggregate/summary.py", line 57, in build_summary\n    weight = capsule_map[row.intent]["weight"]\nKeyError: \'smartthings.scene_run\'' }
     ]
   };
   var CATEGORY_SERVICE = { QUOTA: 'vertex-ai', AUTH_PERMISSION: 'vertex-ai' };
 
   // ───────────────────────────────────────────── utterance content ──
-  var CAPSULES = [
-    { id: 'weather', label: '날씨', labelEn: 'Weather', weight: 14, adj: 0.05, confuse: 'calendar' },
-    { id: 'alarm_timer', label: '알람·타이머', labelEn: 'Alarm & Timer', weight: 13, adj: 0.06, confuse: 'calendar' },
-    { id: 'music', label: '음악', labelEn: 'Music', weight: 14, adj: 0.0, confuse: 'general_qa' },
-    { id: 'device_control', label: '기기제어(SmartThings)', labelEn: 'Device Control (SmartThings)', weight: 12, adj: -0.04, confuse: 'settings' },
-    { id: 'call_message', label: '전화·메시지', labelEn: 'Call & Message', weight: 11, adj: -0.02, confuse: 'calendar' },
-    { id: 'calendar', label: '캘린더', labelEn: 'Calendar', weight: 9, adj: 0.0, confuse: 'alarm_timer' },
-    { id: 'navigation', label: '길찾기', labelEn: 'Navigation', weight: 9, adj: -0.03, confuse: 'general_qa' },
-    { id: 'settings', label: '설정', labelEn: 'Settings', weight: 8, adj: 0.02, confuse: 'device_control' },
-    { id: 'general_qa', label: '일반 Q&A', labelEn: 'General Q&A', weight: 10, adj: -0.07, confuse: 'music' }
-  ];
+  var CAPSULES = DOMAIN.capsules;
   var CAP = {}; CAPSULES.forEach(function (c) { CAP[c.id] = c; });
-  var DEVICES = [
-    { id: 'Galaxy S26', weight: 50, adj: 0, lat: [850, 1750] },
-    { id: 'Galaxy Watch', weight: 15, adj: -0.02, lat: [1350, 2600] },
-    { id: 'Galaxy Buds', weight: 12, adj: -0.04, lat: [1200, 2400] },
-    { id: 'TV', weight: 12, adj: 0, lat: [1000, 2050] },
-    { id: 'Family Hub', weight: 11, adj: -0.01, lat: [1300, 2500] }
-  ];
+  var DEVICES = DOMAIN.devices;
   var DEV = {}; DEVICES.forEach(function (d) { DEV[d.id] = d; });
-  var LANG_BASE_PASS = { ko: 0.875, en: 0.90, ja: 0.82, es: 0.80 };
-  var VERSION_ADJ = { 'v1.0': -0.03, 'v1.1': 0, 'v1.2-rc': 0.04 };
+  var LANG_BASE_PASS = {}; LANGS.forEach(function (l) { LANG_BASE_PASS[l.code] = l.basePass; });
+  var VERSION_ADJ = {}; DOMAIN.releases.forEach(function (r) { VERSION_ADJ[r.version] = r.passAdj; });
   var VERSION_CAPSULE_ADJ = { 'v1.2-rc': { device_control: -0.13, general_qa: 0.03 } }; // rc regresses on SmartThings slot parser
 
   var SLOTS = {
@@ -637,16 +616,23 @@ export function createMockEngine(root) {
     if (lang === 'en' || lang === 'es') { var w = s.split(' '); if (w.length > 2) w.splice(rng.int(1, w.length - 1), 1); else w[w.length - 1] = w[w.length - 1].slice(0, -2) + 'o'; return w.join(' '); }
     return s.slice(0, Math.max(2, s.length - 2)) + 'ー';
   }
-  function passProb(lang, capsule, version, device) {
-    var p = LANG_BASE_PASS[lang] + CAP[capsule].adj + (VERSION_ADJ[version] || 0) + DEV[device].adj;
+  function passProb(lang, capsule, version, device, model) {
+    var p = (LANG_BASE_PASS[lang] || 0.85) + CAP[capsule].adj + (VERSION_ADJ[version] || 0) + DEV[device].adj + (MODEL_ADJ[model] || 0);
+    if (model && /rc$/.test(model) && capsule === 'device_control') p -= 0.05;
     var vc = VERSION_CAPSULE_ADJ[version]; if (vc && vc[capsule] != null) p += vc[capsule];
     return clamp(p, 0.3, 0.985);
   }
 
-  var UTT_CACHE = {};
+  // bounded LRU of per-workflow rows (rows are pure functions of the workflow → safe to evict)
+  var ROW_CACHE = new Map(), ROW_CACHE_ROWS = 0, ROW_CACHE_MAX = 80000, ROW_STATS = { hits: 0, misses: 0, evictions: 0 };
+  function cacheGet(id) { var r = ROW_CACHE.get(id); if (r) { ROW_CACHE.delete(id); ROW_CACHE.set(id, r); ROW_STATS.hits++; } return r; }
+  function cachePut(id, rows) {
+    ROW_CACHE.set(id, rows); ROW_CACHE_ROWS += rows.length; ROW_STATS.misses++;
+    while (ROW_CACHE_ROWS > ROW_CACHE_MAX && ROW_CACHE.size > 1) { var k = ROW_CACHE.keys().next().value; ROW_CACHE_ROWS -= ROW_CACHE.get(k).length; ROW_CACHE.delete(k); ROW_STATS.evictions++; }
+  }
   function wfSeq(wf) { return wf.workflow_id.replace(/^wf-/, ''); }
   function genUtterances(wf) {
-    if (UTT_CACHE[wf.workflow_id]) return UTT_CACHE[wf.workflow_id];
+    var cached = cacheGet(wf.workflow_id); if (cached) return cached;
     var rng = makeRng(hashStr(wf.workflow_id + '|utt'));
     var lang = wf.language, version = wf.pipeline_version, n = wf.input.utteranceCount;
     var rows = [];
@@ -662,10 +648,10 @@ export function createMockEngine(root) {
         language: lang, capsule: CAP[capsule].label, capsule_id: capsule, intent_expected: tpl[0], intent_predicted: tpl[0],
         utterance_text: text, asr_text: asrClean(lang, text), expected_response: expected, actual_response: expected,
         judge_score: 0, judge_reason: '', result: 'PASS', failure_reason: '', latency_ms: 0, device_type: device,
-        model_version: MODEL_BY_VERSION[version], pipeline_version: version, eval_timestamp: '', eval_ts: 0
+        model_version: wf.model_version, pipeline_id: wf.pipeline_id, pipeline_version: version, eval_timestamp: '', eval_ts: 0
       };
       var lat = DEV[device].lat; var latency = rng.int(lat[0], lat[1]) + (capsule === 'general_qa' ? rng.int(300, 900) : 0) - (version === 'v1.2-rc' ? 140 : 0);
-      var pass = rng.chance(passProb(lang, capsule, version, device));
+      var pass = rng.chance(passProb(lang, capsule, version, device, wf.model_version));
       if (pass) {
         row.judge_score = round(rng.float(0.74, 0.99), 2);
         row.judge_reason = rng.pick(JUDGE_PASS);
@@ -716,18 +702,21 @@ export function createMockEngine(root) {
       row.latency_ms = latency;
       rows.push(row);
     }
-    UTT_CACHE[wf.workflow_id] = rows;
+    cachePut(wf.workflow_id, rows);
     return rows;
   }
   function utterRates(wf) {
-    var rows = genUtterances(wf), n = rows.length || 1, it = 0, rp = 0, lt = 0, ps = 0;
+    var rows = genUtterances(wf), n = rows.length || 1, it = 0, rp = 0, lt = 0, ps = 0, sl = 0, as = 0, sf = 0;
     rows.forEach(function (r) {
       if (r.intent_predicted === r.intent_expected) it++;
       if (r.judge_score >= 0.7) rp++;
       if (r.latency_ms <= 8000) lt++;
       if (r.result === 'PASS') ps++;
+      if (r.failure_reason !== 'SLOT_ERROR') sl++;
+      if (r.failure_reason !== 'ASR_ERROR') as++;
+      if (r.failure_reason !== 'POLICY_VIOLATION') sf++;
     });
-    return { intent: it / n, response: rp / n, latency: lt / n, pass: ps / n, passCount: ps, failCount: rows.length - ps };
+    return { intent: it / n, response: rp / n, latency: lt / n, pass: ps / n, slot: sl / n, asr: as / n, safety: sf / n, passCount: ps, failCount: rows.length - ps };
   }
 
   // ───────────────────────────────────────────── results CSV ──
@@ -752,6 +741,7 @@ export function createMockEngine(root) {
     { key: 'latency_ms', label: 'latency_ms', type: 'number' },
     { key: 'device_type', label: 'device_type', type: 'enum' },
     { key: 'model_version', label: 'model_version', type: 'string' },
+    { key: 'pipeline_id', label: 'pipeline_id', type: 'enum' },
     { key: 'pipeline_version', label: 'pipeline_version', type: 'enum' },
     { key: 'eval_timestamp', label: 'eval_timestamp', type: 'datetime' }
   ];
@@ -776,7 +766,7 @@ export function createMockEngine(root) {
   var LOGS_ALL = [], LOGS_BY_WF = {}, LOGS_SYSTEM = [];
   var RESERVATIONS = [], DLQ = [], REPLAYS = [], ALERTS = [], INCIDENTS = [], AUDIT = [];
   var GCS_OBJECTS = {}; GCS_OBJECTS[BUCKET_IN] = []; GCS_OBJECTS[BUCKET_ART] = []; GCS_OBJECTS[BUCKET_RES] = [];
-  var RESULT_ROWS = [], RESULTS_BY_WF = {};
+  var RESULTS_BY_WF = {}; // legacy alias (rows are derived lazily via rowsFor)
   var PLANS = {}, EMITTED = {};
   var FENCE = 48120, DLQ_SEQ = 0, REPLAY_SEQ = 0, ALERT_SEQ = 0, AUDIT_SEQ = 0;
   var SEQ = {}; // date|lang -> last batch seq
@@ -795,7 +785,9 @@ export function createMockEngine(root) {
       event_id: 'ev-' + G.hex(12), ts: ts, timestamp: isoKst(ts), name: name, label: cat.label, stage: cat.stage,
       source: extra.source || cat.source, severity: extra.severity || sevFor(name),
       workflow_id: wf ? wf.workflow_id : null, batch_id: wf ? wf.batch_id : null, language: wf ? wf.language : (extra.language || null),
-      attempt: att ? att.attempt : null, pipeline_job_id: att ? att.pipeline_job_id : null,
+      attempt: att ? att.attempt : null, pipeline_job_id: extra.job ? extra.job.job_id : att ? att.pipeline_job_id : null,
+      root_pipeline_job_id: att ? att.pipeline_job_id : null, pipeline_id: extra.job ? extra.job.pipeline_id : att ? (att.pipeline_id || null) : null,
+      component: extra.component || null, node_path: extra.job ? extra.job.node_path : null,
       correlation_id: wf ? wf.correlation_id : null, trace_id: wf ? wf.trace_id : null, payload: payload || {}
     };
     if (wf) insertSorted(EVENTS_BY_WF[wf.workflow_id], ev);
@@ -809,7 +801,8 @@ export function createMockEngine(root) {
     var att = extra.att !== undefined ? extra.att : (wf && wf.attempts.length ? wf.attempts[wf.attempts.length - 1] : null);
     var l = {
       log_id: 'log-' + G.hex(16), ts: ts, timestamp: isoUtc(ts), severity: severity, service: service, component: extra.component || service,
-      event_type: extra.event_type || null, workflow_id: wf ? wf.workflow_id : null, pipeline_job_id: att ? att.pipeline_job_id : null,
+      event_type: extra.event_type || null, workflow_id: wf ? wf.workflow_id : null, pipeline_job_id: extra.job ? extra.job.job_id : att ? att.pipeline_job_id : null,
+      root_pipeline_job_id: att ? att.pipeline_job_id : null, pipeline_id: extra.job ? extra.job.pipeline_id : att ? (att.pipeline_id || null) : null, node_path: extra.job ? extra.job.node_path : null,
       execution_id: att ? att.workflow_execution_id.split('/').pop() : null, language: wf ? wf.language : (extra.language || null),
       attempt: att ? att.attempt : null, batch_id: wf ? wf.batch_id : null, error_code: extra.error_code || null,
       trace_id: wf ? wf.trace_id : (extra.trace_id || G.hex(32)), span_id: G.hex(16), duration_ms: extra.duration_ms != null ? Math.round(extra.duration_ms) : null,
@@ -840,7 +833,7 @@ export function createMockEngine(root) {
   function activeCount(lang) { var n = 0; for (var i = 0; i < WORKFLOWS.length; i++) { var w = WORKFLOWS[i]; if ((!lang || w.language === lang) && ACTIVE_STATES.indexOf(w.status) >= 0) n++; } return n; }
 
   // ───────────────────────────────────────────── workflow factory ──
-  var BYTES_PER_UTT = { ko: 455, en: 390, ja: 470, es: 405 };
+  var BYTES_PER_UTT = {}; LANGS.forEach(function (l) { BYTES_PER_UTT[l.code] = l.bytesPerUtterance; });
   function makeWorkflow(spec) {
     var dateC = kstCompact(spec.created), date = kstDate(spec.created);
     var key = date + '|' + spec.lang;
@@ -858,129 +851,291 @@ export function createMockEngine(root) {
     var idem = makeRng(hashStr(PROJECT + input.bucket + input.object + input.generation + version + (spec.replayCycle || 0))).hex(64);
     var wf = {
       workflow_id: id, batch_id: orig ? orig.batch_id : 'batch-' + dateC + '-' + spec.lang + '-' + pad(seq, 4), language: spec.lang,
-      status: null, stage: null, pipeline_version: version, replay_cycle: spec.replayCycle || 0, replay_of: orig ? orig.workflow_id : null, replayed_by: null,
+      status: null, stage: null, pipeline_id: spec.pipeline || (orig ? orig.pipeline_id : 'bixby-eval-full'), pipeline_version: version,
+      model_version: spec.model || (orig ? orig.model_version : modelFor(spec.created, makeRng(hashStr(id + '|model')))), replay_cycle: spec.replayCycle || 0, replay_of: orig ? orig.workflow_id : null, replayed_by: null,
       dead_letter_id: null, priority: spec.priority || 5, event_type: orig ? 'pipeline.batch.replay.requested' : 'pipeline.batch.requested',
       event_id: 'evt-' + dateC + '-' + rng.hex(8), idempotency_key: idem, correlation_id: 'corr-' + rng.hex(16), trace_id: rng.hex(32),
       input: input, result: null,
       created_at: null, validated_at: null, queued_at: null, reserved_at: null, started_at: null, completed_at: null, updated_at: null,
       waitMs: null, runMs: null, totalMs: null,
-      attempt: 0, attempts: [], dag: [], current_node: null, progress: { processed: 0, total: n, pct: 0 },
+      attempt: 0, attempts: [], dag: [], current_node: null, current_node_path: null, current_job_id: null, progress: { processed: 0, total: n, pct: 0 },
       reservation_id: null, workflow_execution_id: null, pipeline_job_id: null, error: null, retry_at: null,
       cancel_requested_at: null, cancelled_by: null, cancel_reason: null, status_history: []
     };
+    if (!pipeVer(wf.pipeline_id, version)) wf.pipeline_id = 'bixby-eval-full';
     WORKFLOWS.push(wf); WF[id] = wf; EVENTS_BY_WF[id] = []; LOGS_BY_WF[id] = [];
     return wf;
   }
 
+  // ───────────────────────────────────────────── pipeline registry ──
+  var COMPONENTS = clone(DOMAIN.components);
+  var PIPELINES = clone(DOMAIN.pipelines);
+  var PIPE = {};
+  PIPELINES.forEach(function (p) { PIPE[p.id] = p; p.versions.forEach(function (v) { v.releasedTs = Date.parse(v.releasedAt); }); });
+  var ROOT_PIPELINES = PIPELINES.filter(function (p) { return p.kind === 'root'; });
+  function pipeVer(id, version) { var p = PIPE[id]; if (!p) return null; for (var i = 0; i < p.versions.length; i++) if (p.versions[i].version === version) return p.versions[i]; return null; }
+  function nodeLabels(n) {
+    if (n.kind === 'component') { var c = COMPONENTS[n.component]; return { label: n.label || c.label, labelKo: c.labelKo }; }
+    var p = PIPE[n.ref.pipeline]; return { label: n.label || p.label, labelKo: p.labelKo };
+  }
+  var NOMINAL = {}, TREE_CACHE = {};
+  function nominal(pid, ver) {
+    var k = pid + '@' + ver; if (NOMINAL[k] != null) return NOMINAL[k];
+    var v = pipeVer(pid, ver), eft = {}, tot = 0;
+    v.nodes.forEach(function (n) {
+      var w = n.kind === 'component' ? COMPONENTS[n.component].weight : nominal(n.ref.pipeline, n.ref.version), est = 0;
+      n.deps.forEach(function (d) { est = Math.max(est, eft[d]); }); eft[n.id] = est + w; tot = Math.max(tot, eft[n.id]);
+    });
+    return (NOMINAL[k] = tot);
+  }
+  function leafComponents(pid, ver, out) {
+    out = out || [];
+    pipeVer(pid, ver).nodes.forEach(function (n) { if (n.kind === 'component') { if (out.indexOf(n.component) < 0) out.push(n.component); } else leafComponents(n.ref.pipeline, n.ref.version, out); });
+    return out;
+  }
+  function templateObject(pid, ver) { return 'templates/' + pid + '/' + ver + '.yaml'; }
+  /** Windows are fractions of the ROOT duration; child windows nest inside the parent node's window. */
+  function layoutJob(rng, pid, ver, s, e, suffix, parentNode, pathPrefix, pipePrefix, depth) {
+    var v = pipeVer(pid, ver), est = {}, eft = {}, tot = 0;
+    v.nodes.forEach(function (n) {
+      var w = (n.kind === 'component' ? COMPONENTS[n.component].weight : nominal(n.ref.pipeline, n.ref.version)) * rng.float(0.86, 1.16), st = 0;
+      n.deps.forEach(function (d) { st = Math.max(st, eft[d]); }); est[n.id] = st; eft[n.id] = st + w; tot = Math.max(tot, st + w);
+    });
+    var job = { suffix: suffix, pipeline_id: pid, pipeline_version: ver, depth: depth, s: s, e: e, parentNode: parentNode, nodes: [], byId: {} };
+    var span = e - s;
+    v.nodes.forEach(function (n) {
+      var ns = s + span * est[n.id] / tot, ne = s + span * eft[n.id] / tot, path = pathPrefix.concat([n.id]);
+      var nd = { id: n.id, kind: n.kind, component: n.component || null, ref: n.ref || null, deps: n.deps.slice(), legacyPhase: n.legacyPhase || null, s: ns, e: ne,
+        key: path.join('/'), pipePath: pipePrefix.concat([n.kind === 'component' ? n.component : n.ref.pipeline]).join('/'), job: job, child: null };
+      if (n.kind === 'subpipeline') { var pad = (ne - ns) * 0.015; nd.child = layoutJob(rng, n.ref.pipeline, n.ref.version, ns + pad, ne - pad, suffix + '.' + n.id, nd, path, pipePrefix.concat([n.ref.pipeline]), depth + 1); }
+      job.nodes.push(nd); job.byId[n.id] = nd;
+    });
+    return job;
+  }
+  function flattenJob(job, out) { out = out || []; job.nodes.forEach(function (n) { out.push(n); if (n.child) flattenJob(n.child, out); }); return out; }
+  function jobsOf(job, out) { out = out || []; out.push(job); job.nodes.forEach(function (n) { if (n.child) jobsOf(n.child, out); }); return out; }
+  function rootAncestor(nd) { while (nd.job.parentNode) nd = nd.job.parentNode; return nd; }
+
   // ───────────────────────────────────────────── attempt plans ──
-  var BASE_MIN = { ko: 11, en: 18, ja: 7.5, es: 7.5 };
+  var BASE_MIN = {}; LANGS.forEach(function (l) { BASE_MIN[l.code] = l.baseMinutes; });
   function planDuration(rng, lang, version, n) {
     var m = BASE_MIN[lang] * Math.pow(n / LANG[lang].batchSize, 0.75) * (version === 'v1.2-rc' ? 0.93 : version === 'v1.0' ? 1.06 : 1) * rng.float(0.84, 1.22);
     return Math.round(Math.max(3.2, m) * MIN);
   }
-  function makePlan(rng, lang, version, n, outcome, category, errIdx) {
-    var plan = { durationMs: planDuration(rng, lang, version, n), outcome: outcome, failNode: null, failFrac: null, error: null, timeoutMs: null, cancelAt: null };
-    plan.frac = DAG_TEMPLATE.map(function (d) { var j = rng.float(-0.012, 0.012); return [clamp(d.f[0] + (d.f[0] > 0.1 ? j : 0), 0.04, 0.95), clamp(d.f[1] + j, 0.06, 0.985)]; });
-    // keep dependencies monotone
-    plan.frac[1][0] = plan.frac[2][0] = plan.frac[3][0] = plan.frac[0][1];
-    var evEnd = Math.max(plan.frac[1][1], plan.frac[2][1], plan.frac[3][1]);
-    plan.frac[4][0] = evEnd; plan.frac[4][1] = Math.max(plan.frac[4][1], evEnd + 0.06);
-    plan.frac[5][0] = plan.frac[4][1]; plan.frac[5][1] = Math.min(0.995, Math.max(plan.frac[5][1], plan.frac[5][0] + 0.04));
+  function pickError(rng, category, errIdx, leaves) {
+    var list = ERRORS[category], first = errIdx != null ? errIdx % list.length : rng.int(0, list.length - 1);
+    for (var k = 0; k < list.length; k++) {
+      var e = list[(first + k) % list.length];
+      for (var c = 0; c < e.components.length; c++) {
+        var hit = leaves.filter(function (l) { return l.component === e.components[c]; })[0];
+        if (hit) return { def: e, leaf: hit };
+      }
+    }
+    var e0 = list[first], fb = leaves.filter(function (l) { return l.component === 'aggregate' || l.component === 'compare_baseline'; })[0] || leaves[0];
+    return { def: e0, leaf: fb };
+  }
+  function supportsCategory(pid, ver, category) {
+    var leaves = leafComponents(pid, ver);
+    return ERRORS[category].some(function (e) { return e.components.some(function (c) { return leaves.indexOf(c) >= 0; }); });
+  }
+  function makePlan(rng, lang, version, n, outcome, category, errIdx, pid) {
+    pid = pid || 'bixby-eval-full';
+    if (!pipeVer(pid, version)) pid = 'bixby-eval-full';
+    var plan = { pipeline_id: pid, pipeline_version: version, durationMs: Math.max(Math.round(2.4 * MIN), Math.round(planDuration(rng, lang, version, n) * (PIPE[pid].durationFactor || 1))),
+      outcome: outcome, failKey: null, failLeaf: null, failFrac: null, error: null, timeoutMs: null, cancelAt: null };
+    plan.root = layoutJob(rng, pid, version, 0.05, 0.985, '', null, [], [], 0);
+    plan.all = flattenJob(plan.root);
+    plan.leaves = plan.all.filter(function (x) { return x.kind === 'component'; });
+    plan.jobs = jobsOf(plan.root);
     if (outcome === 'FAILED') {
-      var list = ERRORS[category]; var e = list[errIdx != null ? errIdx % list.length : rng.int(0, list.length - 1)];
-      plan.failNode = e.node; plan.failFrac = rng.float(e.frac[0], e.frac[1]);
+      var pk = pickError(rng, category, errIdx, plan.leaves), e = pk.def, leaf = pk.leaf;
+      plan.failLeaf = leaf; plan.failKey = leaf.key; plan.failFrac = rng.float(e.frac[0], e.frac[1]);
       var line = rng.int(3, n), mm = Math.max(1, n - rng.int(1, 12));
-      plan.error = { category: category, code: e.code, node: e.node, message: e.message.replace('{line}', line).replace('{n}', n).replace('{m}', mm), trace: e.trace.replace(/\{line\}/g, line).replace(/\{n\}/g, n).replace(/\{m\}/g, mm).replace('{job}', rng.int(1e15, 9e15)) };
+      var sub = function (s) { return s.replace(/\{line\}/g, line).replace(/\{n\}/g, n).replace(/\{m\}/g, mm).replace(/\{component\}/g, leaf.component).replace('{job}', rng.int(1e15, 9e15)); };
+      plan.error = { category: category, code: e.code, node: rootAncestor(leaf).legacyPhase || 'aggregate', component: leaf.component, path: leaf.pipePath, node_path: leaf.key, job_suffix: leaf.job.suffix,
+        message: sub(e.message), trace: sub(e.trace) };
     } else if (outcome === 'TIMED_OUT') {
       plan.timeoutMs = config.pipelineTimeoutMin * MIN;
       plan.durationMs = Math.round(plan.timeoutMs * rng.float(1.5, 1.9));
-      plan.error = { category: 'TIMEOUT', code: 'PIPELINE_TIMEOUT', node: 'response_eval', message: 'PipelineJob exceeded pipelineTimeoutMin=' + config.pipelineTimeoutMin + 'm; cancel requested and confirmed. Remaining workflow budget insufficient for another attempt.', trace: null };
+      plan.error = { category: 'TIMEOUT', code: 'PIPELINE_TIMEOUT', node: 'response_eval', component: null, path: null, node_path: null, job_suffix: '', message: 'PipelineJob exceeded pipelineTimeoutMin=' + config.pipelineTimeoutMin + 'm; cancel requested and confirmed. Remaining workflow budget insufficient for another attempt.', trace: null };
     }
     return plan;
   }
   function planEndOffset(plan) {
-    var off;
-    if (plan.outcome === 'FAILED') { var fr = plan.frac[DAG_IDX[plan.failNode]]; off = Math.round(plan.durationMs * (fr[0] + plan.failFrac * (fr[1] - fr[0]))); }
-    else if (plan.outcome === 'TIMED_OUT') off = plan.timeoutMs;
-    else off = plan.durationMs;
-    return off;
+    if (plan.outcome === 'FAILED') { var fr = plan.failLeaf; return Math.round(plan.durationMs * (fr.s + plan.failFrac * (fr.e - fr.s))); }
+    if (plan.outcome === 'TIMED_OUT') return plan.timeoutMs;
+    return plan.durationMs;
   }
   function terminalOf(att, plan) {
-    var t = { type: plan.outcome === 'FAILED' ? 'FAILED' : plan.outcome === 'TIMED_OUT' ? 'TIMED_OUT' : 'SUCCEEDED', at: att.started_at + planEndOffset(plan), node: plan.failNode };
-    if (plan.cancelAt != null && plan.cancelAt < t.at) t = { type: 'CANCELLED', at: Math.max(att.started_at, plan.cancelAt), node: null };
+    var t = { type: plan.outcome === 'FAILED' ? 'FAILED' : plan.outcome === 'TIMED_OUT' ? 'TIMED_OUT' : 'SUCCEEDED', at: att.started_at + planEndOffset(plan), failKey: plan.failKey };
+    if (plan.cancelAt != null && plan.cancelAt < t.at) t = { type: 'CANCELLED', at: Math.max(att.started_at, plan.cancelAt), failKey: null };
     return t;
   }
 
-  // ───────────────────────────────────────────── DAG state ──
+  // ───────────────────────────────────────────── job / DAG state ──
   function artUri(jobId, node, file) { return 'gs://' + BUCKET_ART + '/pipeline_root/' + jobId + '/' + node + '/' + file; }
-  function nodeIO(wf, att, id) {
-    var j = att.pipeline_job_id, n = wf.input.utteranceCount, res = resultUris(wf);
-    var A = function (name, uri, type, size) { return { name: name, type: type, uri: uri, sizeBytes: size }; };
-    switch (id) {
-      case 'preprocess': return { inputs: [A('raw_utterances', wf.input.uri, 'system.Dataset', wf.input.sizeBytes)], outputs: [A('normalized_utterances', artUri(j, id, 'normalized_utterances.jsonl'), 'system.Dataset', Math.round(wf.input.sizeBytes * 1.12))] };
-      case 'intent_eval': return { inputs: [A('normalized_utterances', artUri(j, 'preprocess', 'normalized_utterances.jsonl'), 'system.Dataset')], outputs: [A('intent_predictions', artUri(j, id, 'intent_predictions.jsonl'), 'system.Dataset', n * 310), A('intent_metrics', artUri(j, id, 'intent_metrics.json'), 'system.Metrics', 2400)] };
-      case 'response_eval': return { inputs: [A('normalized_utterances', artUri(j, 'preprocess', 'normalized_utterances.jsonl'), 'system.Dataset')], outputs: [A('judge_scores', artUri(j, id, 'judge_scores.jsonl'), 'system.Dataset', n * 520), A('judge_metrics', artUri(j, id, 'judge_metrics.json'), 'system.Metrics', 2100)] };
-      case 'latency_check': return { inputs: [A('normalized_utterances', artUri(j, 'preprocess', 'normalized_utterances.jsonl'), 'system.Dataset')], outputs: [A('latency_report', artUri(j, id, 'latency_report.json'), 'system.Metrics', n * 42 + 900)] };
-      case 'aggregate': return { inputs: [A('intent_predictions', artUri(j, 'intent_eval', 'intent_predictions.jsonl'), 'system.Dataset'), A('judge_scores', artUri(j, 'response_eval', 'judge_scores.jsonl'), 'system.Dataset'), A('latency_report', artUri(j, 'latency_check', 'latency_report.json'), 'system.Metrics')], outputs: [A('results_csv', artUri(j, id, 'results.csv'), 'system.Dataset', n * 560), A('eval_summary', artUri(j, id, 'eval_summary.json'), 'system.Metrics', 3800)] };
-      default: return { inputs: [A('results_csv', artUri(j, 'aggregate', 'results.csv'), 'system.Dataset')], outputs: [A('results', res.csv, 'system.Dataset', n * 560), A('bq_table', 'bq://' + BQ_TABLE, 'google.BQTable')] };
-    }
-  }
   function resultUris(wf) {
     var base = 'gs://' + BUCKET_RES + '/' + kstDate(wf.created_at || clock.now) + '/' + wf.language + '/' + wf.workflow_id + '/';
     return { csv: base + 'results.csv', summary: base + 'summary.json', base: base };
   }
-  function computeNodes(wf, att, t) {
-    var plan = PLANS[att.pipeline_job_id];
-    if (!att.started_at) return DAG_TEMPLATE.map(function (d) { return blankNode(wf, att, d); });
-    var term = terminalOf(att, plan), done = term.at <= t, tau = done ? term.at : t;
+  function A(name, uri, type, size) { return { name: name, type: type, uri: uri, sizeBytes: size }; }
+  function nodeOutputs(wf, att, nd) {
+    var n = wf.input.utteranceCount;
+    if (nd.kind === 'component') {
+      var c = COMPONENTS[nd.component];
+      if (c.persists) { var res = resultUris(wf); return [A('results', res.csv, 'system.Dataset', n * 560), A('bq_table', 'bq://' + BQ_TABLE, 'google.BQTable')]; }
+      var jid = att.pipeline_job_id + nd.job.suffix;
+      return c.outputs.map(function (o) { return A(o.name, artUri(jid, nd.id, o.file), o.type, Math.round((o.bytesPerUtterance || 0) * n + (o.fixedBytes || 0))); });
+    }
+    var out = [], deps = {};
+    nd.child.nodes.forEach(function (x) { x.deps.forEach(function (d) { deps[d] = 1; }); });
+    nd.child.nodes.forEach(function (x) { if (!deps[x.id]) Array.prototype.push.apply(out, nodeOutputs(wf, att, x)); });
+    return out;
+  }
+  function nodeInputs(wf, att, nd) {
+    if (nd.deps.length) { var out = []; nd.deps.forEach(function (d) { nodeOutputs(wf, att, nd.job.byId[d]).forEach(function (o) { out.push({ name: o.name, type: o.type, uri: o.uri }); }); }); return out; }
+    if (nd.job.parentNode) return nodeInputs(wf, att, nd.job.parentNode);
+    return [A('raw_utterances', wf.input.uri, 'system.Dataset', wf.input.sizeBytes)];
+  }
+  function nodeStatusAt(nd, st, d, term, tau, done) {
+    var s = st + d * nd.s, e = st + d * nd.e, r = { status: 'PENDING', start_at: null, end_at: null, frac: 0 };
+    if (tau < s) r.status = done ? 'SKIPPED' : 'PENDING';
+    else if (tau < e) {
+      r.start_at = Math.round(s); r.frac = clamp((tau - s) / (e - s), 0, 1);
+      if (done) { r.status = (term.type === 'FAILED' && term.failKey && (term.failKey === nd.key || term.failKey.indexOf(nd.key + '/') === 0)) ? 'FAILED' : 'CANCELLED'; r.end_at = Math.round(tau); }
+      else r.status = 'RUNNING';
+    } else { r.status = 'SUCCEEDED'; r.start_at = Math.round(s); r.end_at = Math.round(e); r.frac = 1; }
+    return r;
+  }
+  function wfRates(wf) {
     if (!wf._rates) Object.defineProperty(wf, '_rates', { value: utterRates(wf), enumerable: false, writable: true });
-    var rates = wf._rates;
-    var total = wf.input.utteranceCount, st = att.started_at, d = plan.durationMs;
+    return wf._rates;
+  }
+  function metricRate(rates, metric) { return metric === 'none' || !metric ? 1 : rates[metric] != null ? rates[metric] : 1; }
+  function nodeProgress(wf, nd, frac) {
+    var total = wf.input.utteranceCount, processed = Math.floor(total * frac), metric = nd.kind === 'component' ? COMPONENTS[nd.component].metric : 'pass';
+    var pass = Math.round(processed * metricRate(wfRates(wf), metric));
+    return { processed: processed, total: total, pct: total ? round(processed / total, 4) : 0, pass: pass, fail: processed - pass };
+  }
+  function jobTiming(att) {
+    var plan = PLANS[att.pipeline_job_id];
+    return { plan: plan, term: terminalOf(att, plan), st: att.started_at, d: plan.durationMs };
+  }
+  function rootJobStatus(att, t) {
+    if (!att.started_at) return att.status === 'CANCELLED' ? 'CANCELLED' : 'PENDING';
+    var tm = jobTiming(att);
+    if (tm.term.at > t) return 'RUNNING';
+    return tm.term.type === 'SUCCEEDED' ? 'SUCCEEDED' : tm.term.type === 'CANCELLED' ? 'CANCELLED' : 'FAILED';
+  }
+  /** Full PipelineJobTree of an attempt at virtual time t (pure; derived from the plan). */
+  function jobTree(wf, att, t) {
+    t = t == null ? clock.now : t;
+    var tm = jobTiming(att), plan = tm.plan, started = !!att.started_at, done = started && tm.term.at <= t, tau = started ? Math.min(t, tm.term.at) : 0;
+    if (done && TREE_CACHE[att.pipeline_job_id] && TREE_CACHE[att.pipeline_job_id].at === tm.term.at) return TREE_CACHE[att.pipeline_job_id].tree;
     var hr = makeRng(hashStr(att.pipeline_job_id + '|res'));
-    return DAG_TEMPLATE.map(function (n, i) {
-      var s = st + d * plan.frac[i][0], e = st + d * plan.frac[i][1];
-      var node = blankNode(wf, att, n);
-      var cpuU = hr.int(38, 92), memU = hr.float(0.35, 0.82), gpuU = hr.int(55, 97);
-      if (tau < s) { node.status = done ? 'SKIPPED' : 'PENDING'; }
-      else if (tau < e) {
-        node.start_at = Math.round(s);
-        node.progress.processed = Math.floor(total * clamp((tau - s) / (e - s), 0, 1));
-        if (done) { node.status = (term.type === 'FAILED' && n.id === term.node) ? 'FAILED' : 'CANCELLED'; node.end_at = Math.round(tau); }
-        else node.status = 'RUNNING';
-      } else { node.status = 'SUCCEEDED'; node.start_at = Math.round(s); node.end_at = Math.round(e); node.progress.processed = total; }
-      if (node.start_at) {
-        node.duration_ms = (node.end_at || Math.round(tau)) - node.start_at;
-        node.resources.cpu.utilPct = node.status === 'RUNNING' ? cpuU : Math.round(cpuU * 0.8);
-        node.resources.memory.usedGb = round(n.memGb * memU, 1);
-        if (node.resources.gpu) node.resources.gpu.utilPct = gpuU;
-      }
-      var p = node.progress; p.pct = total ? round(p.processed / total, 4) : 0;
-      var rate = n.id === 'intent_eval' ? rates.intent : n.id === 'response_eval' ? rates.response : n.id === 'latency_check' ? rates.latency : (n.id === 'aggregate' || n.id === 'persist') ? rates.pass : 1;
-      p.pass = Math.round(p.processed * rate); p.fail = p.processed - p.pass;
-      if (node.status === 'FAILED' && plan.error) node.error = { code: plan.error.code, category: plan.error.category, message: plan.error.message };
-      node.outputs.forEach(function (o) { o.available = node.status === 'SUCCEEDED'; });
-      return node;
+    function build(job, status, startAt, endAt, parentJobId) {
+      var jobId = att.pipeline_job_id + job.suffix, errOut = null;
+      var nodes = [], children = [];
+      job.nodes.forEach(function (nd) {
+        var r = started ? nodeStatusAt(nd, tm.st, tm.d, tm.term, tau, done) : { status: att.status === 'CANCELLED' ? 'SKIPPED' : 'PENDING', start_at: null, end_at: null, frac: 0 };
+        var lb = nodeLabels(nd), c = nd.kind === 'component' ? COMPONENTS[nd.component] : null;
+        var cpuU = hr.int(38, 92), memU = hr.float(0.35, 0.82), gpuU = hr.int(55, 97);
+        var res;
+        if (c) res = { machineType: c.machineType, cpu: { cores: c.cpu, utilPct: 0 }, gpu: c.gpu ? { type: c.gpu.type, count: c.gpu.count, utilPct: 0 } : null, memory: { limitGb: c.memGb, usedGb: 0 } };
+        else {
+          var lv = flattenJob(nd.child).filter(function (x) { return x.kind === 'component'; }).map(function (x) { return COMPONENTS[x.component]; });
+          var g = lv.filter(function (x) { return x.gpu; });
+          res = { machineType: 'sub-pipeline (' + lv.length + ' components)', cpu: { cores: sum(lv.map(function (x) { return x.cpu; })), utilPct: 0 }, gpu: g.length ? { type: g[0].gpu.type, count: sum(g.map(function (x) { return x.gpu.count; })), utilPct: 0 } : null, memory: { limitGb: sum(lv.map(function (x) { return x.memGb; })), usedGb: 0 } };
+        }
+        if (r.start_at) {
+          res.cpu.utilPct = r.status === 'RUNNING' ? cpuU : Math.round(cpuU * 0.8);
+          res.memory.usedGb = round(res.memory.limitGb * memU, 1);
+          if (res.gpu) res.gpu.utilPct = gpuU;
+        }
+        var node = {
+          id: nd.id, kind: nd.kind, component: nd.component, ref: nd.ref ? { pipeline_id: nd.ref.pipeline, version: nd.ref.version } : null,
+          child_job_id: nd.child ? jobId + '.' + nd.id : null, node_path: nd.key, label: lb.label, labelKo: lb.labelKo, deps: nd.deps.slice(),
+          status: r.status, start_at: r.start_at, end_at: r.end_at, duration_ms: r.start_at ? (r.end_at || Math.round(tau)) - r.start_at : null,
+          task_id: String(hashStr(jobId + nd.id)) + String(hashStr(nd.id + jobId)).slice(0, 9),
+          progress: nodeProgress(wf, nd, r.frac), resources: res,
+          image: c ? REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/' + c.image + ':' + job.pipeline_version : null,
+          inputs: nodeInputs(wf, att, nd), outputs: nodeOutputs(wf, att, nd).map(function (o) { return Object.assign({}, o, { available: r.status === 'SUCCEEDED' }); }),
+          error: null, description: c ? c.description : PIPE[nd.ref.pipeline].description, legacy_phase: nd.legacyPhase
+        };
+        if (r.status === 'FAILED' && plan.error) { node.error = { code: plan.error.code, category: plan.error.category, message: plan.error.message, path: plan.error.path }; errOut = node.error; }
+        nodes.push(node);
+        if (nd.child) {
+          var pad = (tm.d || 0) * (nd.child.s - nd.s);
+          var cs = r.start_at ? Math.round(r.start_at + pad) : null;
+          if (cs && r.end_at && cs > r.end_at) cs = r.end_at;
+          children.push(build(nd.child, r.status, cs, r.end_at ? Math.max(cs || 0, r.end_at - Math.round(pad)) : null, jobId));
+        }
+      });
+      var edges = []; job.nodes.forEach(function (n) { n.deps.forEach(function (dd) { edges.push({ from: dd, to: n.id }); }); });
+      var pr = nodes.length ? (job.suffix ? null : null) : null; void pr;
+      var frac = startAt && tm.d ? clamp(((endAt || tau) - startAt) / Math.max(1, (job.e - job.s) * tm.d), 0, 1) : 0;
+      if (status === 'SUCCEEDED') frac = 1;
+      var tot = wf.input.utteranceCount;
+      return {
+        job_id: jobId, root_job_id: att.pipeline_job_id, parent_job_id: parentJobId, parent_node_id: job.parentNode ? job.parentNode.id : null, depth: job.depth,
+        workflow_id: wf.workflow_id, attempt: att.attempt, language: wf.language, pipeline_id: job.pipeline_id, pipeline_version: job.pipeline_version, model_version: wf.model_version,
+        vertex_resource: 'projects/' + PROJECT_NUM + '/locations/' + REGION + '/pipelineJobs/' + jobId,
+        status: status, start_at: startAt, end_at: endAt, duration_ms: startAt ? (endAt || Math.round(tau)) - startAt : null,
+        progress: { processed: Math.round(frac * tot), total: tot, pct: round(frac, 4) },
+        nodes: nodes, edges: edges, children: children, error: errOut
+      };
+    }
+    var rs = rootJobStatus(att, t);
+    var rootEnd = done ? Math.round(tm.term.at) : null;
+    var tree = build(plan.root, rs, att.started_at, rootEnd, null);
+    if (done) TREE_CACHE[att.pipeline_job_id] = { at: tm.term.at, tree: tree };
+    return tree;
+  }
+  function jobTreeList(tree, out) { out = out || []; out.push(tree); tree.children.forEach(function (c) { jobTreeList(c, out); }); return out; }
+  /** LEGACY six-phase projection of the root job DAG (keeps GET /workflows/[id]/dag + current UI working). */
+  function legacyDag(wf, att, rootNodes, finished) {
+    return DAG_TEMPLATE.map(function (d) {
+      var m = rootNodes.filter(function (n) { return n.legacy_phase === d.id; });
+      var base = {
+        id: d.id, label: d.label, labelKo: d.labelKo, deps: d.deps.slice(), status: finished ? 'SKIPPED' : 'PENDING', start_at: null, end_at: null, duration_ms: null,
+        task_id: String(hashStr(att.pipeline_job_id + d.id)) + String(hashStr(d.id + att.pipeline_job_id)).slice(0, 9),
+        progress: { processed: 0, total: wf.input.utteranceCount, pct: 0, pass: 0, fail: 0 },
+        resources: { machineType: d.machineType, cpu: { cores: d.cpu, utilPct: 0 }, gpu: d.gpu ? { type: d.gpu.type, count: d.gpu.count, utilPct: 0 } : null, memory: { limitGb: d.memGb, usedGb: 0 } },
+        image: REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/' + d.image + ':' + att.pipeline_version, inputs: [], outputs: [], error: null, description: d.description,
+        mapped_nodes: m.map(function (n) { return n.id; })
+      };
+      if (!m.length) return base;
+      var st = m.map(function (n) { return n.status; });
+      base.status = st.indexOf('FAILED') >= 0 ? 'FAILED' : st.indexOf('RUNNING') >= 0 ? 'RUNNING' : st.every(function (s) { return s === 'SUCCEEDED'; }) ? 'SUCCEEDED'
+        : st.indexOf('CANCELLED') >= 0 ? 'CANCELLED' : st.indexOf('SUCCEEDED') >= 0 ? (finished ? 'SUCCEEDED' : 'RUNNING') : st[0];
+      var starts = m.map(function (n) { return n.start_at; }).filter(function (x) { return x != null; }), ends = m.map(function (n) { return n.end_at; }).filter(function (x) { return x != null; });
+      base.start_at = starts.length ? Math.min.apply(null, starts) : null;
+      base.end_at = base.status === 'RUNNING' || base.status === 'PENDING' ? null : ends.length ? Math.max.apply(null, ends) : null;
+      base.duration_ms = base.start_at ? (base.end_at || Math.max.apply(null, m.map(function (n) { return n.start_at ? n.start_at + (n.duration_ms || 0) : 0; }))) - base.start_at : null;
+      var lead = m[m.length - 1];
+      base.progress = Object.assign({}, lead.progress);
+      base.resources = lead.resources;
+      if (lead.image) base.image = lead.image;
+      base.inputs = m[0].inputs; base.outputs = [].concat.apply([], m.map(function (n) { return n.outputs; }));
+      var fe = m.filter(function (n) { return n.error; })[0];
+      if (fe) base.error = { code: fe.error.code, category: fe.error.category, message: fe.error.message };
+      return base;
     });
   }
-  function blankNode(wf, att, n) {
-    var io = nodeIO(wf, att, n.id);
-    return {
-      id: n.id, label: n.label, labelKo: n.labelKo, deps: n.deps.slice(), status: 'PENDING', start_at: null, end_at: null, duration_ms: null,
-      task_id: String(hashStr(att.pipeline_job_id + n.id)) + String(hashStr(n.id + att.pipeline_job_id)).slice(0, 9),
-      progress: { processed: 0, total: wf.input.utteranceCount, pct: 0, pass: 0, fail: 0 },
-      resources: { machineType: n.machineType, cpu: { cores: n.cpu, utilPct: 0 }, gpu: n.gpu ? { type: n.gpu.type, count: n.gpu.count, utilPct: 0 } : null, memory: { limitGb: n.memGb, usedGb: 0 } },
-      image: REGION + '-docker.pkg.dev/' + PROJECT + '/pipelines/' + n.image + ':' + att.pipeline_version,
-      inputs: io.inputs, outputs: io.outputs, error: null, description: n.description
-    };
-  }
   function applyDag(wf, att, t) {
-    var nodes = computeNodes(wf, att, t);
+    var tree = jobTree(wf, att, t);
+    var finished = tree.status !== 'RUNNING' && tree.status !== 'PENDING';
+    var nodes = legacyDag(wf, att, tree.nodes, finished);
     if (!att.dag.length) nodes.forEach(function (n) { att.dag.push(n); });
     else nodes.forEach(function (n, i) { Object.assign(att.dag[i], n); });
     wf.dag = att.dag;
     var running = att.dag.filter(function (n) { return n.status === 'RUNNING'; });
     var failed = att.dag.filter(function (n) { return n.status === 'FAILED'; })[0];
     wf.current_node = failed ? failed.id : running.length ? running.map(function (n) { return n.id; }).sort(function (a, b) { return DAG_IDX[b] - DAG_IDX[a]; })[0] : null;
+    // deepest running/failed leaf
+    var best = null, bestJob = null;
+    jobTreeList(tree).forEach(function (j) { j.nodes.forEach(function (n) { if (n.kind === 'component' && (n.status === 'RUNNING' || n.status === 'FAILED') && (!best || n.status === 'FAILED' || (best.status !== 'FAILED' && (n.start_at || 0) >= (best.start_at || 0)))) { best = n; bestJob = j; } }); });
+    wf.current_node_path = best ? best.node_path : null; wf.current_job_id = bestJob ? bestJob.job_id : null;
     var plan = PLANS[att.pipeline_job_id];
     if (att.started_at && plan) {
       var frac = clamp((Math.min(t, terminalOf(att, plan).at) - att.started_at) / plan.durationMs, 0, 1);
@@ -990,69 +1145,104 @@ export function createMockEngine(root) {
   }
 
   // ───────────────────────────────────────────── progress / node events ──
-  function progressMsg(wf, node) {
-    var p = node.progress, s = node.id + ' ' + p.processed + '/' + p.total + ' (' + (p.pct * 100).toFixed(1) + '%)';
-    if (node.id === 'preprocess') return s + ' valid=' + p.processed + ' rejected=0';
-    if (node.id === 'intent_eval') return s + ' pass=' + p.pass + ' fail=' + p.fail;
-    if (node.id === 'response_eval') return s + ' judged=' + p.processed + ' avg_score=' + (0.62 + 0.3 * (p.processed ? p.pass / p.processed : 0)).toFixed(2) + ' pass=' + p.pass + ' fail=' + p.fail;
-    if (node.id === 'latency_check') return s + ' p50=' + (1200 + (hashStr(wf.workflow_id) % 300)) + 'ms p95=' + (2300 + (hashStr(wf.workflow_id) % 700)) + 'ms over_8s=' + p.fail;
-    return s;
+  function jobCtx(att, nd) {
+    var job = nd.job;
+    return { job_id: att.pipeline_job_id + job.suffix, pipeline_id: job.pipeline_id, pipeline_version: job.pipeline_version, node_path: nd.key, depth: job.depth };
+  }
+  function childCtx(att, nd) { var c = nd.child; return { job_id: att.pipeline_job_id + c.suffix, pipeline_id: c.pipeline_id, pipeline_version: c.pipeline_version, node_path: nd.key, depth: c.depth }; }
+  function emitJob(wf, att, ctx, parentJobId, from, to, at, err) {
+    emit('job', { job_id: ctx.job_id, root_job_id: att.pipeline_job_id, parent_job_id: parentJobId, workflow_id: wf.workflow_id, language: wf.language, pipeline_id: ctx.pipeline_id,
+      pipeline_version: ctx.pipeline_version, node_path: ctx.node_path, depth: ctx.depth, from: from, to: to, at: Math.round(at), error_code: err ? err.code : null, error_path: err ? err.path : null });
+  }
+  function progressMsg(wf, nd, p) {
+    var s = nd.id + ' ' + p.processed + '/' + p.total + ' (' + (p.pct * 100).toFixed(1) + '%)';
+    var m = COMPONENTS[nd.component].metric;
+    if (m === 'none') return s + ' valid=' + p.processed + ' rejected=0';
+    if (m === 'latency') return s + ' p50=' + (1200 + (hashStr(wf.workflow_id) % 300)) + 'ms p95=' + (2300 + (hashStr(wf.workflow_id) % 700)) + 'ms over_8s=' + p.fail;
+    if (m === 'response') return s + ' judged=' + p.processed + ' avg_score=' + (0.62 + 0.3 * (p.processed ? p.pass / p.processed : 0)).toFixed(2) + ' pass=' + p.pass + ' fail=' + p.fail;
+    return s + ' pass=' + p.pass + ' fail=' + p.fail;
   }
   function syncAttempt(wf, att, t, live) {
     var plan = PLANS[att.pipeline_job_id];
     var em = EMITTED[att.pipeline_job_id] || (EMITTED[att.pipeline_job_id] = {});
-    var term = terminalOf(att, plan), tau = Math.min(t, term.at), st = att.started_at, d = plan.durationMs;
+    var term = terminalOf(att, plan), tau = Math.min(t, term.at), st = att.started_at, d = plan.durationMs, rootId = att.pipeline_job_id;
     var occ = [];
-    DAG_TEMPLATE.forEach(function (n, i) {
-      var s = st + d * plan.frac[i][0], e = st + d * plan.frac[i][1];
+    plan.all.forEach(function (nd, i) {
+      var s = st + d * nd.s, e = st + d * nd.e;
       if (s <= tau && s < term.at) occ.push({ at: s, kind: 'start', i: i });
-      if (i < 4) [0.25, 0.5, 0.75].forEach(function (q) { var at = s + q * (e - s); if (at <= tau && at < term.at) occ.push({ at: at, kind: 'progress', i: i, q: q }); });
+      if (nd.kind === 'component' && !COMPONENTS[nd.component].persists) [0.25, 0.5, 0.75].forEach(function (q) { var at = s + q * (e - s); if (at <= tau && at < term.at) occ.push({ at: at, kind: 'progress', i: i, q: q }); });
       if (e <= tau && e <= term.at) occ.push({ at: e, kind: 'end', i: i });
     });
-    var evalEnd = Math.max(st + d * plan.frac[1][1], st + d * plan.frac[2][1], st + d * plan.frac[3][1]);
-    if (evalEnd <= tau && evalEnd <= term.at) occ.push({ at: evalEnd + 120, kind: 'evaldone' });
+    var aggNode = plan.root.nodes.filter(function (n) { return n.legacyPhase === 'aggregate'; })[0];
+    if (aggNode) { var ea = st + d * aggNode.s; if (ea <= tau && ea <= term.at) occ.push({ at: ea - 60, kind: 'evaldone' }); }
     occ.sort(function (a, b) { return a.at - b.at; });
     occ.forEach(function (o) {
       var key = o.kind + ':' + (o.i != null ? o.i : '') + ':' + (o.q || '');
       if (em[key]) return; em[key] = 1;
-      var n = o.i != null ? DAG_TEMPLATE[o.i] : null;
+      var nd = o.i != null ? plan.all[o.i] : null, ctx = nd ? jobCtx(att, nd) : null;
       if (o.kind === 'start') {
-        addEvent(wf, 'TASK_' + n.ev + '_STARTED', o.at, { task: n.id, task_id: String(hashStr(att.pipeline_job_id + n.id)), machine_type: n.machineType, accelerator: n.gpu ? n.gpu.type + ' x' + n.gpu.count : null }, { att: att });
-        addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', 'Launching component ' + n.id + ' (image ' + n.image + ':' + att.pipeline_version + ', machine ' + n.machineType + (n.gpu ? ', ' + n.gpu.type : '') + ')', { component: n.id, event_type: 'TASK_STARTED', att: att });
+        if (nd.kind === 'component') {
+          var c = COMPONENTS[nd.component];
+          addEvent(wf, 'TASK_' + c.ev + '_STARTED', o.at, { task: nd.id, component: nd.component, task_id: String(hashStr(ctx.job_id + nd.id)), machine_type: c.machineType, accelerator: c.gpu ? c.gpu.type + ' x' + c.gpu.count : null }, { att: att, job: ctx, component: nd.component });
+          addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', 'Launching component ' + nd.id + ' (image ' + c.image + ':' + nd.job.pipeline_version + ', machine ' + c.machineType + (c.gpu ? ', ' + c.gpu.type : '') + ')' + (nd.job.depth ? ' in ' + ctx.job_id : ''), { component: nd.component, event_type: 'TASK_STARTED', att: att, job: ctx });
+        } else {
+          var cc = childCtx(att, nd);
+          addEvent(wf, 'CHILD_PIPELINE_STARTED', o.at, { child_pipeline_job_id: cc.job_id, pipeline_id: cc.pipeline_id, pipeline_version: cc.pipeline_version, parent_node: nd.id, template_uri: 'gs://' + BUCKET_ART + '/' + templateObject(cc.pipeline_id, cc.pipeline_version) }, { att: att, job: cc });
+          addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', 'Launching sub-pipeline ' + cc.pipeline_id + '@' + cc.pipeline_version + ' as PipelineJob ' + cc.job_id + ' (node ' + nd.key + ')', { component: nd.id, event_type: 'CHILD_PIPELINE_STARTED', att: att, job: cc });
+          emitJob(wf, att, cc, ctx.job_id, 'PENDING', 'RUNNING', o.at, null);
+        }
       } else if (o.kind === 'progress') {
-        var nodes = computeNodes(wf, att, o.at);
-        addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', progressMsg(wf, nodes[o.i]), { component: n.id, event_type: 'TASK_PROGRESS', att: att, labels: { progress_pct: String(Math.round(o.q * 100)) } });
+        var fr = clamp((o.at - (st + d * nd.s)) / (d * (nd.e - nd.s)), 0, 1), p = nodeProgress(wf, nd, fr);
+        addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', progressMsg(wf, nd, p), { component: nd.component, event_type: 'TASK_PROGRESS', att: att, job: ctx, labels: { progress_pct: String(Math.round(o.q * 100)) } });
         if (o.q === 0.5) {
-          var r = nodes[o.i].resources;
-          addLog(wf, o.at + 350, 'DEBUG', 'vertex-ai-pipelines', 'resource usage cpu=' + r.cpu.utilPct + '% mem=' + r.memory.usedGb + 'GiB/' + r.memory.limitGb + 'GiB' + (r.gpu ? ' gpu=' + r.gpu.utilPct + '%' : ''), { component: n.id, event_type: 'TASK_METRICS', att: att });
+          var c2 = COMPONENTS[nd.component], hr = makeRng(hashStr(ctx.job_id + nd.id + '|m'));
+          addLog(wf, o.at + 350, 'DEBUG', 'vertex-ai-pipelines', 'resource usage cpu=' + hr.int(38, 92) + '% mem=' + round(c2.memGb * hr.float(0.35, 0.82), 1) + 'GiB/' + c2.memGb + 'GiB' + (c2.gpu ? ' gpu=' + hr.int(55, 97) + '%' : ''), { component: nd.component, event_type: 'TASK_METRICS', att: att, job: ctx });
         }
       } else if (o.kind === 'end') {
-        var nd = computeNodes(wf, att, o.at)[o.i];
-        var dur = d * (plan.frac[o.i][1] - plan.frac[o.i][0]);
-        addEvent(wf, 'TASK_' + n.ev + '_COMPLETED', o.at, { task: n.id, duration_ms: Math.round(dur), processed: nd.progress.processed, pass: nd.progress.pass, fail: nd.progress.fail }, { att: att });
-        addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', n.id + ' completed in ' + fmt.duration(dur, { style: 'short' }) + ': ' + progressMsg(wf, nd).replace(n.id + ' ', ''), { component: n.id, event_type: 'TASK_COMPLETED', att: att, duration_ms: dur });
-        nodeIO(wf, att, n.id).outputs.forEach(function (out) {
-          if (out.uri.indexOf('gs://' + BUCKET_ART + '/') === 0) addGcsObject(BUCKET_ART, out.uri.replace('gs://' + BUCKET_ART + '/', ''), out.sizeBytes || 1200, o.at + 200, /\.json$/.test(out.uri) ? 'application/json' : /\.csv$/.test(out.uri) ? 'text/csv' : 'application/x-ndjson', { pipeline_job_id: att.pipeline_job_id, task: n.id }, wf.workflow_id);
-        });
+        var dur = d * (nd.e - nd.s);
+        if (nd.kind === 'component') {
+          var c3 = COMPONENTS[nd.component], p3 = nodeProgress(wf, nd, 1);
+          addEvent(wf, 'TASK_' + c3.ev + '_COMPLETED', o.at, { task: nd.id, component: nd.component, duration_ms: Math.round(dur), processed: p3.processed, pass: p3.pass, fail: p3.fail }, { att: att, job: ctx, component: nd.component });
+          addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', nd.id + ' completed in ' + fmt.duration(dur, { style: 'short' }) + ': ' + progressMsg(wf, nd, p3).replace(nd.id + ' ', ''), { component: nd.component, event_type: 'TASK_COMPLETED', att: att, job: ctx, duration_ms: dur });
+          nodeOutputs(wf, att, nd).forEach(function (out) {
+            if (out.uri.indexOf('gs://' + BUCKET_ART + '/') === 0) addGcsObject(BUCKET_ART, out.uri.replace('gs://' + BUCKET_ART + '/', ''), out.sizeBytes || 1200, o.at + 200, /\.json$/.test(out.uri) ? 'application/json' : /\.csv$/.test(out.uri) ? 'text/csv' : 'application/x-ndjson', { pipeline_job_id: ctx.job_id, root_pipeline_job_id: rootId, pipeline_id: ctx.pipeline_id, task: nd.id, component: nd.component, node_path: nd.key }, wf.workflow_id);
+          });
+        } else {
+          var cc2 = childCtx(att, nd);
+          addEvent(wf, 'CHILD_PIPELINE_SUCCEEDED', o.at, { child_pipeline_job_id: cc2.job_id, pipeline_id: cc2.pipeline_id, pipeline_version: cc2.pipeline_version, duration_ms: Math.round(dur) }, { att: att, job: cc2 });
+          addLog(wf, o.at, 'INFO', 'vertex-ai-pipelines', 'Sub-pipeline ' + cc2.pipeline_id + '@' + cc2.pipeline_version + ' (' + cc2.job_id + ') SUCCEEDED in ' + fmt.duration(dur, { style: 'short' }), { component: nd.id, event_type: 'CHILD_PIPELINE_SUCCEEDED', att: att, job: cc2, duration_ms: dur });
+          emitJob(wf, att, cc2, ctx.job_id, 'RUNNING', 'SUCCEEDED', o.at, null);
+        }
       } else if (o.kind === 'evaldone') {
-        addEvent(wf, 'TASK_EVALUATION_COMPLETED', o.at, { tasks: ['intent_eval', 'response_eval', 'latency_check'] }, { att: att });
+        addEvent(wf, 'TASK_EVALUATION_COMPLETED', o.at, { tasks: plan.root.nodes.filter(function (n) { return n.legacyPhase && ['intent_eval', 'response_eval', 'latency_check'].indexOf(n.legacyPhase) >= 0; }).map(function (n) { return n.id; }) }, { att: att });
       }
     });
     if (term.at <= t && !em.term) {
       em.term = 1;
+      // nodes state at the terminal instant (deepest first so child-job failures precede parents)
+      var states = plan.all.map(function (nd) { return { nd: nd, r: nodeStatusAt(nd, st, d, term, term.at, true) }; }).reverse();
       if (term.type === 'FAILED') {
-        var fn = DAG_TEMPLATE[DAG_IDX[term.node]];
-        addLog(wf, term.at - 40, 'ERROR', 'vertex-ai-pipelines', fn.id + ' failed: ' + plan.error.message, { component: fn.id, event_type: 'TASK_FAILED', att: att, error_code: plan.error.code, stack_trace: plan.error.trace });
-        addEvent(wf, 'TASK_' + fn.ev + '_FAILED', term.at, { task: fn.id, error_code: plan.error.code, error_category: plan.error.category, message: plan.error.message }, { att: att });
-      } else if (term.type === 'TIMED_OUT' || term.type === 'CANCELLED') {
-        computeNodes(wf, att, term.at).forEach(function (n) {
-          if (n.status === 'CANCELLED') addLog(wf, term.at + 500, 'WARNING', 'vertex-ai-pipelines', n.id + ' cancelled at ' + n.progress.processed + '/' + n.progress.total + ' (pipeline ' + (term.type === 'TIMED_OUT' ? 'timeout' : 'cancel') + ')', { component: n.id, event_type: 'TASK_CANCELLED', att: att });
-        });
+        var leaf = plan.failLeaf, lc = jobCtx(att, leaf), fc = COMPONENTS[leaf.component];
+        addLog(wf, term.at - 40, 'ERROR', 'vertex-ai-pipelines', leaf.id + ' failed: ' + plan.error.message + ' [path ' + plan.error.path + ']', { component: leaf.component, event_type: 'TASK_FAILED', att: att, job: lc, error_code: plan.error.code, stack_trace: plan.error.trace });
+        addEvent(wf, 'TASK_' + fc.ev + '_FAILED', term.at, { task: leaf.id, component: leaf.component, error_code: plan.error.code, error_category: plan.error.category, message: plan.error.message, path: plan.error.path }, { att: att, job: lc, component: leaf.component });
       }
+      states.forEach(function (x) {
+        var nd = x.nd, r = x.r;
+        if (nd.kind === 'component' && r.status === 'CANCELLED') addLog(wf, term.at + 500, 'WARNING', 'vertex-ai-pipelines', nd.id + ' cancelled at ' + nodeProgress(wf, nd, r.frac).processed + '/' + wf.input.utteranceCount + ' (' + (term.type === 'TIMED_OUT' ? 'pipeline timeout' : term.type === 'CANCELLED' ? 'pipeline cancel' : 'sibling failure ' + plan.error.path) + ')', { component: nd.component, event_type: 'TASK_CANCELLED', att: att, job: jobCtx(att, nd) });
+        if (nd.kind === 'subpipeline' && (r.status === 'FAILED' || r.status === 'CANCELLED')) {
+          var cc3 = childCtx(att, nd), failed = r.status === 'FAILED';
+          addEvent(wf, failed ? 'CHILD_PIPELINE_FAILED' : 'CHILD_PIPELINE_CANCELLED', term.at + (failed ? 200 : 600) + nd.job.depth, { child_pipeline_job_id: cc3.job_id, pipeline_id: cc3.pipeline_id, pipeline_version: cc3.pipeline_version, error_code: failed ? plan.error.code : null, path: failed ? plan.error.path : null }, { att: att, job: cc3 });
+          addLog(wf, term.at + (failed ? 250 : 650), failed ? 'ERROR' : 'WARNING', 'vertex-ai-pipelines', 'Sub-pipeline ' + cc3.pipeline_id + '@' + cc3.pipeline_version + ' (' + cc3.job_id + ') ' + (failed ? 'FAILED: ' + plan.error.code + ' at ' + plan.error.path : 'CANCELLED'), { component: nd.id, event_type: failed ? 'CHILD_PIPELINE_FAILED' : 'CHILD_PIPELINE_CANCELLED', att: att, job: cc3, error_code: failed ? plan.error.code : null });
+          emitJob(wf, att, cc3, jobCtx(att, nd).job_id, 'RUNNING', r.status, term.at, failed ? plan.error : null);
+        }
+      });
     }
     applyDag(wf, att, t);
     if (live && term.at > t) {
-      att.dag.forEach(function (n) { if (n.status === 'RUNNING' && DAG_IDX[n.id] < 4) addLog(wf, t, 'INFO', 'vertex-ai-pipelines', progressMsg(wf, n), { component: n.id, event_type: 'TASK_PROGRESS', att: att }); });
+      plan.leaves.forEach(function (nd) {
+        var r = nodeStatusAt(nd, st, d, term, t, false);
+        if (r.status === 'RUNNING' && !COMPONENTS[nd.component].persists) addLog(wf, t, 'INFO', 'vertex-ai-pipelines', progressMsg(wf, nd, nodeProgress(wf, nd, r.frac)), { component: nd.component, event_type: 'TASK_PROGRESS', att: att, job: jobCtx(att, nd) });
+      });
     }
     return term.at <= t ? term : null;
   }
@@ -1064,13 +1254,14 @@ export function createMockEngine(root) {
     var exec = makeRng(hashStr(jobId)).uuid();
     var att = {
       attempt: n, pipeline_job_id: jobId, workflow_execution_id: 'projects/' + PROJECT + '/locations/' + REGION + '/workflows/pipeline-orchestrator/executions/' + exec,
-      vertex_resource: 'projects/' + PROJECT_NUM + '/locations/' + REGION + '/pipelineJobs/' + jobId, pipeline_version: wf.pipeline_version,
+      vertex_resource: 'projects/' + PROJECT_NUM + '/locations/' + REGION + '/pipelineJobs/' + jobId, pipeline_id: plan.pipeline_id, pipeline_version: wf.pipeline_version,
       status: status, created_at: Math.round(t), started_at: null, completed_at: null, duration_ms: null,
-      error_code: null, error_category: null, error_message: null, failed_node: null, backoffSec: null, retry_at: null, dag: []
+      error_code: null, error_category: null, error_message: null, failed_node: null, failed_path: null, failed_node_path: null, failed_component: null, failed_job_id: null,
+      backoffSec: null, retry_at: null, dag: [], job_ids: plan.jobs.map(function (j) { return jobId + j.suffix; })
     };
     PLANS[jobId] = plan;
     wf.attempts.push(att); wf.attempt = n; wf.pipeline_job_id = jobId; wf.workflow_execution_id = att.workflow_execution_id;
-    att.dag = DAG_TEMPLATE.map(function (d) { return blankNode(wf, att, d); }); wf.dag = att.dag;
+    applyDag(wf, att, t);
     return att;
   }
   function reserve(wf, t) {
@@ -1129,8 +1320,8 @@ export function createMockEngine(root) {
   function stepDispatching(wf, t, plan) {
     var att = newAttempt(wf, plan, t, 'DISPATCHING');
     addEvent(wf, 'WORKFLOW_STARTED', t, { workflow: 'pipeline-orchestrator', revision: '000017-a3f', execution_id: att.workflow_execution_id }, { att: att });
-    addEvent(wf, 'PIPELINE_SUBMITTED', t + G.int(300, 900), { pipeline_job_id: att.pipeline_job_id, template_uri: 'gs://' + BUCKET_ART + '/templates/bixby-eval-' + wf.pipeline_version + '.yaml', service_account: 'sa-vertex-pipeline@' + PROJECT + '.iam.gserviceaccount.com', pipeline_root: 'gs://' + BUCKET_ART + '/pipeline_root' }, { att: att });
-    addLog(wf, t + 200, 'INFO', 'dispatcher', 'Creating PipelineJob ' + att.pipeline_job_id + ' (template bixby-eval-' + wf.pipeline_version + ', deterministic id; checking existing job first)', { event_type: 'PIPELINE_SUBMITTED', att: att });
+    addEvent(wf, 'PIPELINE_SUBMITTED', t + G.int(300, 900), { pipeline_job_id: att.pipeline_job_id, pipeline_id: att.pipeline_id, pipeline_version: wf.pipeline_version, template_uri: 'gs://' + BUCKET_ART + '/' + templateObject(att.pipeline_id, wf.pipeline_version), child_jobs: att.job_ids.length - 1, service_account: 'sa-vertex-pipeline@' + PROJECT + '.iam.gserviceaccount.com', pipeline_root: 'gs://' + BUCKET_ART + '/pipeline_root' }, { att: att });
+    addLog(wf, t + 200, 'INFO', 'dispatcher', 'Creating PipelineJob ' + att.pipeline_job_id + ' (template ' + att.pipeline_id + '@' + wf.pipeline_version + ', ' + (att.job_ids.length - 1) + ' sub-pipeline jobs, deterministic id; checking existing job first)', { event_type: 'PIPELINE_SUBMITTED', att: att });
     setStatus(wf, 'DISPATCHING', t);
     return att;
   }
@@ -1141,7 +1332,9 @@ export function createMockEngine(root) {
     addLog(wf, t, 'INFO', 'pipeline-orchestrator', 'PipelineJob ' + att.pipeline_job_id + ' is RUNNING; polling every 30s', { event_type: 'PIPELINE_STARTED', att: att });
     setStatus(wf, 'RUNNING', t);
     applyDag(wf, att, t);
+    emitJob(wf, att, { job_id: att.pipeline_job_id, pipeline_id: att.pipeline_id, pipeline_version: att.pipeline_version, node_path: null, depth: 0 }, null, 'PENDING', 'RUNNING', t, null);
   }
+  function emitRootEnd(wf, att, to, t, err) { emitJob(wf, att, { job_id: att.pipeline_job_id, pipeline_id: att.pipeline_id, pipeline_version: att.pipeline_version, node_path: null, depth: 0 }, null, 'RUNNING', to, t, err); }
   function stepRetryStart(wf, t, plan) {
     var prev = wf.attempts[wf.attempts.length - 1];
     addEvent(wf, 'RETRY_STARTED', t, { previous_attempt: prev.attempt, next_attempt: prev.attempt + 1, previous_error: prev.error_code });
@@ -1161,11 +1354,12 @@ export function createMockEngine(root) {
     if (term.type === 'SUCCEEDED') {
       att.status = 'SUCCEEDED';
       addEvent(wf, 'PIPELINE_SUCCEEDED', t, { pipeline_job_id: att.pipeline_job_id, state: 'PIPELINE_STATE_SUCCEEDED', duration_ms: att.duration_ms }, { att: att });
+      emitRootEnd(wf, att, 'SUCCEEDED', t, null);
       var rows = finalizeRows(wf, att);
       var csv = toCSV(rows), size = utf8Len(csv), uris = resultUris(wf);
       var pc = rows.filter(function (r) { return r.result === 'PASS'; }).length;
       var t1 = t + G.int(900, 2600), t2 = t1 + G.int(1500, 4200), t3 = t2 + G.int(200, 600);
-      addGcsObject(BUCKET_RES, uris.csv.replace('gs://' + BUCKET_RES + '/', ''), size, t1, 'text/csv; charset=utf-8', { workflow_id: wf.workflow_id, pipeline_job_id: att.pipeline_job_id, pipeline_version: wf.pipeline_version, rows: String(rows.length) }, wf.workflow_id);
+      addGcsObject(BUCKET_RES, uris.csv.replace('gs://' + BUCKET_RES + '/', ''), size, t1, 'text/csv; charset=utf-8', { workflow_id: wf.workflow_id, pipeline_job_id: att.pipeline_job_id, pipeline_id: wf.pipeline_id, pipeline_version: wf.pipeline_version, model_version: wf.model_version, rows: String(rows.length) }, wf.workflow_id);
       addGcsObject(BUCKET_RES, uris.summary.replace('gs://' + BUCKET_RES + '/', ''), 1800 + G.int(0, 600), t1 + 150, 'application/json', { workflow_id: wf.workflow_id }, wf.workflow_id);
       wf.result = { uri: uris.csv, summaryUri: uris.summary, sizeBytes: size, rows: rows.length, passCount: pc, failCount: rows.length - pc, passRate: rows.length ? round(pc / rows.length, 4) : 0, bqTable: BQ_TABLE, committed_at: Math.round(t2) };
       addEvent(wf, 'RESULT_COMMITTED', t1, { uri: uris.csv, rows: rows.length, size_bytes: size, pass: pc, fail: rows.length - pc });
@@ -1182,9 +1376,11 @@ export function createMockEngine(root) {
     if (term.type === 'FAILED') {
       var e = plan.error;
       att.status = 'FAILED'; att.error_code = e.code; att.error_category = e.category; att.error_message = e.message; att.failed_node = e.node;
-      wf.error = { code: e.code, category: e.category, message: e.message, node: e.node, attempt: att.attempt };
-      addEvent(wf, 'PIPELINE_FAILED', t + 600, { pipeline_job_id: att.pipeline_job_id, state: 'PIPELINE_STATE_FAILED', failed_task: e.node, error_code: e.code, error_category: e.category, message: e.message }, { att: att });
-      addLog(wf, t + 900, 'ERROR', 'pipeline-orchestrator', 'PipelineJob ' + att.pipeline_job_id + ' FAILED at ' + e.node + ': ' + e.code + ' → classified ' + e.category + ' (' + failureCategoryMeta[e.category].policy + ')', { event_type: 'PIPELINE_FAILED', error_code: e.code, att: att });
+      att.failed_path = e.path; att.failed_node_path = e.node_path; att.failed_component = e.component; att.failed_job_id = att.pipeline_job_id + (e.job_suffix || '');
+      wf.error = { code: e.code, category: e.category, message: e.message, node: e.node, attempt: att.attempt, path: e.path, node_path: e.node_path, component: e.component, pipeline_job_id: att.failed_job_id };
+      emitRootEnd(wf, att, 'FAILED', t, e);
+      addEvent(wf, 'PIPELINE_FAILED', t + 600, { pipeline_job_id: att.pipeline_job_id, state: 'PIPELINE_STATE_FAILED', failed_task: e.node, failed_component: e.component, failed_path: e.path, failed_job_id: att.failed_job_id, error_code: e.code, error_category: e.category, message: e.message }, { att: att });
+      addLog(wf, t + 900, 'ERROR', 'pipeline-orchestrator', 'PipelineJob ' + att.pipeline_job_id + ' FAILED at ' + e.path + ': ' + e.code + ' → classified ' + e.category + ' (' + failureCategoryMeta[e.category].policy + ')', { event_type: 'PIPELINE_FAILED', error_code: e.code, att: att });
       release(wf, t + 1400);
       var cm = failureCategoryMeta[e.category];
       var maxAtt = cm.retryable ? (cm.maxRetries != null ? cm.maxRetries + 1 : config.retry.maxAttempts) : 1;
@@ -1207,7 +1403,8 @@ export function createMockEngine(root) {
     }
     if (term.type === 'TIMED_OUT') {
       att.status = 'TIMED_OUT'; att.error_code = 'PIPELINE_TIMEOUT'; att.error_category = 'TIMEOUT'; att.error_message = plan.error.message;
-      wf.error = { code: 'PIPELINE_TIMEOUT', category: 'TIMEOUT', message: plan.error.message, node: wf.current_node, attempt: att.attempt };
+      wf.error = { code: 'PIPELINE_TIMEOUT', category: 'TIMEOUT', message: plan.error.message, node: wf.current_node, attempt: att.attempt, path: null, node_path: wf.current_node_path, component: null, pipeline_job_id: att.pipeline_job_id };
+      emitRootEnd(wf, att, 'FAILED', t, { code: 'PIPELINE_TIMEOUT', path: null });
       addEvent(wf, 'PIPELINE_TIMEOUT', t, { pipeline_job_id: att.pipeline_job_id, timeout_min: config.pipelineTimeoutMin }, { att: att });
       addLog(wf, t, 'ERROR', 'pipeline-orchestrator', 'PipelineJob exceeded ' + config.pipelineTimeoutMin + 'm; sending cancel', { event_type: 'PIPELINE_TIMEOUT', error_code: 'PIPELINE_TIMEOUT', att: att });
       var tc = t + G.int(25000, 70000);
@@ -1221,6 +1418,7 @@ export function createMockEngine(root) {
     }
     if (term.type === 'CANCELLED') {
       att.status = 'CANCELLED';
+      emitRootEnd(wf, att, 'CANCELLED', t, null);
       if (!wf.cancel_requested_at) requestCancelEvents(wf, t - 1500, wf.cancelled_by || 'op-park-jh', wf.cancel_reason || '운영자 요청');
       var tc2 = t + G.int(8000, 30000);
       addEvent(wf, 'PIPELINE_CANCEL_CONFIRMED', tc2, { pipeline_job_id: att.pipeline_job_id, state: 'PIPELINE_STATE_CANCELLED' }, { att: att });
@@ -1242,18 +1440,43 @@ export function createMockEngine(root) {
     addEvent(wf, 'WORKFLOW_CANCELLED', wf.completed_at, { cancelled_by: by, reason: reason, removed_from_queue: true });
     setStatus(wf, 'CANCELLED', wf.completed_at);
   }
-  function finalizeRows(wf, att) {
-    var rows = genUtterances(wf), plan = PLANS[att.pipeline_job_id], i2 = DAG_IDX.response_eval;
-    var s = att.started_at + plan.durationMs * plan.frac[i2][0], e = att.started_at + plan.durationMs * plan.frac[i2][1];
+  function stampRows(wf, rows) {
+    var att = null;
+    for (var i = wf.attempts.length - 1; i >= 0; i--) if (wf.attempts[i].status === 'SUCCEEDED') { att = wf.attempts[i]; break; }
+    if (!att || !att.started_at) return rows;
+    var plan = PLANS[att.pipeline_job_id];
+    var ev = plan.root.nodes.filter(function (n) { return n.legacyPhase === 'response_eval'; })[0] || plan.root.nodes.filter(function (n) { return n.legacyPhase === 'intent_eval'; })[0] || plan.root.nodes[Math.min(1, plan.root.nodes.length - 1)];
+    var s = att.started_at + plan.durationMs * ev.s, e = att.started_at + plan.durationMs * ev.e;
     rows.forEach(function (r, i) {
       r.pipeline_job_id = att.pipeline_job_id;
       r.eval_ts = Math.round(s + (e - s) * (i + 0.5) / rows.length);
       r.eval_timestamp = isoKst(r.eval_ts);
     });
-    RESULTS_BY_WF[wf.workflow_id] = rows;
-    if (wf.created_at >= TODAY_START && RESULT_ROWS.indexOf(rows[0]) < 0) Array.prototype.push.apply(RESULT_ROWS, rows);
+    Object.defineProperty(rows, '_stamped', { value: true, enumerable: false });
     return rows;
   }
+  /** Result rows of a SUCCEEDED workflow (derived lazily, deterministic, LRU-cached). */
+  function rowsFor(wf) {
+    if (!wf || wf.status !== 'SUCCEEDED') return [];
+    var rows = genUtterances(wf);
+    return rows._stamped ? rows : stampRows(wf, rows);
+  }
+  function finalizeRows(wf, att) {
+    void att;
+    var rows = genUtterances(wf);
+    var tmp = wf.status; wf.status = 'SUCCEEDED';
+    try { return rows._stamped ? rows : stampRows(wf, rows); } finally { wf.status = tmp; }
+  }
+  /** Succeeded workflows whose evaluation window may overlap [from, to]. */
+  function succeededBetween(from, to) {
+    return WORKFLOWS.filter(function (w) { return w.status === 'SUCCEEDED' && w.started_at != null && w.started_at <= to && w.completed_at >= from; });
+  }
+  function rowsInRange(from, to) {
+    var out = [];
+    succeededBetween(from, to).forEach(function (w) { var rs = rowsFor(w); for (var i = 0; i < rs.length; i++) { var t = rs[i].eval_ts; if (t >= from && t <= to) out.push(rs[i]); } });
+    return out;
+  }
+  function todayRows() { return rowsInRange(kstDayStart(clock.now), clock.now); }
 
   // ───────────────────────────────────────────── DLQ ──
   function createDeadLetter(wf, att, t) {
@@ -1261,8 +1484,9 @@ export function createMockEngine(root) {
     var errLogs = LOGS_BY_WF[wf.workflow_id].filter(function (l) { return l.severity === 'ERROR' || l.severity === 'WARNING'; }).slice(-4);
     var dl = {
       dead_letter_id: 'dlq-' + kstCompact(t) + '-' + pad(seq, 3), workflow_id: wf.workflow_id, original_event_id: wf.event_id, language: wf.language, batch_id: wf.batch_id,
-      failure_category: att.error_category, error_code: att.error_code, failure_reason: att.error_message, failed_node: att.failed_node, attempts: att.attempt,
-      pipeline_version: wf.pipeline_version, input_uri: wf.input.uri, utterance_count: wf.input.utteranceCount, last_execution_id: att.workflow_execution_id, last_pipeline_job_id: att.pipeline_job_id,
+      failure_category: att.error_category, error_code: att.error_code, failure_reason: att.error_message, failed_node: att.failed_node,
+      failed_path: att.failed_path, failed_component: att.failed_component, failed_job_id: att.failed_job_id, attempts: att.attempt,
+      pipeline_id: wf.pipeline_id, pipeline_version: wf.pipeline_version, model_version: wf.model_version, input_uri: wf.input.uri, utterance_count: wf.input.utteranceCount, last_execution_id: att.workflow_execution_id, last_pipeline_job_id: att.pipeline_job_id,
       status: 'PENDING_REVIEW', assigned_operator: null, created_at: Math.round(t), updated_at: Math.round(t),
       last_log_excerpt: errLogs.map(function (l) { return fmt.timeMs(l.ts) + ' ' + l.severity + ' [' + l.component + '] ' + l.message; }).join('\n'),
       last_stack_trace: att.error_category && PLANS[att.pipeline_job_id].error ? PLANS[att.pipeline_job_id].error.trace : null,
@@ -1286,7 +1510,7 @@ export function createMockEngine(root) {
   function spec(lang, status, day, attempts, o) {
     o = o || {};
     var s = { lang: lang, status: status, day: day, attempts: attempts || [['SUCCEEDED']], version: o.version || verFor(day), priority: o.priority || (R.chance(0.12) ? 7 : R.chance(0.1) ? 3 : 5),
-      cancel: o.cancel || null, dlq: o.dlq || null, replayOf: o.replayOf || null, replayCycle: o.replayCycle || 0, tag: o.tag || null };
+      cancel: o.cancel || null, dlq: o.dlq || null, replayOf: o.replayOf || null, replayCycle: o.replayCycle || 0, tag: o.tag || null, pipeline: o.pipeline || null, nightly: !!o.nightly };
     s.utteranceCount = o.utteranceCount || (day > 0 && R.chance(0.1) ? Math.round(LANG[lang].batchSize * R.float(0.35, 0.95)) : LANG[lang].batchSize);
     SPECS.push(s);
     return s;
@@ -1326,6 +1550,9 @@ export function createMockEngine(root) {
   D.push(spec('ko', 'DEAD_LETTERED', 5, F('PIPELINE_EXECUTION', 3), { version: 'v1.0', dlq: { status: 'REPLAYED', op: 'op-han-dy', by: 'op-han-dy', approver: 'op-kim-sy', reason: 'v1.0 집계 버그 — v1.1 로 버전 변경하여 Replay', replayVersion: 'v1.1' } }));
   D.push(spec('es', 'DEAD_LETTERED', 5, F('INPUT_SCHEMA', 1), { dlq: { status: 'CLOSED', op: 'op-jung-yn', resolution: '영구 실패 — 원천 로그 수집기의 필드 누락 배치. 수집팀에서 재생성 후 신규 배치로 업로드함 (원본 종료)' } }));
   D.push(spec('en', 'DEAD_LETTERED', 6, F('CODE_DEFECT', 2), { version: 'v1.0', dlq: { status: 'CLOSED', op: 'op-han-dy', resolution: 'v1.0 지원 종료 — 동일 입력은 v1.1 정기 배치에서 재평가됨' } }));
+  // failures that originate two levels deep (response-judge → policy-guard)
+  D.push(spec('en', 'DEAD_LETTERED', 0, [['FAILED', 'PIPELINE_EXECUTION', 0], ['FAILED', 'PIPELINE_EXECUTION', 0], ['FAILED', 'PIPELINE_EXECUTION', 0]], { version: 'v1.1', pipeline: 'bixby-eval-full', dlq: { status: 'PENDING_REVIEW' } }));
+  spec('ko', 'RETRY_WAIT', 0, [['FAILED', 'MODEL_TRANSIENT', 0]], { version: 'v1.1', pipeline: 'bixby-regression-nightly' });
   // past cancelled / timed out
   spec('en', 'CANCELLED', 1, S1, { cancel: { mode: 'running', by: 'op-lee-he', reason: '잘못된 pipeline_version(v1.0)으로 요청됨' } });
   spec('ko', 'CANCELLED', 3, S1, { cancel: { mode: 'queued', by: 'op-park-jh', reason: '중복 업로드된 배치 (generation 상이)' } });
@@ -1337,6 +1564,23 @@ export function createMockEngine(root) {
     var att = R.chance(0.1) ? F(R.weighted({ MODEL_TRANSIENT: 3, QUOTA: day === 3 ? 4 : 1, PIPELINE_EXECUTION: 1 }), 1, 'SUCCEEDED') : R.chance(0.03) ? F('MODEL_TRANSIENT', 2, 'SUCCEEDED') : S1;
     spec(lang, 'SUCCEEDED', day, att);
   }
+  // — older history (days 8 … HISTORY_DAYS-1), lower density —
+  var CLOSE_NOTES = ['영구 실패 — 원천 배치 재생성 후 신규 업로드로 대체 (원본 종료)', '동일 입력은 다음 정기 배치에서 재평가됨', '일시 장애 구간 배치 — 재평가 불필요로 종료'];
+  for (var dd = 8; dd < HISTORY_DAYS; dd++) {
+    var dw = kstParts(BASE_NOW - dd * DAY).dow, cnt = (dw === 0 || dw === 6) ? R.int(2, 3) : R.int(3, 5);
+    for (var kk = 0; kk < cnt; kk++) {
+      var lg = R.weighted({ ko: 0.55, en: 0.22, ja: 0.13, es: 0.10 }), xr = R.next();
+      if (xr < 0.035) { var cat0 = R.weighted({ MODEL_TRANSIENT: 2, PIPELINE_EXECUTION: 2, INPUT_SCHEMA: 1 }); D.push(spec(lg, 'DEAD_LETTERED', dd, F(cat0, cat0 === 'INPUT_SCHEMA' ? 1 : 3), { dlq: { status: 'CLOSED', op: R.pick(['op-han-dy', 'op-park-jh', 'op-lee-he']), resolution: R.pick(CLOSE_NOTES) } })); }
+      else if (xr < 0.055) spec(lg, 'TIMED_OUT', dd, [['TIMED_OUT']]);
+      else if (xr < 0.07) spec(lg, 'CANCELLED', dd, S1, { cancel: { mode: 'queued', by: 'op-park-jh', reason: '중복 업로드된 배치 (generation 상이)' } });
+      else spec(lg, 'SUCCEEDED', dd, R.chance(0.1) ? F(R.weighted({ MODEL_TRANSIENT: 3, PIPELINE_EXECUTION: 1 }), 1, 'SUCCEEDED') : S1);
+    }
+  }
+  // — nightly regression (02:00 KST) —
+  for (var nd0 = 1; nd0 < HISTORY_DAYS; nd0++) {
+    spec('ko', 'SUCCEEDED', nd0, R.chance(0.08) ? F('MODEL_TRANSIENT', 1, 'SUCCEEDED') : S1, { pipeline: 'bixby-regression-nightly', nightly: true });
+    if (nd0 % 2 === 0) spec('en', 'SUCCEEDED', nd0, S1, { pipeline: 'bixby-regression-nightly', nightly: true });
+  }
   // replays (REPLAYING → active, REPLAYED → succeeded)
   D.forEach(function (d) {
     if (!d.dlq || ['REPLAYING', 'REPLAYED'].indexOf(d.dlq.status) < 0) return;
@@ -1344,10 +1588,26 @@ export function createMockEngine(root) {
     d.replaySpec = spec(d.lang, st, d.dlq.status === 'REPLAYED' ? Math.max(1, d.day - 1) : 0, S1, { version: d.dlq.replayVersion || (d.version === 'v1.0' ? 'v1.1' : d.version), priority: 8, replayOf: d, replayCycle: 1, utteranceCount: d.utteranceCount });
   });
 
+  // ── pipeline assignment (mixed registry) ──
+  var PR = makeRng(31337);
+  function assignPipeline(s) {
+    if (s.replayOf) { s.pipeline = s.replayOf.pipeline && pipeVer(s.replayOf.pipeline, s.version) ? s.replayOf.pipeline : 'bixby-eval-full'; return; }
+    if (s.pipeline && pipeVer(s.pipeline, s.version)) return;
+    var cats = s.attempts.filter(function (a) { return a[0] === 'FAILED'; }).map(function (a) { return a[1]; });
+    var cands = ROOT_PIPELINES.filter(function (p) {
+      if (!pipeVer(p.id, s.version) || !p.mixWeight || p.id === 'bixby-regression-nightly') return false;
+      if (p.languages && p.languages.indexOf(s.lang) < 0) return false;
+      return cats.every(function (c) { return supportsCategory(p.id, s.version, c); });
+    });
+    s.pipeline = cands.length ? PR.weighted(cands.map(function (p) { return [p.id, p.mixWeight]; })) : 'bixby-eval-full';
+  }
+  SPECS.forEach(function (s) { if (!s.replayOf) assignPipeline(s); });
+  SPECS.forEach(function (s) { if (s.replayOf) assignPipeline(s); });
+
   // ── planning: offsets relative to created, then anchor ──
   function planSpec(s) {
     var o = {}, rng = R;
-    s.plans = s.attempts.map(function (a) { return makePlan(rng, s.lang, s.version, s.utteranceCount, a[0], a[1]); });
+    s.plans = s.attempts.map(function (a) { return makePlan(rng, s.lang, s.version, s.utteranceCount, a[0], a[1], a[2], s.pipeline); });
     o.validated = rng.int(250, 900); o.queued = o.validated + rng.int(60, 260);
     var wait = s.status === 'QUEUED' ? 0 : (s.lang === 'ko' ? rng.int(20, 480) : rng.int(3, 70)) * 1000;
     o.reserved = o.queued + wait; o.dispatch = o.reserved + rng.int(600, 1800);
@@ -1374,6 +1634,8 @@ export function createMockEngine(root) {
           var oe = s.replayOf.T.final;
           created = Math.min(oe + rng.int(60, 600) * MIN, now - o.final - 20 * MIN);
           if (created < oe + 20 * MIN) created = oe + 20 * MIN;
+        } else if (s.nightly) {
+          created = kstDayStart(now - s.day * DAY) + 2 * HOUR + rng.int(0, 25) * MIN;
         } else if (s.day === 0) {
           var lo = TODAY_START + 25 * MIN, hi = now - o.final - 3 * MIN;
           created = lo + rng.float(0, Math.max(0, hi - lo));
@@ -1411,7 +1673,7 @@ export function createMockEngine(root) {
   }
 
   function runSpec(s) {
-    var wf = makeWorkflow({ created: s.T.created, lang: s.lang, utteranceCount: s.utteranceCount, version: s.version, priority: s.priority, replayOf: s.replayOf ? s.replayOf.wf.workflow_id : null, replayCycle: s.replayCycle });
+    var wf = makeWorkflow({ created: s.T.created, lang: s.lang, utteranceCount: s.utteranceCount, version: s.version, priority: s.priority, pipeline: s.pipeline, replayOf: s.replayOf ? s.replayOf.wf.workflow_id : null, replayCycle: s.replayCycle });
     s.wf = wf;
     if (s.replayOf) linkReplay(s.replayOf.wf, wf, s);
     var T = s.T;
@@ -1460,7 +1722,7 @@ export function createMockEngine(root) {
       var ta = BASE_NOW - 4 * MIN - 12000;
       var rp = { replay_id: 'rpl-' + kstCompact(ta) + '-' + pad(++REPLAY_SEQ, 3), dead_letter_id: dl.dead_letter_id, original_workflow_id: s.wf.workflow_id, replay_workflow_id: null, replay_cycle: 1,
         requested_by: s.dlq.by, approved_by: s.dlq.approver, reason: s.dlq.reason, pipeline_version_from: s.wf.pipeline_version, pipeline_version_to: s.wf.pipeline_version,
-        status: 'APPROVED', created_at: ta - 22 * MIN, approved_at: ta, scheduled_for: Date.parse('2026-11-12T15:00:00+09:00'), completed_at: null };
+        status: 'APPROVED', created_at: ta - 22 * MIN, approved_at: ta, scheduled_for: BASE_NOW + 30 * MIN, completed_at: null };
       REPLAYS.push(rp); dl.replay_ids.push(rp.replay_id); dl.status = 'APPROVED'; dl.updated_at = ta;
       addEvent(s.wf, 'REPLAY_REQUESTED', rp.created_at, { dead_letter_id: dl.dead_letter_id, replay_id: rp.replay_id, requested_by: rp.requested_by, reason: rp.reason }, { att: null });
       addEvent(s.wf, 'REPLAY_APPROVED', ta, { dead_letter_id: dl.dead_letter_id, replay_id: rp.replay_id, approved_by: rp.approved_by, scheduled_for: isoKst(rp.scheduled_for) }, { att: null });
@@ -1539,14 +1801,14 @@ export function createMockEngine(root) {
   // ───────────────────────────────────────────── metrics (BigQuery-style aggregates) ──
   var MR = makeRng(777);
   function diurnal(h) { return 0.22 + 0.78 * Math.exp(-Math.pow(h - 14.5, 2) / (2 * 4.2 * 4.2)); }
-  var PEAK = { ko: 7.2, en: 4.6, ja: 1.6, es: 1.1 };
-  var COST_PER_PIPE = { ko: 1.42, en: 2.31, ja: 0.86, es: 0.81 };
+  var PEAK = {}, COST_PER_PIPE = {}; LANGS.forEach(function (l) { PEAK[l.code] = l.peakPerHour; COST_PER_PIPE[l.code] = l.costPerRunUsd; });
+  var METRIC_HOURS = (HISTORY_DAYS + 1) * 24;
   var ERR_CATS = Object.keys(failureCategoryMeta);
-  var hourly = { ts: [], throughput: {}, utterances: {}, queueDepth: {}, successRate: [], retryRate: [], avgDurationSec: [], p95DurationSec: [], errors: {} };
-  LANG_CODES.forEach(function (l) { hourly.throughput[l] = []; hourly.utterances[l] = []; hourly.queueDepth[l] = []; });
+  var hourly = { ts: [], throughput: {}, utterances: {}, queueDepth: {}, active: {}, successRate: [], retryRate: [], avgDurationSec: [], p95DurationSec: [], errors: {} };
+  LANG_CODES.forEach(function (l) { hourly.throughput[l] = []; hourly.utterances[l] = []; hourly.queueDepth[l] = []; hourly.active[l] = []; });
   ERR_CATS.forEach(function (c) { hourly.errors[c] = []; });
   var hourNow = Math.floor(BASE_NOW / HOUR) * HOUR;
-  for (var hi = 167; hi >= 0; hi--) {
+  for (var hi = METRIC_HOURS - 1; hi >= 0; hi--) {
     var ht = hourNow - hi * HOUR, hp = kstParts(ht), hd = kstDate(ht);
     var weekend = hp.dow === 0 || hp.dow === 6 ? 0.62 : 1;
     var inc = hd === '2026-11-10' && hp.h >= 3 && hp.h <= 6, tmo = hd === '2026-11-08' && hp.h >= 11 && hp.h <= 13;
@@ -1558,6 +1820,8 @@ export function createMockEngine(root) {
       var qd = l === 'ko' ? Math.max(0, Math.round((diurnal(hp.h) - 0.55) * 14 * MR.float(0.6, 1.3))) : MR.chance(0.15) ? 1 : 0;
       if (hi === 0) qd = WORKFLOWS.filter(function (w) { return w.language === l && w.status === 'QUEUED'; }).length;
       hourly.queueDepth[l].push(qd);
+      var ac = hi === 0 ? activeCount(l) : Math.min(LANG[l].maxConcurrent, Math.round(PEAK[l] * 1.25 * diurnal(hp.h) * weekend * MR.float(0.7, 1.15)));
+      hourly.active[l].push(ac);
     });
     hourly.successRate.push(round(inc ? MR.float(0.78, 0.88) : MR.float(0.965, 0.998), 4));
     hourly.retryRate.push(round(inc ? MR.float(0.22, 0.38) : MR.float(0.03, 0.09), 4));
@@ -1589,11 +1853,11 @@ export function createMockEngine(root) {
     fiveMin.successRate.push(round(MR.float(0.95, 1), 4));
     fiveMin.passRate.push(round(MR.float(0.835, 0.89), 4));
   }
-  for (var ft = TODAY_START; ft < BASE_NOW; ft += 5 * MIN) pushFive(ft, false);
+  for (var ft = TODAY_START - DAY; ft < BASE_NOW; ft += 5 * MIN) pushFive(ft, false);
   pushFive(BASE_NOW, true);
   var lastFive = BASE_NOW;
   var daily = [];
-  for (var di = 7; di >= 0; di--) {
+  for (var di = HISTORY_DAYS; di >= 0; di--) {
     var dStart = TODAY_START - di * DAY, dKey = kstDate(dStart), pipes = {}, utt = 0, tot = 0, errs = {}, retries = 0;
     LANG_CODES.forEach(function (l) { pipes[l] = 0; });
     ERR_CATS.forEach(function (c) { errs[c] = 0; });
@@ -1612,19 +1876,27 @@ export function createMockEngine(root) {
       deadLettered: DLQ.filter(function (d) { return kstDate(d.created_at) === dKey; }).length, timedOut: WORKFLOWS.filter(function (w) { return w.status === 'TIMED_OUT' && kstDate(w.completed_at) === dKey; }).length,
       errorCategories: errs, costUsd: cost, partial: di === 0 });
   }
-  var errorCategories7d = ERR_CATS.map(function (c) { return { category: c, label: failureCategoryMeta[c].label, count: sum(hourly.errors[c]) }; }).sort(function (a, b) { return b.count - a.count; });
+  var errorCategories7d = ERR_CATS.map(function (c) { return { category: c, label: failureCategoryMeta[c].label, count: sum(hourly.errors[c].slice(-168)) }; }).sort(function (a, b) { return b.count - a.count; });
 
   // aggregate result files
   var AGG_FILES = [];
+  function succeededToday() { var ds = kstDayStart(clock.now); return WORKFLOWS.filter(function (w) { return w.status === 'SUCCEEDED' && w.completed_at >= ds && w.completed_at <= clock.now; }); }
+  function refreshAgg(f) {
+    var ws = succeededToday().filter(f.filter);
+    f.rowCount = sum(ws.map(function (w) { return w.result ? w.result.rows : 0; }));
+    f.sizeBytes = Math.round(f.rowCount * 612 + 420); f.generatedAt = clock.now;
+    if (f._obj) { f._obj.size = f.sizeBytes; f._obj.updated = clock.now; f._obj.metadata.rows = String(f.rowCount); }
+  }
   function aggFile(name, filterFn, label) {
-    var rows = RESULT_ROWS.filter(filterFn), csv = toCSV(rows, { bom: true }), size = utf8Len(csv);
-    var o = addGcsObject(BUCKET_RES, TODAY + '/aggregate/' + name, size, BASE_NOW - 2 * MIN, 'text/csv; charset=utf-8', { rows: String(rows.length), scope: label, generated_by: 'aggregate-daily' }, null);
-    var f = { uri: o.uri, bucket: BUCKET_RES, name: o.name, sizeBytes: size, generatedAt: o.timeCreated, rowCount: rows.length, scope: label, filter: filterFn };
+    var o = addGcsObject(BUCKET_RES, TODAY + '/aggregate/' + name, 0, BASE_NOW - 2 * MIN, 'text/csv; charset=utf-8', { rows: '0', scope: label, generated_by: 'aggregate-daily' }, null);
+    var f = { uri: o.uri, bucket: BUCKET_RES, name: o.name, sizeBytes: 0, generatedAt: o.timeCreated, rowCount: 0, scope: label, filter: filterFn };
+    Object.defineProperty(f, '_obj', { value: o, enumerable: false });
+    refreshAgg(f); f.generatedAt = o.timeCreated;
     AGG_FILES.push(f); return f;
   }
   var RESULT_FILE = aggFile('results_v1.2-rc.csv', function () { return true; }, 'all-versions (candidate v1.2-rc vs baseline v1.1)');
-  aggFile('results_v1.2-rc_only.csv', function (r) { return r.pipeline_version === 'v1.2-rc'; }, 'v1.2-rc');
-  aggFile('results_v1.1_only.csv', function (r) { return r.pipeline_version === 'v1.1'; }, 'v1.1');
+  aggFile('results_v1.2-rc_only.csv', function (w) { return w.pipeline_version === 'v1.2-rc'; }, 'v1.2-rc');
+  aggFile('results_v1.1_only.csv', function (w) { return w.pipeline_version === 'v1.1'; }, 'v1.1');
 
   // finalize static build
   function byTs(a, b) { return a.ts - b.ts; }
@@ -1637,11 +1909,13 @@ export function createMockEngine(root) {
   function asArr(x) { return x == null ? null : Array.isArray(x) ? x : [x]; }
   function listWorkflows(f) {
     f = f || {};
-    var langs = asArr(f.language), sts = asArr(f.status), vers = asArr(f.pipeline_version), q = f.q ? String(f.q).toLowerCase() : null;
+    var langs = asArr(f.language), sts = asArr(f.status), vers = asArr(f.pipeline_version), pids = asArr(f.pipeline_id), mods = asArr(f.model_version), q = f.q ? String(f.q).toLowerCase() : null;
     var out = WORKFLOWS.filter(function (w) {
       if (langs && langs.indexOf(w.language) < 0) return false;
       if (sts && sts.indexOf(w.status) < 0) return false;
       if (vers && vers.indexOf(w.pipeline_version) < 0) return false;
+      if (pids && pids.indexOf(w.pipeline_id) < 0) return false;
+      if (mods && mods.indexOf(w.model_version) < 0) return false;
       if (f.stage && w.stage !== f.stage) return false;
       if (f.event_type && w.event_type !== f.event_type) return false;
       if (f.batch_id && w.batch_id !== f.batch_id) return false;
@@ -1652,7 +1926,7 @@ export function createMockEngine(root) {
       if (f.hasRetries && w.attempts.length < 2) return false;
       if (f.replay === true && !w.replay_of) return false;
       if (q) {
-        var hay = [w.workflow_id, w.batch_id, w.input.object, w.idempotency_key, w.correlation_id, w.trace_id, w.dead_letter_id || ''].concat(w.attempts.map(function (a) { return a.pipeline_job_id + ' ' + (a.error_code || ''); })).join(' ').toLowerCase();
+        var hay = [w.workflow_id, w.batch_id, w.input.object, w.idempotency_key, w.correlation_id, w.trace_id, w.dead_letter_id || '', w.pipeline_id, w.model_version].concat(w.attempts.map(function (a) { return a.pipeline_job_id + ' ' + (a.error_code || '') + ' ' + (a.failed_path || ''); })).join(' ').toLowerCase();
         if (hay.indexOf(q) < 0) return false;
       }
       return true;
@@ -1670,10 +1944,13 @@ export function createMockEngine(root) {
     WORKFLOWS.forEach(function (w) { o[STATE_TO_STAGE[w.status]].push(w); });
     return o;
   }
+  function lowerBound(arr, ts) { var lo = 0, hi = arr.length; while (lo < hi) { var m = (lo + hi) >> 1; if (arr[m].ts < ts) lo = m + 1; else hi = m; } return lo; }
+  function sliceByTs(arr, from, to) { var a = from != null ? lowerBound(arr, from) : 0, b = to != null ? lowerBound(arr, to + 1) : arr.length; return a === 0 && b === arr.length ? arr : arr.slice(a, b); }
   var SEV_ORDER = { DEBUG: 0, INFO: 1, NOTICE: 2, WARNING: 3, ERROR: 4, CRITICAL: 5 };
   function queryLogs(f) {
     f = f || {};
     var src = f.workflow_id ? (LOGS_BY_WF[f.workflow_id] || []) : f.system ? LOGS_SYSTEM : LOGS_ALL;
+    if (f.from != null || f.to != null) src = sliceByTs(src, f.from, f.to);
     var sevs = asArr(f.severity), svcs = asArr(f.service), comps = asArr(f.component), q = f.q ? String(f.q).toLowerCase() : null;
     var minS = f.minSeverity ? SEV_ORDER[f.minSeverity] : null;
     var out = src.filter(function (l) {
@@ -1684,7 +1961,9 @@ export function createMockEngine(root) {
       if (f.attempt != null && l.attempt !== f.attempt) return false;
       if (f.language && l.language !== f.language) return false;
       if (f.trace_id && l.trace_id !== f.trace_id) return false;
-      if (f.pipeline_job_id && l.pipeline_job_id !== f.pipeline_job_id) return false;
+      if (f.pipeline_job_id && l.pipeline_job_id !== f.pipeline_job_id && !(f.job_scope !== 'self' && l.pipeline_job_id && l.pipeline_job_id.indexOf(f.pipeline_job_id + '.') === 0)) return false;
+      if (f.pipeline_id && l.pipeline_id !== f.pipeline_id) return false;
+      if (f.node_path && (!l.node_path || (l.node_path !== f.node_path && l.node_path.indexOf(f.node_path + '/') !== 0))) return false;
       if (f.error_code && l.error_code !== f.error_code) return false;
       if (f.event_type && l.event_type !== f.event_type) return false;
       if (f.from != null && l.ts < f.from) return false;
@@ -1698,9 +1977,15 @@ export function createMockEngine(root) {
   function recentEvents(n, f) {
     f = f || {}; n = n || 30;
     var out = [];
+    var upper = Math.min(clock.now, f.to != null ? f.to : Infinity);
     for (var i = EVENTS_ALL.length - 1; i >= 0 && out.length < n; i--) {
       var e = EVENTS_ALL[i];
-      if (e.ts > clock.now) continue;
+      if (e.ts > upper) continue;
+      if (f.from != null && e.ts < f.from) break;
+      if (f.workflow_id && e.workflow_id !== f.workflow_id) continue;
+      if (f.pipeline_id && e.pipeline_id !== f.pipeline_id) continue;
+      if (f.component && e.component !== f.component) continue;
+      if (f.pipeline_job_id && e.pipeline_job_id !== f.pipeline_job_id && !(f.job_scope !== 'self' && e.pipeline_job_id && e.pipeline_job_id.indexOf(f.pipeline_job_id + '.') === 0)) continue;
       if (f.stage && e.stage !== f.stage) continue;
       if (f.language && e.language !== f.language) continue;
       if (f.severity && asArr(f.severity).indexOf(e.severity) < 0) continue;
@@ -1750,65 +2035,17 @@ export function createMockEngine(root) {
     var runs = succ7.map(function (w) { return w.attempts[w.attempts.length - 1].duration_ms; });
     var errs = {}; Object.keys(failureCategoryMeta).forEach(function (c) { errs[c] = 0; });
     WORKFLOWS.forEach(function (w) { w.attempts.forEach(function (a) { if (a.error_category && a.completed_at >= wk) errs[a.error_category]++; }); });
-    var pass = RESULT_ROWS.filter(function (r) { return r.result === 'PASS'; }).length;
+    var uttRows = sum(succToday.map(function (w) { return w.result ? w.result.rows : 0; })), pass = sum(succToday.map(function (w) { return w.result ? w.result.passCount : 0; }));
     return {
       at: now, running: dist.RUNNING, pending: dist.RECEIVED + dist.VALIDATED + dist.QUEUED + dist.RESERVED + dist.DISPATCHING, queued: dist.QUEUED,
       completedToday: succToday.length, failedToday: failToday.length, cancelledToday: doneToday.filter(function (w) { return w.status === 'CANCELLED'; }).length,
       retryWaiting: dist.RETRY_WAIT, dlqPendingReview: DLQ.filter(function (d) { return d.status === 'PENDING_REVIEW'; }).length, dlqTotal: DLQ.length,
       successRate7d: term7.length ? round(succ7.length / term7.length, 4) : null, successRateToday: (succToday.length + failToday.length) ? round(succToday.length / (succToday.length + failToday.length), 4) : null,
       avgProcessingMs: Math.round(avg(runs)), p95ProcessingMs: pctl(runs, 0.95), avgWaitMs: Math.round(avg(succ7.map(function (w) { return w.waitMs || 0; }))),
-      utterancesEvaluatedToday: RESULT_ROWS.length, utterancePassRateToday: RESULT_ROWS.length ? round(pass / RESULT_ROWS.length, 4) : null,
+      utterancesEvaluatedToday: uttRows, utterancePassRateToday: uttRows ? round(pass / uttRows, 4) : null,
       statusDistribution: dist, errorDistribution7d: errs, openAlerts: ALERTS.filter(function (a) { return a.status !== 'RESOLVED'; }).length,
       capacity: getCapacity()
     };
-  }
-
-  // ───────────────────────────────────────────── stage detail ──
-  var STAGE_LOG_FILTER = {
-    gcs_input: function (l) { return l.event_type === 'EVENT_RECEIVED'; },
-    event_bus: function (l) { return l.event_type === 'EVENT_RECEIVED'; },
-    ingress: function (l) { return l.service === 'event-ingress'; },
-    registry_queue: function (l) { return l.event_type === 'QUEUED'; },
-    scheduler: function (l) { return (l.service === 'scheduler' && l.event_type !== 'QUEUED') || l.service === 'reconciler'; },
-    workflows: function (l) { return (l.service === 'dispatcher' || l.service === 'pipeline-orchestrator' || l.event_type === 'CANCEL_REQUESTED') && !/^RETRY/.test(l.event_type || ''); },
-    vertex: function (l) { return l.service === 'vertex-ai-pipelines'; },
-    results: function (l) { return l.service === 'result-commit'; },
-    retry: function (l) { return /^RETRY/.test(l.event_type || ''); },
-    dlq: function (l) { return l.service === 'dlq-manager' || /DEAD_LETTER|REPLAY/.test(l.event_type || ''); }
-  };
-  function stageDetail(stageId, opts) {
-    opts = opts || {};
-    var st = STAGE[stageId]; if (!st) return null;
-    var lim = opts.limit || 60, now = clock.now;
-    var wfs = st.states.length ? WORKFLOWS.filter(function (w) { return st.states.indexOf(w.status) >= 0; })
-      : WORKFLOWS.filter(function (w) { return w.created_at > now - 30 * MIN && !w.replay_of; });
-    wfs = wfs.slice().sort(function (a, b) { return b.updated_at - a.updated_at; });
-    var evs = recentEvents(lim, { stage: stageId });
-    var logs = []; for (var i = LOGS_ALL.length - 1; i >= 0 && logs.length < lim; i--) { if (LOGS_ALL[i].ts <= now && STAGE_LOG_FILTER[stageId](LOGS_ALL[i])) logs.push(LOGS_ALL[i]); }
-    var gcsObjects = [];
-    var lastN = function (b, n) { return GCS_OBJECTS[b].filter(function (o) { return o.timeCreated <= now; }).slice(-n).reverse(); };
-    if (stageId === 'gcs_input') gcsObjects = lastN(BUCKET_IN, 40);
-    else if (stageId === 'vertex') gcsObjects = lastN(BUCKET_ART, 40);
-    else if (stageId === 'results') gcsObjects = lastN(BUCKET_RES, 40);
-    else if (stageId === 'dlq') gcsObjects = DLQ.map(function (d) { return gcsGet(BUCKET_IN, WF[d.workflow_id].input.object); }).filter(Boolean);
-    var dayStart = kstDayStart(now), todayW = WORKFLOWS.filter(function (w) { return w.created_at >= dayStart; });
-    var cap = getCapacity(), m;
-    switch (stageId) {
-      case 'gcs_input': var objs = GCS_OBJECTS[BUCKET_IN].filter(function (o) { return o.timeCreated >= dayStart && o.timeCreated <= now; });
-        m = { objectsToday: objs.length, bytesToday: sum(objs.map(function (o) { return o.size; })), utterancesToday: sum(objs.map(function (o) { return +o.metadata.utterance_count || 0; })), lastUploadAt: objs.length ? objs[objs.length - 1].timeCreated : null, byLanguage: countBy(objs, function (o) { return o.metadata.language; }) }; break;
-      case 'event_bus': m = { deliveredToday: todayW.length, avgDeliveryLatencyMs: 420, p95DeliveryLatencyMs: 1150, redeliveriesToday: 2, subscriptionBacklog: wfs.filter(function (w) { return w.status === 'RECEIVED'; }).length, deadLetterTopicMessages: 0 }; break;
-      case 'ingress': m = { receivedToday: todayW.length, validatedToday: todayW.filter(function (w) { return w.validated_at; }).length, duplicatesIgnoredToday: 3, validationErrorsToday: 0, p95RegistrationLatencyMs: 1380, inFlight: wfs.length }; break;
-      case 'registry_queue': m = { queued: cap.global.backlog, byLanguage: cap.languages.reduce(function (o, l) { o[l.code] = l.backlog; return o; }, {}), oldestQueuedAt: Math.min.apply(null, cap.languages.map(function (l) { return l.oldestQueuedAt || Infinity; })), p95WaitSec: Math.max.apply(null, cap.languages.map(function (l) { return l.p95WaitSec; })) }; break;
-      case 'scheduler': m = { activeSlots: cap.global.active, globalMax: cap.global.max, reservationsActive: cap.reservationsActive, reservationsOrphaned: cap.reservationsOrphaned, admissionsLastHour: WORKFLOWS.filter(function (w) { return w.reserved_at > now - HOUR; }).length, saturatedLanguages: cap.languages.filter(function (l) { return l.status === 'SATURATED'; }).map(function (l) { return l.code; }) }; break;
-      case 'workflows': m = { dispatching: wfs.filter(function (w) { return w.status === 'DISPATCHING'; }).length, executionsToday: sum(todayW.map(function (w) { return w.attempts.length; })), cancelledToday: todayW.filter(function (w) { return w.status === 'CANCELLED'; }).length, timedOut7d: WORKFLOWS.filter(function (w) { return w.status === 'TIMED_OUT'; }).length, p95StartLatencyMs: 4100 }; break;
-      case 'vertex': var nodes = {}; DAG_TEMPLATE.forEach(function (d) { nodes[d.id] = 0; }); wfs.forEach(function (w) { w.dag.forEach(function (n) { if (n.status === 'RUNNING') nodes[n.id]++; }); });
-        m = { running: wfs.length, runningByComponent: nodes, utterancesInFlight: sum(wfs.map(function (w) { return w.input.utteranceCount; })), gpuInUse: nodes.response_eval, gpuQuota: 16, avgDurationSec: Math.round(overview().avgProcessingMs / 1000) }; break;
-      case 'results': var sr = todayW.filter(function (w) { return w.status === 'SUCCEEDED'; });
-        m = { succeededToday: sr.length, rowsWrittenToday: sum(sr.map(function (w) { return w.result.rows; })), csvBytesToday: sum(sr.map(function (w) { return w.result.sizeBytes; })), bqTable: BQ_TABLE, passRateToday: RESULT_ROWS.length ? round(RESULT_ROWS.filter(function (r) { return r.result === 'PASS'; }).length / RESULT_ROWS.length, 4) : null, aggregateFile: RESULT_FILE.uri }; break;
-      case 'retry': m = { retryWait: wfs.length, retriesToday: sum(todayW.map(function (w) { return Math.max(0, w.attempts.length - 1); })), retryRate: todayW.length ? round(todayW.filter(function (w) { return w.attempts.length > 1; }).length / todayW.length, 4) : 0, nextRetryAt: wfs.length ? Math.min.apply(null, wfs.map(function (w) { return w.retry_at; })) : null, policy: config.retry }; break;
-      case 'dlq': m = { pendingReview: DLQ.filter(function (d) { return d.status === 'PENDING_REVIEW'; }).length, total: DLQ.length, byStatus: countBy(DLQ, function (d) { return d.status; }), byCategory: countBy(DLQ, function (d) { return d.failure_category; }), replays: REPLAYS.length }; break;
-    }
-    return { stage: st, workflows: wfs, counts: countBy(wfs, function (w) { return w.status; }), gcsObjects: gcsObjects, events: evs, logs: logs, metrics: m };
   }
 
   // ───────────────────────────────────────────── GCS api ──
@@ -1817,7 +2054,8 @@ export function createMockEngine(root) {
     { name: BUCKET_ART, location: REGION, storageClass: 'STANDARD', purpose: 'Vertex AI pipeline_root (컴포넌트 중간 산출물) · 템플릿', versioning: false, retentionDays: 30, trigger: null },
     { name: BUCKET_RES, location: REGION, storageClass: 'STANDARD', purpose: '발화별 PASS/FAIL 결과 CSV · summary.json · 일별 aggregate', versioning: true, retentionDays: 365, trigger: null }
   ];
-  ['v1.0', 'v1.1', 'v1.2-rc'].forEach(function (v, i) { var o = addGcsObject(BUCKET_ART, 'templates/bixby-eval-' + v + '.yaml', 48211 + i * 3170, PIPELINE_VERSIONS[i].releasedAt, 'application/x-yaml', { pipeline_version: v }, null); GCS_OBJECTS[BUCKET_ART].sort(function (a, b) { return a.timeCreated - b.timeCreated; }); });
+  PIPELINES.forEach(function (p) { p.versions.forEach(function (v, i) { addGcsObject(BUCKET_ART, templateObject(p.id, v.version), 18211 + v.nodes.length * 3170 + i * 211, v.releasedTs, 'application/x-yaml', { pipeline_id: p.id, pipeline_version: v.version, kind: p.kind }, null); }); });
+  GCS_OBJECTS[BUCKET_ART].sort(function (a, b) { return a.timeCreated - b.timeCreated; });
   BUCKETS.forEach(function (b) { Object.defineProperty(b, 'objectCount', { enumerable: true, get: function () { return GCS_OBJECTS[b.name].length; } }); Object.defineProperty(b, 'totalBytes', { enumerable: true, get: function () { return sum(GCS_OBJECTS[b.name].map(function (o) { return o.size; })); } }); });
   function gcsGet(bucket, name) { var l = GCS_OBJECTS[bucket] || []; for (var i = l.length - 1; i >= 0; i--) if (l[i].name === name) return l[i]; return null; }
   function gcsList(bucket, prefix, opts) {
@@ -1849,12 +2087,23 @@ export function createMockEngine(root) {
     var wf = o.workflow_id ? WF[o.workflow_id] : null;
     if (bucket === BUCKET_IN && wf) return sampleLines(wf.workflow_id, lim).join('\n') + '\n';
     if (bucket === BUCKET_RES) {
-      if (/aggregate\//.test(name)) { var f = AGG_FILES.filter(function (x) { return x.name === name; })[0]; return toCSV((f ? RESULT_ROWS.filter(f.filter) : RESULT_ROWS).slice(0, lim)); }
-      if (wf && /results\.csv$/.test(name)) return toCSV((RESULTS_BY_WF[wf.workflow_id] || []).slice(0, lim));
-      if (wf && /summary\.json$/.test(name)) return JSON.stringify(resultsSummary(RESULTS_BY_WF[wf.workflow_id] || []), null, 2);
+      if (/aggregate\//.test(name)) {
+        var f = AGG_FILES.filter(function (x) { return x.name === name; })[0], out = [];
+        succeededToday().filter(f ? f.filter : function () { return true; }).some(function (w) { Array.prototype.push.apply(out, rowsFor(w).slice(0, lim - out.length)); return out.length >= lim; });
+        return toCSV(out);
+      }
+      if (wf && /results\.csv$/.test(name)) return toCSV(rowsFor(wf).slice(0, lim));
+      if (wf && /summary\.json$/.test(name)) return JSON.stringify(resultsSummary(rowsFor(wf)), null, 2);
     }
-    if (/\.yaml$/.test(name)) return '# PIPELINE SPEC (compiled KFP v2)\npipelineInfo:\n  name: bixby-eval\n  description: Bixby real-utterance evaluation\nroot:\n  dag:\n    tasks:\n' + DAG_TEMPLATE.map(function (d) { return '      ' + d.id.replace('_', '-') + ':\n        componentRef: {name: comp-' + d.id.replace('_', '-') + '}\n' + (d.deps.length ? '        dependentTasks: [' + d.deps.map(function (x) { return x.replace('_', '-'); }).join(', ') + ']\n' : ''); }).join('');
-    if (/\.json$/.test(name)) return JSON.stringify({ pipeline_job_id: o.metadata.pipeline_job_id, task: o.metadata.task, generated_at: isoKst(o.timeCreated), metrics: wf ? utterRates(wf) : {} }, null, 2);
+    if (/\.yaml$/.test(name)) {
+      var pv = pipeVer(o.metadata.pipeline_id, o.metadata.pipeline_version);
+      if (!pv) return '';
+      var dash = function (x) { return x.replace(/_/g, '-'); };
+      return '# PIPELINE SPEC (compiled KFP v2)\npipelineInfo:\n  name: ' + o.metadata.pipeline_id + '\n  version: ' + o.metadata.pipeline_version + '\n  description: ' + PIPE[o.metadata.pipeline_id].description + '\nroot:\n  dag:\n    tasks:\n' + pv.nodes.map(function (d) {
+        return '      ' + dash(d.id) + ':\n' + (d.kind === 'component' ? '        componentRef: {name: comp-' + dash(d.component) + '}\n' : '        pipelineRef: {name: ' + d.ref.pipeline + ', version: ' + d.ref.version + '}  # sub-pipeline → child PipelineJob\n') + (d.deps.length ? '        dependentTasks: [' + d.deps.map(dash).join(', ') + ']\n' : '');
+      }).join('');
+    }
+    if (/\.json$/.test(name)) return JSON.stringify({ pipeline_job_id: o.metadata.pipeline_job_id, pipeline_id: o.metadata.pipeline_id, task: o.metadata.task, generated_at: isoKst(o.timeCreated), metrics: wf ? wfRates(wf) : {} }, null, 2);
     if (wf) return genUtterances(wf).slice(0, lim).map(function (r) { return JSON.stringify({ utterance_id: r.utterance_id, intent_predicted: r.intent_predicted, judge_score: r.judge_score, latency_ms: r.latency_ms }); }).join('\n') + '\n';
     return '';
   }
@@ -1863,7 +2112,7 @@ export function createMockEngine(root) {
   function rate(rows) { var p = rows.filter(function (r) { return r.result === 'PASS'; }).length; return { total: rows.length, pass: p, fail: rows.length - p, passRate: rows.length ? round(p / rows.length, 4) : null }; }
   function groupRate(rows, key) { var g = {}; rows.forEach(function (r) { (g[r[key]] = g[r[key]] || []).push(r); }); var o = {}; Object.keys(g).forEach(function (k) { o[k] = rate(g[k]); }); return o; }
   function resultsSummary(rows) {
-    rows = rows || RESULT_ROWS;
+    rows = rows || todayRows();
     var s = rate(rows), lat = rows.map(function (r) { return r.latency_ms; }), cv = {};
     CAPSULES.forEach(function (c) { var rs = rows.filter(function (r) { return r.capsule_id === c.id; }); cv[c.id] = groupRate(rs, 'pipeline_version'); });
     s.byLanguage = groupRate(rows, 'language'); s.byCapsule = groupRate(rows, 'capsule_id'); s.byVersion = groupRate(rows, 'pipeline_version'); s.byDevice = groupRate(rows, 'device_type');
@@ -1874,51 +2123,6 @@ export function createMockEngine(root) {
     return s;
   }
 
-  // ───────────────────────────────────────────── analytics (derived) ──
-  function componentDurations() {
-    return DAG_TEMPLATE.map(function (d) {
-      var all = [], byL = {}, byV = {};
-      WORKFLOWS.forEach(function (w) { w.attempts.forEach(function (a) {
-        if (a.status !== 'SUCCEEDED') return; var n = a.dag[DAG_IDX[d.id]]; if (!n || !n.duration_ms) return;
-        all.push(n.duration_ms); (byL[w.language] = byL[w.language] || []).push(n.duration_ms); (byV[a.pipeline_version] = byV[a.pipeline_version] || []).push(n.duration_ms);
-      }); });
-      var stat = function (a) { return { avgSec: Math.round(avg(a) / 1000), p95Sec: Math.round(pctl(a, 0.95) / 1000), n: a.length }; };
-      var ol = {}, ov = {}; Object.keys(byL).forEach(function (k) { ol[k] = stat(byL[k]); }); Object.keys(byV).forEach(function (k) { ov[k] = stat(byV[k]); });
-      return Object.assign({ component: d.id, label: d.label, labelKo: d.labelKo, byLanguage: ol, byVersion: ov }, stat(all));
-    });
-  }
-  function versionComparison() {
-    return PIPELINE_VERSIONS.map(function (v) {
-      var ws = WORKFLOWS.filter(function (w) { return w.pipeline_version === v.version; });
-      var term = ws.filter(function (w) { return TERMINAL_STATES.indexOf(w.status) >= 0 && w.status !== 'CANCELLED'; });
-      var succ = term.filter(function (w) { return w.status === 'SUCCEEDED'; });
-      var durs = succ.map(function (w) { return w.attempts[w.attempts.length - 1].duration_ms; });
-      var rows = []; succ.forEach(function (w) { Array.prototype.push.apply(rows, RESULTS_BY_WF[w.workflow_id] || []); });
-      var rs = rate(rows), bc = groupRate(rows, 'capsule_id');
-      var lat = rows.map(function (r) { return r.latency_ms; });
-      return { version: v.version, status: v.status, trafficPct: v.trafficPct, modelUnderTest: v.modelUnderTest, judgeModel: v.judgeModel,
-        runs: ws.length, terminal: term.length, succeeded: succ.length, pipelineSuccessRate: term.length ? round(succ.length / term.length, 4) : null,
-        retryRate: ws.length ? round(ws.filter(function (w) { return w.attempts.length > 1; }).length / ws.length, 4) : null,
-        avgDurationSec: Math.round(avg(durs) / 1000), p95DurationSec: Math.round(pctl(durs, 0.95) / 1000),
-        utterances: rs.total, utterancePassRate: rs.passRate, byCapsule: bc, avgLatencyMs: Math.round(avg(lat)), p95LatencyMs: pctl(lat, 0.95),
-        avgJudgeScore: round(avg(rows.map(function (r) { return r.judge_score; })), 3),
-        costPerRunUsd: round({ 'v1.0': 1.38, 'v1.1': 1.52, 'v1.2-rc': 1.71 }[v.version], 2) };
-    });
-  }
-  function languageSummary() {
-    var cap = getCapacity();
-    return LANGS.map(function (l, i) {
-      var ws = WORKFLOWS.filter(function (w) { return w.language === l.code; });
-      var term = ws.filter(function (w) { return TERMINAL_STATES.indexOf(w.status) >= 0 && w.status !== 'CANCELLED'; });
-      var succ = term.filter(function (w) { return w.status === 'SUCCEEDED'; });
-      var durs = succ.map(function (w) { return w.attempts[w.attempts.length - 1].duration_ms; });
-      var rows = RESULT_ROWS.filter(function (r) { return r.language === l.code; });
-      return { code: l.code, name: l.name, workflows: ws.length, succeeded: succ.length, successRate: term.length ? round(succ.length / term.length, 4) : null,
-        deadLettered: ws.filter(function (w) { return w.status === 'DEAD_LETTERED'; }).length, avgDurationSec: Math.round(avg(durs) / 1000), p95DurationSec: Math.round(pctl(durs, 0.95) / 1000),
-        utterancesToday: rows.length, passRateToday: rate(rows).passRate, capacity: cap.languages[i], throughput7d: sum(hourly.throughput[l.code]) };
-    });
-  }
-
   // ───────────────────────────────────────────── actions ──
   function refreshRuntime() { config.runtimeConfig = flattenRuntime(); }
   function pushAudit(a) { AUDIT.unshift(a); emit('audit', a); return a; }
@@ -1926,7 +2130,10 @@ export function createMockEngine(root) {
     o = o || {};
     var lang = o.language || G.weighted({ ko: 0.5, en: 0.25, ja: 0.15, es: 0.1 });
     var t = Math.round(o.at || clock.now);
-    var wf = makeWorkflow({ created: t, lang: lang, utteranceCount: o.utteranceCount || LANG[lang].batchSize, version: o.pipelineVersion || (G.chance(0.5) ? 'v1.2-rc' : 'v1.1'), priority: o.priority || (G.chance(0.1) ? 7 : 5) });
+    var ver = o.pipelineVersion || (G.chance(0.5) ? 'v1.2-rc' : 'v1.1');
+    var pc = ROOT_PIPELINES.filter(function (p) { return pipeVer(p.id, ver) && p.mixWeight && p.id !== 'bixby-regression-nightly' && (!p.languages || p.languages.indexOf(lang) >= 0); });
+    var pid = o.pipelineId && pipeVer(o.pipelineId, ver) ? o.pipelineId : pc.length ? G.weighted(pc.map(function (p) { return [p.id, p.mixWeight]; })) : 'bixby-eval-full';
+    var wf = makeWorkflow({ created: t, lang: lang, utteranceCount: o.utteranceCount || LANG[lang].batchSize, version: ver, pipeline: pid, priority: o.priority || (G.chance(0.1) ? 7 : 5) });
     stepReceived(wf, t);
     return wf;
   }
@@ -1948,7 +2155,7 @@ export function createMockEngine(root) {
       o = o || {}; var dl = getDeadLetter(dlqId); if (!dl || dl.status === 'REPLAYING' || dl.status === 'REPLAYED') return null;
       var orig = WF[dl.workflow_id], by = o.operator || 'op-kim-sy', t = clock.now, reason = o.reason || '일시 장애 해소 확인 후 수동 Replay';
       var ver = o.pipelineVersion || dl.pipeline_version;
-      var wf = makeWorkflow({ created: t + 1500, lang: orig.language, utteranceCount: orig.input.utteranceCount, version: ver, priority: o.priority || 8, replayOf: orig.workflow_id, replayCycle: orig.replay_cycle + 1 });
+      var wf = makeWorkflow({ created: t + 1500, lang: orig.language, utteranceCount: orig.input.utteranceCount, version: ver, pipeline: orig.pipeline_id, priority: o.priority || 8, replayOf: orig.workflow_id, replayCycle: orig.replay_cycle + 1 });
       var rp = { replay_id: 'rpl-' + kstCompact(t) + '-' + pad(++REPLAY_SEQ, 3), dead_letter_id: dl.dead_letter_id, original_workflow_id: orig.workflow_id, replay_workflow_id: wf.workflow_id, replay_cycle: wf.replay_cycle,
         requested_by: by, approved_by: by, reason: reason, pipeline_version_from: orig.pipeline_version, pipeline_version_to: ver, status: 'QUEUED', created_at: t, approved_at: t + 500, completed_at: null };
       var prevApproved = REPLAYS.filter(function (r) { return r.dead_letter_id === dl.dead_letter_id && r.status === 'APPROVED'; })[0];
@@ -1976,6 +2183,7 @@ export function createMockEngine(root) {
       o = o || {}; var l = LANG[code]; if (!l) return null;
       var by = o.operator || 'op-kim-sy', before = {}, after = {}, t = clock.now;
       Object.keys(patch).forEach(function (k) { before[k] = l[k]; l[k] = patch[k]; after[k] = patch[k]; });
+      noteDrift(Object.keys(patch).filter(function (k) { return ['maxConcurrent', 'maxStartsPerMinute', 'priorityWeight'].indexOf(k) >= 0; }).map(function (k) { return 'languages.' + code + '.' + k; }), by, o.reason);
       refreshRuntime();
       var act = patch.paused === true ? 'LANGUAGE_PAUSED' : patch.paused === false ? 'LANGUAGE_RESUMED' : 'CAPACITY_UPDATED';
       addEvent(null, 'CONFIG_UPDATED', t, { event_type: 'pipeline.config.updated', key: 'language:' + code, before: before, after: after, changed_by: by, reason: o.reason || null }, { att: null, language: code });
@@ -1985,7 +2193,7 @@ export function createMockEngine(root) {
     },
     setGlobalCapacity: function (n, o) {
       o = o || {}; var by = o.operator || 'op-kim-sy', before = config.global.maxConcurrent, t = clock.now;
-      config.global.maxConcurrent = n; refreshRuntime();
+      config.global.maxConcurrent = n; noteDrift(['global.maxConcurrent'], by, o.reason); refreshRuntime();
       addEvent(null, 'CONFIG_UPDATED', t, { event_type: 'pipeline.config.updated', key: 'global.maxConcurrent', before: before, after: n, changed_by: by, reason: o.reason || null }, { att: null });
       pushAudit(audit(t, by, 'CAPACITY_UPDATED', 'global.maxConcurrent', { value: before }, { value: n }, o.reason));
       emit('config', { global: true, before: before, after: n });
@@ -1993,7 +2201,7 @@ export function createMockEngine(root) {
     },
     updateRetryPolicy: function (patch, o) {
       o = o || {}; var by = o.operator || 'op-kim-sy', before = JSON.parse(JSON.stringify(config.retry));
-      Object.assign(config.retry, patch); refreshRuntime();
+      Object.assign(config.retry, patch); noteDrift(['retry.maxRetries', 'retry.backoffSeconds'], by, o.reason); refreshRuntime();
       pushAudit(audit(clock.now, by, 'CONFIG_UPDATED', 'retry', before, JSON.parse(JSON.stringify(config.retry)), o.reason));
       emit('config', { retry: config.retry });
       return config.retry;
@@ -2014,7 +2222,7 @@ export function createMockEngine(root) {
       var fail = rng.chance(Math.min(0.95, p * failMul));
       var cat = null;
       if (fail) { cat = rng.weighted(n === 1 ? { MODEL_TRANSIENT: 4, PIPELINE_EXECUTION: 2, QUOTA: 1.5, CODE_DEFECT: 0.6, INPUT_SCHEMA: 0.35, TIMEOUT: 0.5, AUTH_PERMISSION: 0.15 } : { MODEL_TRANSIENT: 4, PIPELINE_EXECUTION: 2, QUOTA: 1.5, TIMEOUT: 0.5 }); }
-      return makePlan(rng, w.language, w.pipeline_version, w.input.utteranceCount, fail ? 'FAILED' : 'SUCCEEDED', cat);
+      return makePlan(rng, w.language, w.pipeline_version, w.input.utteranceCount, fail ? 'FAILED' : 'SUCCEEDED', cat, undefined, w.pipeline_id);
     }
     function canAdmit(lang, now) {
       var L = LANG[lang];
@@ -2032,7 +2240,7 @@ export function createMockEngine(root) {
         var dl2 = getDeadLetter(w.dead_letter_id);
         raiseAlert({ policy_id: 'ap-dlq-new', severity: 'CRITICAL', title: 'DLQ 신규 발생: ' + dl2.dead_letter_id, message: w.language + ' · ' + dl2.failure_category + ' · ' + dl2.error_code + ' (' + dl2.attempts + '회 시도)', language: w.language, workflow_id: w.workflow_id, dead_letter_id: dl2.dead_letter_id, opened_at: dl2.created_at + 4000 });
       }
-      if (w.status === 'SUCCEEDED' && prevStatus !== 'SUCCEEDED') emit('result', { workflow_id: w.workflow_id, rows: RESULTS_BY_WF[w.workflow_id], file: w.result });
+      if (w.status === 'SUCCEEDED' && prevStatus !== 'SUCCEEDED') emit('result', { workflow_id: w.workflow_id, file: w.result });
     }
     function tick() {
       var prevG = G; G = rng;
@@ -2126,11 +2334,13 @@ export function createMockEngine(root) {
       var rb = { maxRetries: config.retry.maxRetries, backoffSeconds: config.retry.backoffSeconds.slice() };
       if (patch.retry.maxRetries != null) { config.retry.maxRetries = patch.retry.maxRetries; config.retry.maxAttempts = patch.retry.maxRetries + 1; }
       if (patch.retry.backoffSeconds) config.retry.backoffSeconds = patch.retry.backoffSeconds.slice();
+      noteDrift(['retry.maxRetries', 'retry.backoffSeconds'], by, reason);
       configChange(by, 'retry', rb, { maxRetries: config.retry.maxRetries, backoffSeconds: config.retry.backoffSeconds.slice() }, reason); changed.push('retry');
     }
     ['workflowTimeoutMin', 'pipelineTimeoutMin'].forEach(function (k) {
       if (patch[k] == null || patch[k] === config[k]) return;
       var b = config[k]; config[k] = patch[k];
+      noteDrift([k], by, reason);
       configChange(by, k, { value: b }, { value: patch[k] }, reason); changed.push(k);
     });
     if (patch.queuePolicy) {
@@ -2140,7 +2350,7 @@ export function createMockEngine(root) {
       configChange(by, 'queuePolicy', qb, JSON.parse(JSON.stringify(config.queuePolicy)), reason); changed.push('queuePolicy');
     }
     if (patch.defaultPipelineVersion && patch.defaultPipelineVersion !== config.defaultPipelineVersion) {
-      var dv = config.defaultPipelineVersion; config.defaultPipelineVersion = patch.defaultPipelineVersion;
+      var dv = config.defaultPipelineVersion; config.defaultPipelineVersion = patch.defaultPipelineVersion; noteDrift(['defaultPipelineVersion'], by, reason);
       configChange(by, 'defaultPipelineVersion', { default: dv }, { default: patch.defaultPipelineVersion }, reason, 'PIPELINE_VERSION_PROMOTED'); changed.push('defaultPipelineVersion');
     }
     if (patch.versionTraffic) {
@@ -2165,12 +2375,14 @@ export function createMockEngine(root) {
   actions.setGlobalStartsPerMinute = function (n, o) {
     o = o || {}; var by = o.operator || 'op-kim-sy', before = config.global.maxStartsPerMinute;
     config.global.maxStartsPerMinute = n;
+    noteDrift(['global.maxStartsPerMinute'], by, o.reason);
     configChange(by, 'global.maxStartsPerMinute', { value: before }, { value: n }, o.reason, 'CAPACITY_UPDATED');
     return config.global;
   };
   var _internal = {
     audit: audit, pushAudit: pushAudit, addEvent: addEvent, addLog: addLog, refreshRuntime: refreshRuntime, emit: emit,
-    clock: clock, OP: OP, LANG: LANG, WF: WF, gcsGet: gcsGet, inputLine: inputLine, genUtterances: genUtterances,
+    clock: clock, OP: OP, LANG: LANG, WF: WF, gcsGet: gcsGet, inputLine: inputLine, genUtterances: genUtterances, kstDayStart: kstDayStart,
+    DRIFT_NOTES: DRIFT_NOTES, rowCacheStats: function () { return { workflows: ROW_CACHE.size, rows: ROW_CACHE_ROWS, max: ROW_CACHE_MAX, hits: ROW_STATS.hits, misses: ROW_STATS.misses, evictions: ROW_STATS.evictions }; },
     RESULTS_BY_WF: RESULTS_BY_WF, PIPELINE_VERSIONS: PIPELINE_VERSIONS, SERVICES: SERVICES, ALERT_POLICIES: ALERT_POLICIES,
     kstDate: kstDate, isoKst: isoKst, BASE_NOW: BASE_NOW, TODAY_START: TODAY_START
   };
@@ -2183,7 +2395,7 @@ export function createMockEngine(root) {
     states: STATES, ACTIVE_STATES: ACTIVE_STATES, TERMINAL_STATES: TERMINAL_STATES, DAG_TEMPLATE: DAG_TEMPLATE,
     statusMeta: statusMeta, nodeStatusMeta: nodeStatusMeta, attemptStatusMeta: attemptStatusMeta, dlqStatusMeta: dlqStatusMeta, severityMeta: severityMeta,
     failureCategoryMeta: failureCategoryMeta, failureReasonMeta: failureReasonMeta, eventCatalog: EVENT_CATALOG, capsules: CAPSULES, devices: DEVICES.map(function (d) { return d.id; }),
-    workflows: WORKFLOWS, getWorkflow: getWorkflow, listWorkflows: listWorkflows, workflowsByStage: workflowsByStage, stageDetail: stageDetail,
+    workflows: WORKFLOWS, getWorkflow: getWorkflow, listWorkflows: listWorkflows, workflowsByStage: workflowsByStage,
     events: { all: EVENTS_ALL, byWorkflow: EVENTS_BY_WF, recent: recentEvents, forWorkflow: function (id) { return EVENTS_BY_WF[id] || []; } },
     getEvents: function (id) { return EVENTS_BY_WF[id] || []; },
     logs: { all: LOGS_ALL, byWorkflow: LOGS_BY_WF, system: LOGS_SYSTEM, recent: function (n, f) { return queryLogs(Object.assign({ limit: n || 50, order: 'desc', to: clock.now }, f || {})); }, query: queryLogs },
@@ -2191,15 +2403,22 @@ export function createMockEngine(root) {
     gcs: { buckets: BUCKETS, objects: GCS_OBJECTS, list: gcsList, get: gcsGet, read: gcsRead, sampleLines: sampleLines },
     dlq: DLQ, replays: REPLAYS, getDeadLetter: getDeadLetter,
     reservations: RESERVATIONS, getCapacity: getCapacity, overview: overview,
-    metrics: { hourly: hourly, fiveMin: fiveMin, daily: daily, errorCategories7d: errorCategories7d, componentDurations: componentDurations, versionComparison: versionComparison, languageSummary: languageSummary },
+    metrics: { hourly: hourly, fiveMin: fiveMin, daily: daily, errorCategories7d: errorCategories7d },
+    pipelines: {
+      registry: PIPELINES, components: COMPONENTS, models: MODELS, get: pipeVer, leafComponents: leafComponents, templateObject: templateObject,
+      jobTree: jobTree, plan: function (jobId) { return PLANS[jobId] || null; }
+    },
+    dataWindow: function () {
+      var e = hourly.ts[0];
+      for (var i = 0; i < WORKFLOWS.length; i++) if (WORKFLOWS[i].created_at != null && WORKFLOWS[i].created_at < e) e = WORKFLOWS[i].created_at;
+      return { earliest: e, now: clock.now, historyDays: HISTORY_DAYS };
+    },
     alerts: ALERTS, incidents: INCIDENTS, audit: AUDIT,
-    results: { columns: RESULT_COLUMNS, rows: RESULT_ROWS, file: RESULT_FILE, files: AGG_FILES, byWorkflow: function (id) { return RESULTS_BY_WF[id] || []; }, forWorkflow: function (id) { return RESULTS_BY_WF[id] || []; }, summary: resultsSummary, toCSV: toCSV,
-      download: function (rows, filename, o) { if (typeof document === 'undefined') return false; var blob = new Blob([toCSV(rows || RESULT_ROWS, Object.assign({ bom: true }, o || {}))], { type: 'text/csv;charset=utf-8' }); var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename || 'results.csv'; document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0); return true; } },
+    results: { columns: RESULT_COLUMNS, get rows() { return todayRows(); }, file: RESULT_FILE, files: AGG_FILES, byWorkflow: function (id) { return rowsFor(WF[id]); }, forWorkflow: function (id) { return rowsFor(WF[id]); }, summary: resultsSummary, toCSV: toCSV,
+      rowsFor: rowsFor, rowsInRange: rowsInRange, succeededBetween: succeededBetween },
     actions: actions, on: on, off: off, createSimulator: createSimulator, fmt: fmt
   };
-  on('result', function () {
-    AGG_FILES.forEach(function (f) { var bpr = f.sizeBytes / Math.max(1, f.rowCount); f.rowCount = RESULT_ROWS.filter(f.filter).length; f.sizeBytes = Math.round(bpr * f.rowCount); f.generatedAt = clock.now; });
-  });
+  on('result', function () { AGG_FILES.forEach(refreshAgg); });
   MOCK._internal = _internal;
   return MOCK;
 }

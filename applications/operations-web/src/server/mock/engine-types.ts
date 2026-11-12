@@ -1,14 +1,15 @@
 /**
- * Typed surface of the (untyped, verbatim-ported) mock engine in ./engine.ts.
- * Server-only. Route handlers should go through ./runtime + ./projections rather than
- * touching these arrays directly, and must never mutate them except via `actions`.
+ * Typed surface of the (untyped) mock engine in ./engine.ts.
+ * Server-only. Route handlers should go through ./runtime + services rather than touching these
+ * arrays directly, and must never mutate them except via `actions`.
  */
 import type {
   Alert,
+  AlertPolicy,
   AppConfig,
   AuditEntry,
   CapacitySnapshot,
-  ComponentDuration,
+  ComponentSpec,
   ConfigPatch,
   DailyMetrics,
   DeadLetter,
@@ -19,11 +20,16 @@ import type {
   GcsObject,
   HourlyMetrics,
   Incident,
+  LangCode,
   LanguageConfig,
-  LanguageSummary,
   LogEntry,
+  ModelVersionInfo,
+  Attempt,
+  OverviewKpis,
   Operator,
-  Overview,
+  PipelineDef,
+  PipelineJobTree,
+  PipelineVersionDef,
   PipelineVersionDetail,
   Replay,
   Reservation,
@@ -32,21 +38,20 @@ import type {
   ResultRow,
   ResultsSummary,
   ServiceInfo,
-  AlertPolicy,
+  Severity,
   Stage,
   StageId,
-  VersionComparison,
   Workflow,
   WorkflowEvent,
   WorkflowStatus,
-  LangCode,
-  Severity,
 } from "@/lib/types";
 
 export interface WorkflowFilter {
   language?: string | string[];
   status?: string | string[];
   pipeline_version?: string | string[];
+  pipeline_id?: string | string[];
+  model_version?: string | string[];
   stage?: StageId;
   event_type?: string;
   batch_id?: string;
@@ -71,7 +76,11 @@ export interface LogFilter {
   attempt?: number;
   language?: string;
   trace_id?: string;
+  /** job id; matches the job and (job_scope "tree", default) its child jobs */
   pipeline_job_id?: string;
+  job_scope?: "self" | "tree";
+  pipeline_id?: string;
+  node_path?: string;
   error_code?: string;
   event_type?: string;
   from?: number;
@@ -79,6 +88,20 @@ export interface LogFilter {
   q?: string;
   order?: "asc" | "desc";
   limit?: number;
+}
+
+export interface EventFilter {
+  stage?: string;
+  language?: string;
+  severity?: string | string[];
+  names?: string | string[];
+  from?: number;
+  to?: number;
+  workflow_id?: string;
+  pipeline_id?: string;
+  component?: string;
+  pipeline_job_id?: string;
+  job_scope?: "self" | "tree";
 }
 
 export interface MockSimulator {
@@ -92,6 +115,27 @@ interface ActionOpts {
   reason?: string;
 }
 
+/** Internal layout node of a plan (never serialized). */
+export interface PlanNode {
+  id: string;
+  kind: "component" | "subpipeline";
+  component: string | null;
+  key: string;
+  pipePath: string;
+  legacyPhase: string | null;
+  s: number;
+  e: number;
+}
+export interface AttemptPlan {
+  pipeline_id: string;
+  pipeline_version: string;
+  durationMs: number;
+  outcome: string;
+  all: PlanNode[];
+  leaves: PlanNode[];
+  error: { category: string; code: string; component: string | null; path: string | null; node_path: string | null; job_suffix: string; message: string } | null;
+}
+
 export interface MockEngine {
   meta: { baseNow: number; baseNowIso: string; timezone: string; project: string; region: string };
   now(): number;
@@ -103,22 +147,10 @@ export interface MockEngine {
   getWorkflow(id: string): Workflow | null;
   listWorkflows(f?: WorkflowFilter): Workflow[];
   workflowsByStage(): Record<StageId, Workflow[]>;
-  stageDetail(
-    id: string,
-    opts?: { limit?: number },
-  ): {
-    stage: Stage;
-    workflows: Workflow[];
-    counts: Partial<Record<WorkflowStatus, number>>;
-    gcsObjects: GcsObject[];
-    events: WorkflowEvent[];
-    logs: LogEntry[];
-    metrics: Record<string, unknown>;
-  } | null;
   events: {
     all: WorkflowEvent[];
     byWorkflow: Record<string, WorkflowEvent[]>;
-    recent(n?: number, f?: { stage?: string; language?: string; severity?: string | string[]; names?: string | string[] }): WorkflowEvent[];
+    recent(n?: number, f?: EventFilter): WorkflowEvent[];
   };
   getEvents(id: string): WorkflowEvent[];
   logs: { all: LogEntry[]; system: LogEntry[]; query(f: LogFilter): LogEntry[] };
@@ -136,30 +168,43 @@ export interface MockEngine {
   getDeadLetter(id: string): DeadLetter | null;
   reservations: Reservation[];
   getCapacity(): CapacitySnapshot;
-  overview(): Overview;
+  /** live "today" KPIs (+ statusDistribution + capacity) — used by the SSE tick */
+  overview(): OverviewKpis & { statusDistribution: Record<WorkflowStatus, number>; capacity: CapacitySnapshot };
   metrics: {
-    hourly: HourlyMetrics;
+    hourly: HourlyMetrics & { active: Record<LangCode, number[]> };
     fiveMin: FiveMinMetrics;
     daily: DailyMetrics[];
     errorCategories7d: ErrorCategoryCount[];
-    componentDurations(): ComponentDuration[];
-    versionComparison(): VersionComparison[];
-    languageSummary(): LanguageSummary[];
   };
+  pipelines: {
+    registry: (PipelineDef & { versions: (PipelineVersionDef & { releasedTs: number })[] })[];
+    components: Record<string, ComponentSpec>;
+    models: (ModelVersionInfo & { releasedTs: number })[];
+    get(id: string, version: string): (PipelineVersionDef & { releasedTs: number }) | null;
+    leafComponents(id: string, version: string): string[];
+    templateObject(id: string, version: string): string;
+    jobTree(wf: Workflow, att: Attempt, t?: number): PipelineJobTree;
+    plan(jobId: string): AttemptPlan | null;
+  };
+  dataWindow(): { earliest: number; now: number; historyDays: number };
   alerts: Alert[];
   incidents: Incident[];
   audit: AuditEntry[];
   results: {
     columns: ResultColumn[];
+    /** LEGACY: today's rows (derived on access) */
     rows: ResultRow[];
     file: ResultFile & { filter?: unknown };
     files: (ResultFile & { filter?: unknown })[];
     byWorkflow(id: string): ResultRow[];
     summary(rows?: ResultRow[]): ResultsSummary;
     toCSV(rows: ResultRow[], opts?: { bom?: boolean; columns?: string[]; eol?: string }): string;
+    rowsFor(wf: Workflow): ResultRow[];
+    rowsInRange(from: number, to: number): ResultRow[];
+    succeededBetween(from: number, to: number): Workflow[];
   };
   actions: {
-    injectBatch(o?: { language?: LangCode; utteranceCount?: number; pipelineVersion?: string; priority?: number }): Workflow;
+    injectBatch(o?: { language?: LangCode; utteranceCount?: number; pipelineVersion?: string; pipelineId?: string; priority?: number }): Workflow;
     cancelWorkflow(id: string, o?: ActionOpts): Workflow | null;
     replayDeadLetter(
       id: string,
@@ -201,7 +246,10 @@ export interface MockEngine {
     PIPELINE_VERSIONS: PipelineVersionDetail[];
     SERVICES: ServiceInfo[];
     ALERT_POLICIES: AlertPolicy[];
+    DRIFT_NOTES: Record<string, { changedBy: string; changedAt: number; reason: string | null }>;
+    rowCacheStats(): { workflows: number; rows: number; max: number; hits: number; misses: number; evictions: number };
     kstDate(ts: number): string;
+    kstDayStart(ts: number): number;
     isoKst(ts: number): string;
     BASE_NOW: number;
     TODAY_START: number;

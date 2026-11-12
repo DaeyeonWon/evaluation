@@ -11,17 +11,29 @@ import type { NextConfig } from "next";
  *   /api/v1/* request is proxied server-side to the real FastAPI Operations API via a
  *   `beforeFiles` rewrite, which takes precedence over the built-in mock route handlers.
  *   Unset (default) → the internal mock API answers. Evaluated at build time.
+ *   src/proxy.ts still runs first (auth + RBAC) and forwards identity as x-console-user-* headers.
+ * - output "standalone": .next/standalone/server.js for the Docker image (see Dockerfile).
+ * - experimental.authInterrupts: enables forbidden() (403 UI in src/app/forbidden.tsx).
  */
 const upstream = process.env.OPERATIONS_API_URL?.replace(/\/+$/, "");
 
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  output: "standalone",
+  experimental: {
+    authInterrupts: true,
+  },
   compress: false,
   reactStrictMode: true,
   poweredByHeader: false,
   async rewrites() {
     if (!upstream) return [];
-    return { beforeFiles: [{ source: "/api/v1/:path*", destination: `${upstream}/:path*` }], afterFiles: [], fallback: [] };
+    // /api/v1/auth/** (session cookie, role config) always stays local; everything else goes upstream.
+    return {
+      beforeFiles: [{ source: "/api/v1/:path((?!auth(?:/|$)).*)", destination: `${upstream}/:path` }],
+      afterFiles: [],
+      fallback: [],
+    };
   },
   turbopack: {
     rules: {

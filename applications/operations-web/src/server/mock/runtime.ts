@@ -6,10 +6,11 @@
  * - Idle guard: when nobody is connected to /api/v1/stream and no API request arrived for
  *   IDLE_AFTER_MS, ticks are skipped (memory stays bounded on a forgotten dev server).
  *   The next request or stream connection resumes it automatically.
- * - Demo day loop: at 1× the virtual clock crosses KST midnight after ~34 real minutes, which
- *   would zero every "오늘" KPI and let result rows grow without bound. When the virtual date
- *   leaves the seeded day, the engine is re-seeded (same deterministic data) and SSE
- *   subscribers, speed and pause carry over; a "sim" message tells clients to refetch.
+ * - Demo day loop: at 1× the virtual clock crosses KST midnight after ~34 real minutes. When the
+ *   virtual date leaves the seeded day, the engine is re-seeded ANCHORED ON THE NEW DAY at the same
+ *   time-of-day as the seed (default 14:30 KST → e.g. 2026-11-13T14:30) — so "today" resolves to the
+ *   new virtual day and 30 days of history are regenerated behind it. SSE subscribers, speed and
+ *   pause carry over; a "sim" message tells clients to refetch.
  * - Every engine bus event is re-broadcast to SSE subscribers in a compact, JSON-safe form.
  */
 import type {
@@ -18,6 +19,7 @@ import type {
   AuditEntry,
   DeadLetter,
   LogEntry,
+  PipelineJobTransition,
   SimState,
   StreamEventMap,
   StreamEventType,
@@ -26,6 +28,7 @@ import type {
   Workflow,
   WorkflowEvent,
 } from "@/lib/types";
+import { domain } from "@/config/domain";
 import { createMockEngine } from "./engine";
 import type { MockEngine, MockSimulator } from "./engine-types";
 import { buildTick, toActivePos } from "./projections";
@@ -66,8 +69,8 @@ function kstDay(rt: Runtime, t: number): string {
   return rt.engine._internal.isoKst(t).slice(0, 10);
 }
 
-function createRuntime(carry?: Pick<Runtime, "listeners" | "speed" | "paused" | "tickNo">): Runtime {
-  const engine = createMockEngine(globalThis) as unknown as MockEngine;
+function createRuntime(carry?: Pick<Runtime, "listeners" | "speed" | "paused" | "tickNo">, baseNow?: number): Runtime {
+  const engine = createMockEngine(globalThis, { domain, baseNow }) as unknown as MockEngine;
   const sim = engine.createSimulator({ seed: SIM_SEED, tickMs: TICK_MS });
   if (carry && carry.speed !== 1) sim.setSpeed(carry.speed);
   const rt: Runtime = {
@@ -101,6 +104,7 @@ function createRuntime(carry?: Pick<Runtime, "listeners" | "speed" | "paused" | 
   engine.on("alert", (a: Alert) => broadcast(rt, "alert", a));
   engine.on("audit", (a: AuditEntry) => broadcast(rt, "audit", a));
   engine.on("dlq", (d: DeadLetter) => broadcast(rt, "dlq", d));
+  engine.on("job", (j: PipelineJobTransition) => broadcast(rt, "job", j));
 
   rt.timer = setInterval(() => {
     if (rt.paused || isIdle(rt)) return;
@@ -118,9 +122,13 @@ function createRuntime(carry?: Pick<Runtime, "listeners" | "speed" | "paused" | 
 
 /** Re-seed the runtime once the virtual clock leaves the seeded KST day. Returns true if it did. */
 function rollDayIfNeeded(rt: Runtime): boolean {
-  if (kstDay(rt, rt.engine.now()) === kstDay(rt, rt.engine.meta.baseNow)) return false;
+  const now = rt.engine.now();
+  const base = rt.engine.meta.baseNow;
+  if (kstDay(rt, now) === kstDay(rt, base)) return false;
   if (rt.timer) clearInterval(rt.timer);
-  const next = createRuntime({ listeners: rt.listeners, speed: rt.speed, paused: rt.paused, tickNo: rt.tickNo });
+  const dayStart = rt.engine._internal.kstDayStart;
+  const nextBase = dayStart(now) + (base - dayStart(base));
+  const next = createRuntime({ listeners: rt.listeners, speed: rt.speed, paused: rt.paused, tickNo: rt.tickNo }, nextBase);
   G.__aipoRuntime = next;
   const snap = buildTick(next);
   next.lastTick = snap;

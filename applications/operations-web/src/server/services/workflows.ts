@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { DAG_TEMPLATE, LANG_CODES, PIPELINE_VERSIONS, STAGES, STATES, TERMINAL_STATES } from "@/lib/catalog";
 import type {
   AttemptHistory,
+  WorkflowPipelineRuns,
   LangCode,
   LogPage,
   Severity,
@@ -14,7 +15,8 @@ import type {
 import { Query, badRequest, conflict, notFound, paginate } from "../http";
 import type { LogFilter, WorkflowFilter } from "../mock/engine-types";
 import { getEngine } from "../mock/runtime";
-import { countBy, toSummary } from "../mock/projections";
+import { countBy, toSummary, wfOverlaps } from "../mock/projections";
+import { readRange } from "../range";
 
 export const SEVERITIES: Severity[] = ["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL"];
 const SORTS = ["created_desc", "created_asc", "wait_desc", "run_desc", "updated_desc", "attempts_desc"] as const;
@@ -33,19 +35,23 @@ export function listWorkflows(req: NextRequest): WorkflowListResponse {
     language: q.enumList("language", LANG_CODES, "language"),
     status: q.enumList("status", STATES, "status"),
     pipeline_version: q.enumList("version", PIPELINE_VERSIONS, "version") ?? q.enumList("pipeline_version", PIPELINE_VERSIONS, "pipeline_version"),
+    pipeline_id: q.list("pipeline_id") ?? q.list("pipeline"),
+    model_version: q.list("model_version") ?? q.list("model"),
     stage: q.enumOne("stage", STAGES.map((s) => s.id) as StageId[]),
     event_type: q.str("event_type"),
     batch_id: q.str("batch_id"),
     error_code: q.str("error_code"),
     error_category: q.str("error_category"),
-    from: q.time("from"),
-    to: q.time("to"),
     hasRetries: q.bool("has_retries") || undefined,
     replay: q.bool("replay") || undefined,
     q: q.str("q"),
     sort: sort === "attempts_desc" ? "created_desc" : sort,
   };
-  let rows = e.listWorkflows(f);
+  const range = readRange(req);
+  const rangeBy = q.enumOne("range_by", ["active", "created", "updated"] as const, "active")!;
+  let rows = e.listWorkflows(f).filter((w) =>
+    rangeBy === "created" ? w.created_at >= range.from && w.created_at <= range.to : rangeBy === "updated" ? w.updated_at >= range.from && w.updated_at <= range.to : wfOverlaps(w, range),
+  );
   const wid = q.str("workflow_id");
   if (wid) rows = rows.filter((w) => w.workflow_id === wid || w.workflow_id.includes(wid));
   const pj = q.str("pipeline_job_id");
@@ -61,7 +67,10 @@ export function listWorkflows(req: NextRequest): WorkflowListResponse {
       status: countBy(rows, (w) => w.status) as Partial<Record<WorkflowStatus, number>>,
       language: countBy(rows, (w) => w.language) as Partial<Record<LangCode, number>>,
       version: countBy(rows, (w) => w.pipeline_version),
+      pipeline_id: countBy(rows, (w) => w.pipeline_id),
+      model_version: countBy(rows, (w) => w.model_version),
     },
+    range,
   };
 }
 
@@ -77,6 +86,9 @@ export function workflowLogs(id: string, req: NextRequest): LogPage {
     attempt: q.int("attempt", { min: 1, max: 10 }),
     event_type: q.str("event_type"),
     trace_id: q.str("trace_id"),
+    pipeline_job_id: q.str("pipeline_job_id"),
+    job_scope: q.enumOne("job_scope", ["self", "tree"] as const, "tree"),
+    node_path: q.str("node_path"),
     error_code: q.str("error_code"),
     from: q.time("from"),
     to: q.time("to"),
@@ -107,13 +119,17 @@ export function globalLogs(req: NextRequest): LogPage {
     language: q.enumOne("language", LANG_CODES),
     trace_id: q.str("trace_id"),
     pipeline_job_id: q.str("pipeline_job_id"),
+    job_scope: q.enumOne("job_scope", ["self", "tree"] as const, "tree"),
+    pipeline_id: q.str("pipeline_id"),
+    node_path: q.str("node_path"),
     error_code: q.str("error_code"),
     event_type: q.str("event_type"),
-    from: q.time("from"),
-    to: q.time("to") ?? e.now(),
     q: q.str("q"),
     order: q.enumOne("order", ["asc", "desc"] as const, "desc"),
   };
+  const range = readRange(req);
+  f.from = range.from;
+  f.to = Math.min(range.to, e.now());
   const items = e.logs.query(f);
   const limit = q.int("limit", { min: 1, max: 5000, def: 200 })!;
   const src = f.system ? e.logs.system : e.logs.all;
@@ -122,6 +138,7 @@ export function globalLogs(req: NextRequest): LogPage {
     total: items.length,
     components: [...new Set(src.slice(-2000).map((l) => l.component))],
     services: [...new Set(src.slice(-2000).map((l) => l.service))],
+    range,
   };
 }
 
@@ -177,4 +194,17 @@ export function cancelWorkflow(id: string, operatorId: string, reason: string) {
   const res = e.actions.cancelWorkflow(id, { operator: operatorId, reason });
   if (!res) throw badRequest("Workflow를 취소하지 못했습니다.");
   return toSummary(res);
+}
+
+/** GET /workflows/[id]/pipeline-runs — root + child job tree for every attempt. */
+export function workflowPipelineRuns(id: string): WorkflowPipelineRuns {
+  const e = getEngine();
+  const w = getWorkflowOr404(id);
+  const now = e.now();
+  return {
+    workflow_id: w.workflow_id,
+    pipeline_id: w.pipeline_id,
+    pipeline_version: w.pipeline_version,
+    attempts: w.attempts.map((a) => ({ attempt: a.attempt, status: a.status, root: e.pipelines.jobTree(w, a, now) })),
+  };
 }

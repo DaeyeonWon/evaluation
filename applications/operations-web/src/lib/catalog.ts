@@ -3,10 +3,11 @@
  * Generated from the mock engine's initial state (same values as designs/mock-data.js).
  * Live/mutable values (capacity limits, paused flags, config) must come from the API instead.
  */
+import { domain } from "@/config/domain";
 import type {
-  AttemptStatus, Capsule, DagTemplateNode, DlqStatus, EventCatalogEntry, FailureCategory,
-  FailureCategoryMetaEntry, FailureReason, FailureReasonMetaEntry, LangCode, LanguageConfig, MetaEntry,
-  NodeStatus, Operator, ResultColumn, RolePermission, Severity, SeverityMetaEntry, Stage, StageEdge, StageId,
+  AttemptStatus, Capsule, ComponentSpec, DagTemplateNode, DlqStatus, DomainLanguage, EventCatalogEntry, FailureCategory,
+  FailureCategoryMetaEntry, FailureReason, FailureReasonMetaEntry, LangCode, MetaEntry, ModelVersionInfo,
+  NodeStatus, Operator, PipelineDef, ResultColumn, RolePermission, Severity, SeverityMetaEntry, Stage, StageEdge, StageId,
   StatusMetaEntry, Tone, WorkflowStatus,
 } from "./types";
 
@@ -40,7 +41,7 @@ export const LANG_CODES: LangCode[] = [
   "es"
 ];
 /** Initial language config (static defaults). Live values: GET /api/v1/languages/capacity. */
-export const LANGUAGES: LanguageConfig[] = [
+export const LANGUAGES: DomainLanguage[] = [
   {
     "code": "ko",
     "name": "한국어",
@@ -54,7 +55,13 @@ export const LANGUAGES: LanguageConfig[] = [
     "enabled": true,
     "paused": false,
     "backlogAlertThreshold": 8,
-    "p95WaitSloSec": 900
+    "p95WaitSloSec": 900,
+    "basePass": 0.875,
+    "bytesPerUtterance": 455,
+    "baseMinutes": 11,
+    "peakPerHour": 7.2,
+    "costPerRunUsd": 1.42,
+    "mixWeight": 0.55
   },
   {
     "code": "en",
@@ -69,7 +76,13 @@ export const LANGUAGES: LanguageConfig[] = [
     "enabled": true,
     "paused": false,
     "backlogAlertThreshold": 20,
-    "p95WaitSloSec": 600
+    "p95WaitSloSec": 600,
+    "basePass": 0.9,
+    "bytesPerUtterance": 390,
+    "baseMinutes": 18,
+    "peakPerHour": 4.6,
+    "costPerRunUsd": 2.31,
+    "mixWeight": 0.22
   },
   {
     "code": "ja",
@@ -84,7 +97,13 @@ export const LANGUAGES: LanguageConfig[] = [
     "enabled": true,
     "paused": false,
     "backlogAlertThreshold": 6,
-    "p95WaitSloSec": 900
+    "p95WaitSloSec": 900,
+    "basePass": 0.82,
+    "bytesPerUtterance": 470,
+    "baseMinutes": 7.5,
+    "peakPerHour": 1.6,
+    "costPerRunUsd": 0.86,
+    "mixWeight": 0.13
   },
   {
     "code": "es",
@@ -99,10 +118,16 @@ export const LANGUAGES: LanguageConfig[] = [
     "enabled": true,
     "paused": false,
     "backlogAlertThreshold": 5,
-    "p95WaitSloSec": 1200
+    "p95WaitSloSec": 1200,
+    "basePass": 0.8,
+    "bytesPerUtterance": 405,
+    "baseMinutes": 7.5,
+    "peakPerHour": 1.1,
+    "costPerRunUsd": 0.81,
+    "mixWeight": 0.1
   }
 ];
-export const LANGUAGE_BY_CODE = Object.fromEntries(LANGUAGES.map((l) => [l.code, l])) as Record<LangCode, LanguageConfig>;
+export const LANGUAGE_BY_CODE = Object.fromEntries(LANGUAGES.map((l) => [l.code, l])) as Record<LangCode, DomainLanguage>;
 
 export const OPERATORS: Operator[] = [
   {
@@ -355,7 +380,7 @@ export const STAGES: Stage[] = [
       "en": "Vertex AI Pipeline"
     },
     "gcpService": "Vertex AI Pipelines",
-    "resource": "bixby-eval pipeline",
+    "resource": "pipeline registry (bixby-eval-*)",
     "icon": "cpu",
     "states": [
       "RUNNING"
@@ -371,7 +396,7 @@ export const STAGES: Stage[] = [
       "aggregate",
       "persist"
     ],
-    "description": "Preprocessing → Agent Evaluation(의도·응답(LLM Judge)·지연) → Result Aggregation → Output Persistence."
+    "description": "Pipeline Registry의 루트 Pipeline(bixby-eval-full / quick / regression-nightly / tts-quality)이 하위 Pipeline(asr-eval · nlu-eval · response-judge → policy-guard)을 자식 PipelineJob으로 호출한다."
   },
   {
     "id": "results",
@@ -1175,6 +1200,206 @@ export const EVENT_CATALOG: Record<string, EventCatalogEntry> = {
     "stage": "scheduler",
     "source": "reconciler",
     "label": "Slot 정합성 복구"
+  },
+  "CHILD_PIPELINE_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "하위 Pipeline 시작"
+  },
+  "CHILD_PIPELINE_SUCCEEDED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "하위 Pipeline 성공"
+  },
+  "CHILD_PIPELINE_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "하위 Pipeline 실패"
+  },
+  "CHILD_PIPELINE_CANCELLED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "하위 Pipeline 취소"
+  },
+  "TASK_WER_CALC_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "단어 오류율 시작"
+  },
+  "TASK_WER_CALC_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "단어 오류율 완료"
+  },
+  "TASK_WER_CALC_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "단어 오류율 실패"
+  },
+  "TASK_CER_CALC_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "문자 오류율 시작"
+  },
+  "TASK_CER_CALC_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "문자 오류율 완료"
+  },
+  "TASK_CER_CALC_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "문자 오류율 실패"
+  },
+  "TASK_NOISE_ROBUSTNESS_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "소음 강건성 시작"
+  },
+  "TASK_NOISE_ROBUSTNESS_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "소음 강건성 완료"
+  },
+  "TASK_NOISE_ROBUSTNESS_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "소음 강건성 실패"
+  },
+  "TASK_INTENT_CLASSIFY_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "의도 분류 시작"
+  },
+  "TASK_INTENT_CLASSIFY_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "의도 분류 완료"
+  },
+  "TASK_INTENT_CLASSIFY_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "의도 분류 실패"
+  },
+  "TASK_SLOT_FILL_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "슬롯 추출 시작"
+  },
+  "TASK_SLOT_FILL_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "슬롯 추출 완료"
+  },
+  "TASK_SLOT_FILL_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "슬롯 추출 실패"
+  },
+  "TASK_CAPSULE_ROUTE_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "캡슐 라우팅 시작"
+  },
+  "TASK_CAPSULE_ROUTE_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "캡슐 라우팅 완료"
+  },
+  "TASK_CAPSULE_ROUTE_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "캡슐 라우팅 실패"
+  },
+  "TASK_LLM_JUDGE_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "LLM 응답 채점 시작"
+  },
+  "TASK_LLM_JUDGE_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "LLM 응답 채점 완료"
+  },
+  "TASK_LLM_JUDGE_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "LLM 응답 채점 실패"
+  },
+  "TASK_TOXICITY_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "유해성 검사 시작"
+  },
+  "TASK_TOXICITY_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "유해성 검사 완료"
+  },
+  "TASK_TOXICITY_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "유해성 검사 실패"
+  },
+  "TASK_PII_SCAN_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "개인정보 탐지 시작"
+  },
+  "TASK_PII_SCAN_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "개인정보 탐지 완료"
+  },
+  "TASK_PII_SCAN_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "개인정보 탐지 실패"
+  },
+  "TASK_TTS_SYNTHESIZE_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "음성 합성 시작"
+  },
+  "TASK_TTS_SYNTHESIZE_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "음성 합성 완료"
+  },
+  "TASK_TTS_SYNTHESIZE_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "음성 합성 실패"
+  },
+  "TASK_MOS_PREDICT_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "음질(MOS) 예측 시작"
+  },
+  "TASK_MOS_PREDICT_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "음질(MOS) 예측 완료"
+  },
+  "TASK_MOS_PREDICT_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "음질(MOS) 예측 실패"
+  },
+  "TASK_COMPARE_BASELINE_STARTED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "기준 모델 비교 시작"
+  },
+  "TASK_COMPARE_BASELINE_COMPLETED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "기준 모델 비교 완료"
+  },
+  "TASK_COMPARE_BASELINE_FAILED": {
+    "stage": "vertex",
+    "source": "vertex-ai",
+    "label": "기준 모델 비교 실패"
   }
 };
 
@@ -1362,6 +1587,11 @@ export const RESULT_COLUMNS: ResultColumn[] = [
     "type": "string"
   },
   {
+    "key": "pipeline_id",
+    "label": "pipeline_id",
+    "type": "enum"
+  },
+  {
     "key": "pipeline_version",
     "label": "pipeline_version",
     "type": "enum"
@@ -1372,6 +1602,17 @@ export const RESULT_COLUMNS: ResultColumn[] = [
     "type": "datetime"
   }
 ];
+
+// ── domain registry (re-exported from src/config/domain.ts) ──
+/** Versioned pipeline registry (root + sub-pipelines). Enriched view: GET /api/v1/pipelines or /meta. */
+export const PIPELINE_REGISTRY: PipelineDef[] = domain.pipelines;
+export const PIPELINE_BY_ID = Object.fromEntries(PIPELINE_REGISTRY.map((p) => [p.id, p])) as Record<string, PipelineDef>;
+export const ROOT_PIPELINE_IDS: string[] = PIPELINE_REGISTRY.filter((p) => p.kind === "root").map((p) => p.id);
+/** Leaf components by id. */
+export const COMPONENTS: Record<string, ComponentSpec> = domain.components;
+/** Models under test (results.model_version) — distinct from pipeline_version. */
+export const MODELS: ModelVersionInfo[] = domain.models;
+export const MODEL_VERSIONS: string[] = MODELS.map((m) => m.id);
 
 /** Standardized status tones (CSS tokens --st-<tone>). */
 export const TONES: Tone[] = ["success", "running", "queued", "retry", "failed", "dlq", "cancelled"];

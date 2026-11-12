@@ -13,6 +13,7 @@ import type {
 import { Query, badRequest, conflict, notFound, paginate } from "../http";
 import { getEngine } from "../mock/runtime";
 import { countBy, toSummary } from "../mock/projections";
+import { readRange } from "../range";
 
 export const DLQ_STATUSES: DlqStatus[] = ["PENDING_REVIEW", "APPROVED", "REPLAYING", "REPLAYED", "CLOSED"];
 export const CATEGORIES: FailureCategory[] = [
@@ -40,8 +41,9 @@ export function listDeadLetters(req: NextRequest): DeadLetterList {
   const code = q.str("error_code");
   const op = q.str("operator");
   const text = q.str("q")?.toLowerCase();
-  const from = q.time("from");
-  const to = q.time("to");
+  const range = readRange(req);
+  const { from, to } = range;
+  const pids = q.list("pipeline_id");
   const sort = q.enumOne("sort", ["created_desc", "created_asc", "updated_desc", "attempts_desc"] as const, "created_desc")!;
   let rows = e.dlq.filter((d) => {
     if (statuses && !statuses.includes(d.status)) return false;
@@ -49,10 +51,10 @@ export function listDeadLetters(req: NextRequest): DeadLetterList {
     if (cats && !cats.includes(d.failure_category)) return false;
     if (code && d.error_code !== code) return false;
     if (op && d.assigned_operator !== op) return false;
-    if (from != null && d.created_at < from) return false;
-    if (to != null && d.created_at > to) return false;
+    if (d.created_at < from || d.created_at > to) return false;
+    if (pids && !pids.includes(d.pipeline_id)) return false;
     if (text) {
-      const hay = [d.dead_letter_id, d.workflow_id, d.batch_id, d.error_code, d.failure_reason, d.input_uri].join(" ").toLowerCase();
+      const hay = [d.dead_letter_id, d.workflow_id, d.batch_id, d.error_code, d.failure_reason, d.input_uri, d.failed_path ?? "", d.pipeline_id].join(" ").toLowerCase();
       if (!hay.includes(text)) return false;
     }
     return true;
@@ -71,6 +73,12 @@ export function listDeadLetters(req: NextRequest): DeadLetterList {
       status: countBy(rows, (d) => d.status) as Partial<Record<DlqStatus, number>>,
       category: countBy(rows, (d) => d.failure_category) as Partial<Record<FailureCategory, number>>,
       language: countBy(rows, (d) => d.language) as Partial<Record<LangCode, number>>,
+    },
+    range,
+    outsideRange: {
+      pendingReview: e.dlq.filter((d) => (d.created_at < from || d.created_at > to) && d.status === "PENDING_REVIEW").length,
+      approved: e.dlq.filter((d) => (d.created_at < from || d.created_at > to) && d.status === "APPROVED").length,
+      replaying: e.dlq.filter((d) => (d.created_at < from || d.created_at > to) && d.status === "REPLAYING").length,
     },
   };
 }

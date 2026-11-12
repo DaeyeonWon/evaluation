@@ -1,0 +1,125 @@
+/** status — English. Must have exactly the keys of ../ko/status.ts (enforced by `satisfies`). */
+import type { Messages } from "../../core";
+import type ko from "../ko/status";
+
+const status = {
+  workflow: {
+    RECEIVED: { label: "Received", help: "Event received by Event Ingress" },
+    VALIDATED: { label: "Validated", help: "Passed schema validation and deduplication" },
+    QUEUED: { label: "Queued", help: "Waiting in the language Pending Queue for a Slot" },
+    RESERVED: { label: "Reserved", help: "The Scheduler reserved a Capacity Slot" },
+    DISPATCHING: { label: "Dispatching", help: "Cloud Workflows is creating the PipelineJob" },
+    RUNNING: { label: "Running", help: "The Vertex AI Pipeline is running" },
+    RETRY_WAIT: { label: "Retry wait", help: "Waiting out the backoff before re-admission" },
+    SUCCEEDED: { label: "Succeeded", help: "Result CSV uploaded and committed to BigQuery" },
+    DEAD_LETTERED: { label: "Dead-lettered", help: "Moved to the DLQ after a final failure; needs review" },
+    CANCELLED: { label: "Cancelled", help: "Cancelled at an operator's request" },
+    TIMED_OUT: { label: "Timed out", help: "Exceeded the Workflow timeout" },
+  },
+  node: {
+    PENDING: { label: "Pending", help: "Waiting for upstream tasks" },
+    RUNNING: { label: "Running", help: "Running" },
+    SUCCEEDED: { label: "Succeeded", help: "Succeeded" },
+    FAILED: { label: "Failed", help: "Failed" },
+    SKIPPED: { label: "Skipped", help: "Not run because an upstream task failed or was cancelled" },
+    CANCELLED: { label: "Cancelled", help: "Cancelled" },
+  },
+  attempt: {
+    DISPATCHING: { label: "Dispatching", help: "Creating the PipelineJob" },
+    RUNNING: { label: "Running", help: "Running" },
+    SUCCEEDED: { label: "Succeeded", help: "Succeeded" },
+    FAILED: { label: "Failed", help: "Failed" },
+    TIMED_OUT: { label: "Timed out", help: "Timed out" },
+    CANCELLED: { label: "Cancelled", help: "Cancelled" },
+  },
+  dlq: {
+    PENDING_REVIEW: { label: "Pending review", help: "Needs operator review" },
+    APPROVED: { label: "Approved", help: "Replay approved; waiting to be re-queued" },
+    REPLAYING: { label: "Replaying", help: "A new Replay cycle is running" },
+    REPLAYED: { label: "Replayed", help: "Replay completed" },
+    CLOSED: { label: "Closed", help: "Closed without Replay" },
+  },
+  replay: {
+    APPROVED: { label: "Approved", help: "Approved" },
+    QUEUED: { label: "Queued", help: "Queued" },
+    RUNNING: { label: "Running", help: "Running" },
+    SUCCEEDED: { label: "Succeeded", help: "Succeeded" },
+    FAILED: { label: "Failed", help: "Failed" },
+    CANCELLED: { label: "Cancelled", help: "Cancelled" },
+    SUPERSEDED: { label: "Superseded", help: "Replaced by a newer Replay" },
+  },
+  reservation: {
+    ACTIVE: { label: "Active", help: "Slot in use" },
+    RELEASED: { label: "Released", help: "Slot released" },
+    ORPHANED: { label: "Orphaned", help: "Orphaned Slot; the Reconciler will reclaim it" },
+  },
+  alert: {
+    OPEN: { label: "Open", help: "Not acknowledged yet" },
+    ACKNOWLEDGED: { label: "Acknowledged", help: "An owner has acknowledged it" },
+    RESOLVED: { label: "Resolved", help: "Resolved" },
+  },
+  severity: {
+    DEBUG: { label: "DEBUG", help: "Debug" },
+    INFO: { label: "INFO", help: "Info" },
+    NOTICE: { label: "NOTICE", help: "Notice" },
+    WARNING: { label: "WARNING", help: "Warning" },
+    ERROR: { label: "ERROR", help: "Error" },
+    CRITICAL: { label: "CRITICAL", help: "Critical" },
+  },
+  capacity: {
+    OK: { label: "OK", help: "Healthy" },
+    SATURATED: { label: "Saturated", help: "Concurrency limit reached" },
+    BACKLOGGED: { label: "Backlogged", help: "Backlog is above the alert threshold" },
+    PAUSED: { label: "Paused", help: "No new Workflows are started" },
+    DISABLED: { label: "Disabled", help: "Disabled" },
+  },
+  service: {
+    HEALTHY: { label: "Healthy", help: "Healthy" },
+    DEGRADED: { label: "Degraded", help: "Degraded performance" },
+    DOWN: { label: "Down", help: "Unavailable" },
+    DISABLED: { label: "Disabled", help: "Disabled" },
+  },
+  version: {
+    DEPRECATED: { label: "Deprecated", help: "Can no longer be used for new runs" },
+    STABLE: { label: "Stable", help: "Stable release" },
+    CANARY: { label: "Canary", help: "Rolled out to a share of traffic only" },
+  },
+  result: {
+    PASS: { label: "PASS", help: "Passed" },
+    FAIL: { label: "FAIL", help: "Failed" },
+  },
+  role: {
+    Admin: { label: "Admin", help: "Full access, including config changes and version promotion" },
+    Operator: { label: "Operator", help: "Cancel, request Replay, pause languages, handle alerts" },
+    Viewer: { label: "Viewer", help: "View and export" },
+  },
+  failureCategory: {
+    PIPELINE_EXECUTION: { label: "Pipeline execution error", policy: "Retry" },
+    MODEL_TRANSIENT: { label: "Transient model error", policy: "Retry per policy" },
+    QUOTA: { label: "Vertex AI quota", policy: "Retry after backoff" },
+    TIMEOUT: { label: "Execution timeout", policy: "Confirm cancellation, then decide on Retry" },
+    INPUT_SCHEMA: { label: "Input schema error", policy: "Straight to DLQ" },
+    AUTH_PERMISSION: { label: "Auth / permission error", policy: "Stop retrying, notify operators" },
+    CODE_DEFECT: { label: "Pipeline code defect", policy: "Limited Retry (once)" },
+  },
+  failureReason: {
+    INTENT_MISMATCH: { label: "Intent mismatch" },
+    SLOT_ERROR: { label: "Slot error" },
+    RESPONSE_QUALITY: { label: "Response quality" },
+    TIMEOUT: { label: "Response timeout" },
+    ASR_ERROR: { label: "ASR error" },
+    POLICY_VIOLATION: { label: "Policy violation" },
+  },
+  tone: {
+    success: "Success",
+    running: "Running",
+    queued: "Queued",
+    retry: "Retry",
+    failed: "Failed",
+    dlq: "DLQ",
+    cancelled: "Cancelled",
+  },
+  unknown: "Unknown ({value})",
+} satisfies Messages<typeof ko>;
+
+export default status;

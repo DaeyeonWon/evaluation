@@ -1,0 +1,56 @@
+/*
+ * Auth pages (/login, 403) — Atlas look outside the console shell. Uses Atlas tokens from
+ * src/styles/atlas.css (imported alongside). Scoped under [data-variant="atlas"] .auth.
+ */
+[data-variant="atlas"] .auth {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 32px 16px;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+
+  & .auth-sheet {
+    width: min(560px, 100%);
+    background: var(--sheet);
+    border: 1px solid var(--rule);
+    border-radius: var(--r);
+    box-shadow: var(--shadow);
+  }
+  & .auth-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 18px 20px 16px; border-bottom: 1px solid var(--rule-2);
+  }
+  & .auth-head svg { width: 30px; height: 30px; flex: none; color: var(--ink); }
+  & .auth-head b { display: block; font-weight: 800; font-size: 17px; letter-spacing: -0.01em; line-height: 1.15; }
+  & .auth-head small { display: block; font: 400 10.5px/1 var(--f-mono); color: var(--ink-3); letter-spacing: 0.08em; margin-top: 5px; }
+  & .auth-env { margin-left: auto; font: 600 10px/1 var(--f-mono); letter-spacing: 0.12em; padding: 5px 7px; border: 1px dashed var(--mark); color: var(--mark); border-radius: 2px; }
+  & .auth-body { padding: 18px 20px 20px; display: grid; gap: 14px; }
+  & .auth-title { margin: 0; font-size: var(--t-lg); font-weight: 750; }
+  & .auth-code { font: 600 11px var(--f-mono); color: var(--ink-3); letter-spacing: 0.1em; }
+  & .auth-lead { margin: 0; color: var(--ink-2); font-size: var(--t-sm); }
+  & .auth-users { list-style: none; margin: 0; padding: 0; border: 1px solid var(--rule-2); border-radius: var(--r); }
+  & .auth-users li + li { border-top: 1px solid var(--rule-2); }
+  & .auth-user {
+    width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: center;
+    padding: 10px 12px; background: transparent; border: 0; text-align: left; cursor: pointer;
+  }
+  & .auth-user:hover { background: var(--sheet-2); }
+  & .auth-user[aria-current="true"] { background: var(--accent-soft); }
+  & .auth-user .n { font-weight: 700; }
+  & .auth-user .e { grid-column: 1; font: 400 11px var(--f-mono); color: var(--ink-3); }
+  & .auth-user .r { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  & .auth-tag { font: 600 10.5px/1 var(--f-mono); padding: 4px 6px; border-radius: 2px; border: 1px solid var(--rule); color: var(--ink-2); background: var(--sheet); }
+  & .auth-tag.role-Admin { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, var(--rule)); }
+  & .auth-tag.role-Viewer { color: var(--ink-3); }
+  & .auth-tag.yes { color: var(--st-success); border-color: color-mix(in srgb, var(--st-success) 40%, var(--rule)); }
+  & .auth-tag.no { color: var(--ink-3); border-style: dashed; }
+  & .auth-foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: var(--t-xs); color: var(--ink-3); }
+  & .auth-foot .btn { text-decoration: none; }
+  & .auth-dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: var(--t-sm); }
+  & .auth-dl dt { color: var(--ink-3); font: 400 11px var(--f-mono); padding-top: 2px; }
+  & .auth-dl dd { margin: 0; }
+}

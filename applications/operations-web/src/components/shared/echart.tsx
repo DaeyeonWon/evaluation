@@ -26,6 +26,7 @@ import clsx from "clsx";
 import type { EChartsOption, ECharts, SetOptionOpts } from "echarts";
 import { useEffect, useRef, type CSSProperties } from "react";
 import { LANG_CODES, TONES } from "@/lib/catalog";
+import { useT } from "@/i18n/client";
 import type { LangCode, Tone } from "@/lib/types";
 
 export interface ChartTokens {
@@ -55,7 +56,7 @@ export interface EChartProps {
   onEvents?: Record<string, (params: unknown, chart: ECharts) => void>;
   onReady?: (chart: ECharts) => void;
   loading?: boolean;
-  /** accessible description of the chart */
+  /** accessible description of the chart (default: localized "Chart" / "차트") */
   ariaLabel?: string;
 }
 
@@ -85,6 +86,7 @@ export function EChart({ option, className, style, renderer = "canvas", setOptio
   const optsRef = useRef(setOptionOpts);
   const eventsRef = useRef(onEvents);
   const readyRef = useRef(onReady);
+  const t = useT("common");
 
   useEffect(() => {
     optionRef.current = option;
@@ -148,5 +150,5 @@ export function EChart({ option, className, style, renderer = "canvas", setOptio
     else c.hideLoading();
   }, [loading]);
 
-  return <div ref={elRef} className={clsx("echart", className)} style={style} role="img" aria-label={ariaLabel} />;
+  return <div ref={elRef} className={clsx("echart", className)} style={style} role="img" aria-label={ariaLabel ?? t("chart.defaultLabel")} aria-busy={loading || undefined} />;
 }

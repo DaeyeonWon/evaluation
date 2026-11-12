@@ -1,10 +1,23 @@
 /**
- * Formatters (isomorphic). Port of MOCK.fmt from designs/mock-data.js — identical output.
- * All times render in KST (Asia/Seoul, UTC+9) regardless of the browser's timezone.
+ * Formatters (isomorphic). Port of MOCK.fmt from designs/mock-data.js — identical output for the
+ * default locale ("ko"). All times render in KST (Asia/Seoul, UTC+9) regardless of the browser's
+ * timezone, in EVERY UI locale (the platform runs on Seoul time; labels say "KST").
+ *
+ * Locale-aware members take an optional trailing locale (default "ko" → unchanged legacy output):
+ *   fmt.duration(ms, { style, locale })   ko long "11분 49초" · en long "11m 49s" · short "11m 49s" (both)
+ *   fmt.relative(ts, now, locale)          ko "3분 전" / "방금" · en "3m ago" / "just now" / "in 2h"
+ *   fmt.dateLabel(ts, locale)              ko "11월 12일 (목)" · en "Thu, Nov 12"
+ *   fmt.dateTimeLabel(ts, locale)          ko "11월 12일 14:31 KST" · en "Nov 12, 14:31 KST"
+ * Prefer the bound helpers: client `const f = useFmt()` (src/i18n/client), server `await getFmt()`
+ * (src/i18n/server), or `createFmt(locale)` anywhere — they inject the active locale.
+ * Locale-independent: bytes, number (always "2,400"), pct, usd, time, timeMs, hm, date, dateTime, iso.
  *
  * IMPORTANT: `relative(ts, now)` needs the simulator's virtual "now" (useSimNow()), never Date.now().
  */
 import type { EpochMs } from "./types";
+
+/** UI locale accepted by the formatters (mirrors src/i18n/locales.ts; kept local so this file has no deps). */
+export type FmtLocale = "ko" | "en";
 
 const SEC = 1000;
 const MIN = 60 * SEC;
@@ -12,6 +25,8 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const KST = 9 * HOUR;
 const DOW_KO = ["일", "월", "화", "수", "목", "금", "토"];
+const DOW_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MON_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function pad(n: number | string, w = 2): string {
   let s = String(n);
@@ -67,10 +82,23 @@ export const fmt = {
   usd(n: Num, d = 2): string {
     return "$" + fmt.number(n, d);
   },
-  /** ms → "850ms" | "4.2초" | "11분 49초" | "1시간 5분";  style:'short' → "4.2s" | "11m 49s" | "1h 05m" */
-  duration(ms: Num, opts?: { style?: "short" | "long" }): string {
+  /**
+   * ms → "850ms" | "4.2초" | "11분 49초" | "1시간 5분";  style:'short' → "4.2s" | "11m 49s" | "1h 05m".
+   * locale "en": long → "4.2s" | "11m 49s" | "1h 5m" (English has no separate long form in the UI).
+   */
+  duration(ms: Num, opts?: { style?: "short" | "long"; locale?: FmtLocale }): string {
     if (bad(ms)) return "-";
     const short = opts?.style === "short";
+    if (!short && opts?.locale === "en") {
+      ms = Math.max(0, Math.round(ms));
+      if (ms < 1000) return ms + "ms";
+      const s = ms / 1000;
+      if (s < 60) return (s < 10 ? s.toFixed(1) : Math.round(s)) + "s";
+      const tot = Math.round(s);
+      const h = Math.floor(tot / 3600);
+      const m = Math.floor((tot % 3600) / 60);
+      return h > 0 ? h + "h " + m + "m" : m + "m " + (tot % 60) + "s";
+    }
     ms = Math.max(0, Math.round(ms));
     if (ms < 1000) return ms + "ms";
     const s = ms / 1000;
@@ -112,6 +140,21 @@ export const fmt = {
     const p = kstParts(ts);
     return p.mo + "월 " + p.d + "일 (" + DOW_KO[p.dow] + ")";
   },
+  /** ko "11월 12일 (목)" · en "Thu, Nov 12" (KST) */
+  dateLabel(ts: Num, locale: FmtLocale = "ko"): string {
+    if (bad(ts)) return "-";
+    if (locale !== "en") return fmt.dateKo(ts);
+    const p = kstParts(ts);
+    return DOW_EN[p.dow] + ", " + MON_EN[p.mo - 1] + " " + p.d;
+  },
+  /** ko "11월 12일 14:31 KST" · en "Nov 12, 14:31 KST" */
+  dateTimeLabel(ts: Num, locale: FmtLocale = "ko", opts?: { seconds?: boolean; tz?: boolean }): string {
+    if (bad(ts)) return "-";
+    const p = kstParts(ts);
+    const clock = opts?.seconds ? fmt.time(ts) : fmt.hm(ts);
+    const tz = opts?.tz === false ? "" : " KST";
+    return (locale === "en" ? MON_EN[p.mo - 1] + " " + p.d + ", " : p.mo + "월 " + p.d + "일 ") + clock + tz;
+  },
   /** "2026-11-12 14:30:00" */
   dateTime(ts: Num): string {
     return bad(ts) ? "-" : fmt.date(ts) + " " + fmt.time(ts);
@@ -122,12 +165,17 @@ export const fmt = {
     const p = kstParts(ts);
     return fmt.date(ts) + "T" + pad(p.h) + ":" + pad(p.mi) + ":" + pad(p.s) + "." + pad(p.ms, 3) + "+09:00";
   },
-  /** "방금" | "12초 전" | "3분 전" | "2시간 후" — pass the SIM now (useSimNow()) */
-  relative(ts: Num, now: EpochMs): string {
+  /** "방금" | "12초 전" | "3분 전" | "2시간 후" — pass the SIM now (useSimNow()). en: "just now" | "12s ago" | "in 2h" */
+  relative(ts: Num, now: EpochMs, locale: FmtLocale = "ko"): string {
     if (bad(ts)) return "-";
     let d = now - ts;
     const fut = d < 0;
     d = Math.abs(d);
+    if (locale === "en") {
+      if (d < 5 * SEC) return "just now";
+      const v = d < MIN ? Math.round(d / SEC) + "s" : d < HOUR ? Math.round(d / MIN) + "m" : d < DAY ? Math.round(d / HOUR) + "h" : Math.round(d / DAY) + "d";
+      return fut ? "in " + v : v + " ago";
+    }
     if (d < 5 * SEC) return "방금";
     let t: string;
     if (d < MIN) t = Math.round(d / SEC) + "초";
@@ -148,3 +196,31 @@ export const fmt = {
 };
 
 export type Fmt = typeof fmt;
+
+/** `fmt` with the locale pre-applied (same member names and argument order, minus the locale). */
+export interface LocaleFmt extends Omit<Fmt, "duration" | "relative" | "dateLabel" | "dateTimeLabel"> {
+  readonly locale: FmtLocale;
+  duration(ms: Num, opts?: { style?: "short" | "long" }): string;
+  relative(ts: Num, now: EpochMs): string;
+  dateLabel(ts: Num): string;
+  dateTimeLabel(ts: Num, opts?: { seconds?: boolean; tz?: boolean }): string;
+}
+
+const bound = new Map<FmtLocale, LocaleFmt>();
+
+/** Locale-bound formatter set (cached per locale). createFmt("ko") behaves exactly like `fmt`. */
+export function createFmt(locale: FmtLocale = "ko"): LocaleFmt {
+  let f = bound.get(locale);
+  if (!f) {
+    f = {
+      ...fmt,
+      locale,
+      duration: (ms, opts) => fmt.duration(ms, { ...opts, locale }),
+      relative: (ts, now) => fmt.relative(ts, now, locale),
+      dateLabel: (ts) => fmt.dateLabel(ts, locale),
+      dateTimeLabel: (ts, opts) => fmt.dateTimeLabel(ts, locale, opts),
+    };
+    bound.set(locale, f);
+  }
+  return f;
+}

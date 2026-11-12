@@ -26,7 +26,9 @@ export function toSummary(w: Workflow): WorkflowSummary {
     language: w.language,
     status: w.status,
     stage: w.stage,
+    pipeline_id: w.pipeline_id,
     pipeline_version: w.pipeline_version,
+    model_version: w.model_version,
     priority: w.priority,
     event_type: w.event_type,
     replay_cycle: w.replay_cycle,
@@ -42,6 +44,7 @@ export function toSummary(w: Workflow): WorkflowSummary {
     attemptsCount: w.attempts.length,
     retries: Math.max(0, w.attempts.length - 1),
     current_node: w.current_node,
+    current_node_path: w.current_node_path,
     progress: { ...w.progress },
     error: w.error ? { ...w.error } : null,
     lastErrorCode: lastErr ? lastErr.error_code : null,
@@ -73,6 +76,23 @@ export function toActivePos(w: Workflow): ActiveWorkflowPos {
     queued_at: w.queued_at,
     retry_at: w.retry_at,
   };
+}
+
+/** Workflow lifetime [created_at, completed_at ?? +∞] overlaps the range. */
+export function wfOverlaps(w: Workflow, r: { from: number; to: number }): boolean {
+  return w.created_at != null && w.created_at <= r.to && (w.completed_at ?? Number.POSITIVE_INFINITY) >= r.from;
+}
+
+export function pctl(arr: number[], p: number): number {
+  if (!arr.length) return 0;
+  const a = [...arr].sort((x, y) => x - y);
+  return a[Math.min(a.length - 1, Math.floor(p * a.length))];
+}
+export function avg(arr: number[]): number {
+  return arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+}
+export function round4(x: number): number {
+  return Math.round(x * 10000) / 10000;
 }
 
 /** Full workflow document, JSON-safe (drops nothing; arrays are shared refs, serialize immediately). */
@@ -171,5 +191,7 @@ export function resultsAggregates(e: MockEngine, rows: ResultRow[]): ResultsAggr
     judgeScoreHistogram,
     latencyHistogram,
     latencyHistogramFine: { edgesMs: fineEdges, counts: fineCounts },
+    byModelVersion: groupRate(rows, (r) => r.model_version),
+    byPipeline: groupRate(rows, (r) => r.pipeline_id),
   };
 }

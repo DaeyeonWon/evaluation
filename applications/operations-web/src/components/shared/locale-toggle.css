@@ -1,0 +1,69 @@
+/*
+ * <LocaleToggle> base styles. Everything is driven by CSS variables and wrapped in :where() (zero
+ * specificity), so a variant re-themes it by setting variables or by plain selectors:
+ *
+ *   [data-variant="atlas"] {
+ *     --locale-toggle-bg: var(--sheet);        --locale-toggle-fg: var(--ink-3);
+ *     --locale-toggle-active-bg: var(--ink);   --locale-toggle-active-fg: var(--sheet);
+ *     --locale-toggle-border: var(--rule);     --locale-toggle-radius: var(--r);
+ *     --locale-toggle-font: var(--f-mono);     --locale-toggle-focus: var(--accent);
+ *   }
+ */
+:where(.locale-toggle) {
+  display: inline-flex;
+  align-items: stretch;
+  gap: var(--locale-toggle-gap, 0);
+  padding: var(--locale-toggle-padding, 2px);
+  border: 1px solid var(--locale-toggle-border, currentColor);
+  border-radius: var(--locale-toggle-radius, 6px);
+  background: var(--locale-toggle-bg, transparent);
+  font-family: var(--locale-toggle-font, inherit);
+  font-size: var(--locale-toggle-font-size, 11px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  height: var(--locale-toggle-height, 28px);
+  box-sizing: border-box;
+}
+
+:where(.locale-toggle) :where(.locale-toggle-option) {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  min-width: var(--locale-toggle-option-width, 28px);
+  padding: 0 var(--locale-toggle-option-padding, 7px);
+  border-radius: calc(var(--locale-toggle-radius, 6px) - 2px);
+  background: transparent;
+  color: var(--locale-toggle-fg, inherit);
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+:where(.locale-toggle) :where(.locale-toggle-option:hover:not([aria-checked="true"])) {
+  background: var(--locale-toggle-hover-bg, color-mix(in srgb, currentColor 10%, transparent));
+}
+
+:where(.locale-toggle) :where(.locale-toggle-option[aria-checked="true"]) {
+  background: var(--locale-toggle-active-bg, currentColor);
+  color: var(--locale-toggle-active-fg, Canvas);
+  cursor: default;
+}
+
+:where(.locale-toggle) :where(.locale-toggle-option:focus-visible) {
+  outline: 2px solid var(--locale-toggle-focus, Highlight);
+  outline-offset: 1px;
+}
+
+:where(.locale-toggle[data-pending]) {
+  opacity: 0.7;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(.locale-toggle) :where(.locale-toggle-option) {
+    transition: none;
+  }
+}

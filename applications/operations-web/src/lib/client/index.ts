@@ -9,5 +9,7 @@ export { LiveStreamProvider, useLiveStream, useSimNow, useStreamEvent } from "./
 export type { LiveStream, StreamStatus } from "./live-stream";
 export { csvUrl, downloadCsv, downloadText } from "./download";
 export { useQueryState, useQueryStates, parseAsString, parseAsInt, parseAsBool, parseAsList } from "./use-query-state";
+export { useTimeRange } from "./use-query-state";
 export type { Parser } from "./use-query-state";
+export { SessionProvider, useSession } from "./session";
 export { useOperator, getOperatorId, setOperatorId } from "./operator";
