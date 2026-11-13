@@ -1,194 +1,178 @@
-# AIPO Operations Web — 빅스비 실발화 평가 운영 콘솔 데모
+# AIPO Operations Console (Atlas) — 빅스비 실발화 평가 운영 콘솔
 
-빅스비 실발화 평가 파이프라인(AIPO)을 관제하는 **운영 콘솔의 실동작 데모**입니다.
-언어별로 묶인 실발화 배치가 GCS에 올라오면 Eventarc/PubSub → Cloud Run Ingress → Firestore 레지스트리·대기열 →
-언어별 스케줄러(ko 10 / en 25 / ja 5 / es 4, Global 36) → Cloud Workflows(재시도 최대 2회, backoff 60s/300s) →
-Vertex AI Pipeline(preprocess → intent_eval ‖ response_eval ‖ latency_check → aggregate → persist) →
+AIPO 플랫폼의 **빅스비 실발화 평가** 파이프라인을 관제하는 단일 운영 콘솔입니다.
+언어별 실발화 배치가 GCS에 올라오면 Eventarc/Pub/Sub → Cloud Run Event Ingress → Firestore 레지스트리·언어별 Pending Queue →
+언어별 Scheduler(Capacity Slot) → Cloud Workflows(Retry·Backoff) → Vertex AI Pipeline(root + sub-pipeline) →
 발화별 PASS/FAIL 결과 CSV(GCS)·BigQuery로 흐르고, 실패는 Retry → DLQ → 수동 Replay로 복구됩니다.
 
-이 앱은 그 흐름을 **세 가지 디자인 콘셉트**로 구현했으며, 모든 화면은 앱에 내장된 **Mock Operations API(`/api/v1/*`)와
-서버 시뮬레이터**의 데이터로 실제로 동작합니다. GCP 호출·비밀 값·실제 내부 데이터는 전혀 없습니다.
+콘솔은 Atlas 디자인(블루프린트 도면 스타일, 라이트/다크 테마) 하나로 구성되며, 앱에 내장된 **Mock Operations API(`/api/v1`)와
+서버 시뮬레이터**로 GCP 없이 그대로 동작합니다. 실제 FastAPI Operations API와 IAP 인증으로 전환할 수 있습니다.
 
-- 스택: Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v4 · ECharts 6 · SVG(DAG/플로우) · motion · d3-zoom
-- 디자인 원본(승인된 프로토타입): [`../../designs/`](../../designs/) — `a-flowline.html`, `b-atlas.html`, `c-lanes.html`, `mock-data.js`
-- 개발자용 상세 문서(API 레퍼런스·클라이언트 훅·공용 컴포넌트·Gotchas): **[FOUNDATION.md](./FOUNDATION.md)**
-
----
-
-## 1. 세 가지 콘셉트
-
-`/`(랜딩)에서 실시간 미니 프리뷰와 함께 세 콘셉트를 고를 수 있습니다. 세 콘셉트는 같은 Mock API와 같은 시뮬레이터 상태를 공유합니다.
-
-| 콘셉트 | 진입 경로 | 성격 | 폰트 (전부 self-host, `next/font`) |
-| --- | --- | --- | --- |
-| **A · Flowline** | `/flowline` | 미션 컨트롤 파이프라인 레일. GCS 입력→결과 CSV까지 한 줄 레일 위로 배치 토큰이 흐르고, 단계 클릭 → 슬라이드 인스펙터 | **Pretendard Variable** + **JetBrains Mono** |
-| **B · Atlas** | `/atlas` | 아키텍처 도면(블루프린트) 위의 실시간 관제. 줌/팬 캔버스, ADR·계획서 조항 주석 | **SUIT Variable** + **IBM Plex Mono** |
-| **C · Lanes** | `/lanes` | 언어 레인 × 상태 머신 매트릭스 보드, Time river 타임라인, 에디토리얼 타이포그래피 | **Wanted Sans Variable**(디스플레이) + **Pretendard Variable** + **Fira Code** |
-
-### 콘셉트별 라우트
-
-| 화면 | Flowline | Atlas | Lanes |
-| --- | --- | --- | --- |
-| 오케스트레이션(홈) | `/flowline` | `/atlas` | `/lanes` (보드) |
-| 개요(KPI·차트) | `/flowline/overview` | `/atlas/overview` | `/lanes/overview` |
-| Capacity 관리 | `/flowline/capacity` | `/atlas/capacity` | `/lanes/capacity` |
-| Workflow 탐색 | `/flowline/explorer` | `/atlas/explorer` | `/lanes/explorer` |
-| Pipeline 상세 진입 | `/flowline/workflows` | `/atlas/workflows` | (보드·탐색에서 진입) |
-| Pipeline 상세 | `/flowline/workflows/[id]` | `/atlas/workflows/[id]` | `/lanes/workflows/[id]` |
-| DLQ · Replay | `/flowline/dlq` | `/atlas/dlq` | `/lanes/dlq` |
-| 평가 결과(PASS/FAIL, CSV) | `/flowline/results` | `/atlas/results` | `/lanes/results` |
-| 분석 | `/flowline/analytics` | `/atlas/analytics` | `/lanes/analytics` |
-| 설정·권한·감사 | `/flowline/config` | `/atlas/config` | `/lanes/config` |
-
-`[id]` 예: `wf-20261112-ko-0033`. 필터·선택 상태는 URL 쿼리에 동기화되어 링크로 공유할 수 있습니다.
+- 스택: Next.js 16 (App Router, `src/proxy.ts`) · React 19 · TypeScript · Tailwind CSS v4 · ECharts 6 · motion · d3-zoom
+- 폰트: SUIT Variable + IBM Plex Mono (`next/font`로 self-host)
+- 언어: 한국어 / English 전환 (KO | EN). 한국어 UI도 기술 용어·서비스 이름은 영어로 유지합니다.
 
 ---
 
-## 2. 실행 방법
+## 1. 화면
+
+모든 화면 상단에 전역 기간 선택기(오늘 · 어제 · 1h · 6h · 24h · 7d · 30d · 직접 지정, KST)가 있습니다. 기간은 URL(`?range=` 또는
+`?from=&to=`)에 저장되어 새로고침과 화면 이동 후에도 유지되고, 콘솔 안의 모든 링크가 현재 기간을 함께 넘깁니다.
+
+| 경로 | 화면 |
+| --- | --- |
+| `/` | **오케스트레이션 캔버스**: §3.1 아키텍처를 줌/팬 가능한 도면으로 그리고, 실시간 배치 토큰·Edge 처리량·단계 인스펙터·파일명 검색을 제공합니다. Vertex AI 노드에서 Pipeline을 골라 내부 DAG를 볼 수 있습니다 (`?pipeline=`) |
+| `/board` | **언어 레인 보드**: 언어 × Workflow 상태 매트릭스, Time river, 단계 인스펙터 드로어 |
+| `/overview` | 개요: KPI, 상태·언어·오류 차트, 알림 |
+| `/capacity` | 언어별·Global Capacity 조회와 변경 (dry run 영향 분석, 사유 필수) |
+| `/explorer` | Workflow 검색·필터 표 |
+| `/pipelines` | Pipeline 레지스트리 (root / sub-pipeline, version) |
+| `/pipelines/[id]` | Pipeline 상태: 실행 이력, 노드별 활동, PipelineJob 탐색 |
+| `/workflows/[id]` | Pipeline 상세: DAG, Event Timeline, Attempt 이력, 로그, Workflow 취소 (`/workflows`는 최근 실행 중인 Workflow로 이동) |
+| `/files` | 모든 단계의 GCS 객체를 파일명으로 검색 |
+| `/dlq` | DLQ: 검토, 단건·일괄 Replay, 종료 처리, 담당 지정 |
+| `/results` | 평가 결과 (PASS/FAIL): 발화별 판정 근거, CSV 내보내기 |
+| `/analytics` | 장기 분석: 품질, 오류, Component, Version, 비용 |
+| `/config` | 운영 설정: Retry·Timeout, Version 트래픽, 서비스, 알림 정책, 권한, 감사 로그 |
+| `/hermes` | 외부 Hermes 대시보드 진입점 (권한이 있으면 307 이동, 없으면 403) |
+| `/login` | mock 모드 데모 로그인 (다른 모드에서는 인증 프록시 안내) |
+| `/403` | 권한 없음 안내 (서버 렌더링, HTTP 403). 권한 없는 화면은 proxy가 이 화면으로 rewrite합니다 |
+
+단계 인스펙터는 URL로 열 수 있습니다: `/?stage=gcs_input&tab=gcs&q=batch-0014` (`tab` = `wf` · `gcs` · `ev` · `log` · `met`).
+`/board`에서도 같은 파라미터가 동작합니다.
+
+---
+
+## 2. 빠른 시작
 
 요구 사항: Node.js 20.9 이상.
 
 ```bash
 cd applications/operations-web
 npm i
-npm run dev            # → http://localhost:3000 을 열어 주세요
+npm run dev            # http://localhost:3000 → /login 으로 이동합니다
 ```
+
+`/login`에서 데모 사용자를 고르면 로그인됩니다 (mock 모드). 역할에 따라 버튼이 비활성화되고, 서버도 같은 권한을 검사합니다.
+
+| 사용자 | ID | 역할 | 할 수 있는 일 |
+| --- | --- | --- | --- |
+| 김서연, 한도윤 | `op-kim-sy`, `op-han-dy` | Admin | 전체 (설정 변경, 시뮬레이터 제어 포함) |
+| 박지훈, 이하은, 정유나 | `op-park-jh`, `op-lee-he`, `op-jung-yn` | Operator | Capacity 변경, DLQ Replay, Workflow 취소, Hermes |
+| 최민준, Kenji Sato | `op-choi-mj`, `op-sato-k` | Viewer | 조회·내보내기만 (Hermes 불가) |
+
+헤더의 시뮬레이터 컨트롤(일시정지, 1x·2x·5x)은 Admin만 사용할 수 있습니다.
 
 | 명령 | 설명 |
 | --- | --- |
 | `npm run dev` | 개발 서버 (http://localhost:3000) |
-| `npm run build` → `npm start` | 프로덕션 빌드·실행 (`npm start -- -p 3100` 처럼 포트 지정 가능) |
+| `npm run build` → `npm start` | 프로덕션 빌드·실행 (standalone 출력) |
 | `npm run typecheck` | `next typegen && tsc --noEmit` |
-| `npm run lint` | ESLint (next core-web-vitals + typescript) |
-| `npm run test:e2e` | Playwright (`PW_BASE_URL`, 기본 http://localhost:3100) |
-| `npm run oracle` | Mock 엔진이 `designs/mock-data.js`와 동일한 데이터를 내는지 지문 비교 (`ORACLE: IDENTICAL`) |
+| `npm run lint` | ESLint |
+| `npm run i18n:check` | ko/en 메시지 키·placeholder 일치 검사 (`tsx src/i18n/check-messages.ts`) |
+| `npm run test:e2e` | Playwright smoke. `next dev -p 3100`(`.next-e2e`)을 자동으로 띄웁니다. 이미 실행 중인 서버를 쓰려면 `PW_BASE_URL=http://localhost:3000` |
+| `npm run gen:catalog` | `src/config/domain.ts`·Mock 엔진에서 `src/lib/catalog.ts`를 다시 생성 |
 
-화면 우상단(또는 랜딩 하단)의 시뮬레이터 컨트롤로 일시정지 / 배속(1×·2×·5×·10×) / 배치 주입을 할 수 있습니다.
+개발 서버 여러 개를 동시에 띄울 때는 빌드 디렉터리를 나눕니다: `NEXT_DIST_DIR=.next-a npx next dev -p 3101`.
 
 ---
 
-## 3. Mock API 개요
+## 3. 설정
 
-서버 시뮬레이터(`src/server/mock`)는 프로토타입의 `mock-data.js`를 그대로 포팅한 결정적(seeded) 엔진입니다.
-가상 시계는 **2026-11-12 14:30 KST**에서 시작해 1.2초마다 20초 × 배속만큼 진행하고, 매 틱마다 Workflow 상태 전이·이벤트·로그·
-알림·DLQ가 생성됩니다. 상태는 서버 프로세스 메모리에만 있으며 재시작하면 처음 시나리오로 돌아갑니다.
-
-### 계획서 §8 API ↔ Mock 구현
-
-| Method | Endpoint (계획서 §8) | 기능 | Mock 구현 |
-| --- | --- | --- | --- |
-| GET | `/api/v1/overview` | 전체 운영 현황 | ✅ |
-| GET | `/api/v1/workflows` | Workflow 목록 (검색·필터·정렬·페이지) | ✅ |
-| GET | `/api/v1/workflows/{id}` | Workflow 상세 | ✅ |
-| GET | `/api/v1/workflows/{id}/events` | Event Timeline | ✅ |
-| GET | `/api/v1/workflows/{id}/logs` | 상세 로그 | ✅ |
-| GET | `/api/v1/workflows/{id}/attempts` | Attempt 이력 | ✅ |
-| GET | `/api/v1/languages/capacity` | 언어별 Capacity | ✅ |
-| PATCH | `/api/v1/languages/{lang}/capacity` | Capacity 변경 (`dry_run=1` 지원) | ✅ |
-| GET | `/api/v1/dead-letters` | DLQ 목록 | ✅ |
-| GET | `/api/v1/dead-letters/{id}` | DLQ 상세 | ✅ |
-| POST | `/api/v1/dead-letters/{id}/replay` | 단건 Replay | ✅ |
-| POST | `/api/v1/dead-letters/replay-batch` | 일괄 Replay | ✅ |
-| POST | `/api/v1/workflows/{id}/cancel` | 실행 취소 | ✅ |
-| GET | `/api/v1/analytics/throughput` | 처리량 분석 | ✅ |
-
-§8 외에 화면에 필요해 추가한 엔드포인트:
-
-- `workflows/{id}/dag`, `workflows/{id}/results` — Vertex PipelineJob DAG, 해당 Workflow의 발화 결과
-- `capacity/global`, `reservations` — Global Slot 상한·분당 시작 수, 슬롯 예약
-- `dead-letters/{id}/assign|close`, `replays` — DLQ 배정·종료, Replay 이력
-- `analytics/{quality,errors,components,versions,languages,cost,daily,summary}` — 장기 분석(BigQuery 성격 집계)
-- `stages`, `stages/{id}`, `gcs/{buckets,objects,object}` — 파이프라인 단계 상세, GCS 객체 탐색·미리보기
-- `results`, `results/{utterance_id}`, `results/csv`, `results/file` — 발화별 PASS/FAIL 조회·집계, **CSV 다운로드**(UTF-8 BOM)
-- `config`, `audit`, `alerts` (+ `ack`/`resolve`), `incidents`, `me`, `operators`, `meta`, `events`, `logs`, `sim`, `stream`
-
-계획서 §8의 운영 원칙도 Mock에서 재현합니다.
-
-- **인증/RBAC**: `x-operator` 헤더(운영자 id, URI 인코딩)로 Viewer / Operator / Admin 권한을 검사합니다. 운영자 선택(헤더 또는 설정 화면)을 Viewer로 바꾸면 변경 요청이 403으로 거부되는 것을 확인할 수 있습니다.
-- **Idempotency-Key**: POST/PATCH에 대해 첫 성공 응답을 10분간 캐시하고, 재요청에는 `idempotent-replay: true`로 같은 응답을 돌려줍니다.
-- **감사 기록·입력 검증**: 모든 상태 변경에 `reason`이 필수이며, 변경은 `AuditEntry`로 남습니다(`GET /audit`, SSE `audit`). 오류는 `{ error: { code, message(한국어) } }` 형식입니다.
-
-### 실시간 갱신 — SSE
-
-`GET /api/v1/stream` (`text/event-stream`). 앱 전체가 EventSource 하나를 공유하고(`LiveStreamProvider`), 각 화면은 필요한 이벤트만 구독합니다.
-
-| event | 내용 |
+| 파일 | 내용 |
 | --- | --- |
-| `hello` | 연결 직후 시뮬레이터 상태 |
-| `tick` | 1.2초마다: 상태별 카운트, 단계별 카운트, KPI, Capacity, 진행 중 배치 위치 |
-| `transition` | Workflow 상태 전이 (예: `RESERVED → DISPATCHING`) |
-| `event` / `log` | 레지스트리 이벤트, 구조화 로그 (로그는 대량) |
-| `alert` / `audit` / `dlq` / `sim` | 알림, 운영자 감사 기록, DLQ 변경, 시뮬레이터 일시정지·배속 |
+| [`console.config.ts`](./console.config.ts) | 브랜딩, 인증 모드, 역할 → 권한, 사용자 → 역할 규칙, env 목록 매핑, 외부 링크(Hermes). 서버 전용입니다 |
+| [`src/config/domain.ts`](./src/config/domain.ts) | 도메인 모델: 언어와 Capacity 기본값, 단계, 버킷, Capsule, 기기, 모델, Pipeline 레지스트리(version별 DAG, sub-pipeline) |
+| [`.env.example`](./.env.example) | 환경 변수 전체 목록과 설명 |
 
-`?types=tick,transition` 처럼 구독 이벤트를 걸러낼 수 있으며, 15초마다 keep-alive 주석을 보냅니다.
-계획서대로 SSE로 먼저 구현했고, 필요하면 WebSocket으로 확장할 수 있습니다.
+주요 환경 변수 (별도 표시가 없으면 서버 실행 시점에 읽습니다):
+
+| 변수 | 설명 |
+| --- | --- |
+| `CONSOLE_AUTH_MODE` | `mock`(기본) · `iap` · `oidc-header` |
+| `CONSOLE_SESSION_SECRET` | mock 모드 세션 쿠키 HMAC 키. 노트북 밖에서는 반드시 설정해야 합니다 |
+| `IAP_AUDIENCE` | iap 모드에서 IAP JWT의 `aud`. 설정하면 모든 요청의 JWT를 검증합니다 |
+| `CONSOLE_AUTH_EMAIL_HEADER`, `CONSOLE_AUTH_NAME_HEADER` | oidc-header 모드의 헤더 이름 |
+| `CONSOLE_ADMINS`, `CONSOLE_OPERATORS`, `CONSOLE_VIEWERS`, `CONSOLE_HERMES_USERS` | 쉼표로 구분한 이메일 → 역할 |
+| `CONSOLE_VIEWER_DOMAINS` | 이 도메인의 모든 사용자에게 Viewer 부여 |
+| `HERMES_DASHBOARD_URL` | `/hermes`가 이동할 Hermes 대시보드 URL |
+| `CONSOLE_ENV_LABEL` | `/login`·403 화면의 환경 배지 (기본 `DEV`, production이면 `PROD`) |
+| `CONSOLE_DEFAULT_LOCALE`, `CONSOLE_LOCALE_DETECTION` | 기본 언어(`ko`), `0`이면 `Accept-Language` 감지를 끕니다 |
+| `OPERATIONS_API_URL` [빌드 시점] | 설정하면 `/api/v1/*`를 실제 FastAPI로 서버 측 프록시합니다 (`/api/v1/auth/**` 제외). 미설정이면 내장 Mock API |
+| `NEXT_PUBLIC_API_BASE` [빌드 시점] | 브라우저가 실제 API를 직접 호출 (CORS 필요, 콘솔 RBAC를 우회하므로 비권장) |
 
 ---
 
-## 4. 실제 Operations API(FastAPI)로 교체하기
+## 4. 인증과 권한
 
-화면 코드는 모두 `src/lib/client`(`api.*`, `useApi`, `useLiveStream`, `csvUrl`)를 통해서만 API를 호출하므로,
-**API 기준 URL 하나만 바꾸면** 실제 FastAPI Operations API로 전환됩니다. 아무것도 설정하지 않으면 내장 Mock API를 씁니다.
-두 변수 모두 **빌드 시점**에 반영되므로 값을 바꾼 뒤에는 다시 `npm run build` 해야 합니다. 예시는 [`.env.example`](./.env.example)에 있습니다.
+| 모드 | 동작 |
+| --- | --- |
+| `mock` | `/login`에서 데모 사용자 선택 → 서명된 HttpOnly 쿠키(`aipo_session`, 12시간) |
+| `iap` | Google Cloud IAP 헤더(`x-goog-authenticated-user-email`)와 JWT(`IAP_AUDIENCE` 설정 시) |
+| `oidc-header` | oauth2-proxy 등 인증 프록시가 넣는 이메일 헤더를 신뢰 |
 
-| 방식 | 환경 변수 | 동작 | 비고 |
-| --- | --- | --- | --- |
-| **서버 측 프록시 (권장)** | `OPERATIONS_API_URL=https://ops.example.com/api/v1` | `next.config.ts`의 `beforeFiles` rewrite가 `/api/v1/*`를 실제 API로 프록시. 내장 Mock 라우트보다 우선합니다. | 같은 출처라 CORS 불필요. 브라우저 코드는 그대로 `/api/v1`를 호출 |
-| 브라우저 직접 호출 | `NEXT_PUBLIC_API_BASE=https://ops.example.com/api/v1` | 클라이언트의 `API_BASE`(`src/lib/client/api.ts`)가 해당 URL로 바뀜 (fetch, SSE, CSV 링크 모두) | 실제 API에 CORS 허용 필요 (`x-operator`, `idempotency-key` 헤더 포함) |
+- `src/proxy.ts`가 모든 페이지와 API 요청을 먼저 검사합니다: 세션이 없으면 페이지는 `/login?next=…`, API는 401입니다.
+  권한이 없으면 API는 403, 페이지는 `/403`입니다. 상태 변경 API는 route handler에서 한 번 더 검사하고 감사 로그에 세션 사용자를 기록합니다.
+- 권한 키: `view`, `capacity:write`, `config:write`, `dlq:replay`, `workflow:cancel`, `sim:control`, `hermes:access`, `admin`.
+- 세션이 만료되면 백그라운드 요청을 포함한 모든 API 호출의 401이 `/login?next=<현재 화면>`으로 이동시킵니다.
+- 자세한 내용: [docs/auth.md](./docs/auth.md).
+
+### Hermes
+
+`/hermes`는 `hermes:access` 권한(Operator, Admin, `CONSOLE_HERMES_USERS`)이 있는 사용자만 엽니다.
+`HERMES_DASHBOARD_URL`이 있으면 그 URL로 307 이동하고, 없으면 "아직 연결되지 않음" 안내를 보여 줍니다. 권한이 없으면 HTTP 403입니다.
+
+---
+
+## 5. 다국어 (KO / EN)
+
+- 헤더의 KO | EN 토글로 전환하며, 선택은 `console_locale` 쿠키에 저장됩니다. 쿠키가 없으면 `Accept-Language`, 그다음 `ko`를 씁니다.
+- 모든 화면 문자열, aria-label, 차트 라벨, 토스트, 페이지 제목이 번역되어 있습니다. 상태 값(Running, Succeeded…)은 두 언어 모두 영어입니다.
+- API 오류 메시지도 요청 언어로 돌아옵니다: `{ error: { code, message, key } }`.
+- 시각은 두 언어 모두 KST로 표시합니다. 자세한 내용: [docs/i18n.md](./docs/i18n.md).
+
+---
+
+## 6. Docker / Cloud Run
+
+[`Dockerfile`](./Dockerfile)은 standalone 빌드를 non-root로 실행하며 8080 포트를 엽니다. IBM Plex Mono를 빌드 시점에 내려받으므로 빌드에 네트워크가 필요합니다.
 
 ```bash
-# 예: 사내 Operations API로 프록시
-OPERATIONS_API_URL=https://ops.internal.example/api/v1 npm run build && npm start
+docker build -t aipo-ops-web .
+docker run -p 8080:8080 -e CONSOLE_SESSION_SECRET=$(openssl rand -hex 32) aipo-ops-web
+
+# 실제 API로 프록시하는 이미지
+docker build --build-arg OPERATIONS_API_URL=https://ops-api.internal.example/api/v1 -t aipo-ops-web .
 ```
 
-실제 API가 지켜야 할 계약은 `src/lib/types.ts`(요청·응답 타입)와 FOUNDATION.md §4(파라미터·오류 형식·SSE 이벤트)입니다.
-인증은 현재 데모용 `x-operator` 헤더이므로, 실제 환경에서는 IAP/OIDC 등 사내 인증으로 대체해야 합니다.
-전환 후에는 `src/app/api/v1`과 `src/server`(Mock)를 제거해도 화면은 영향을 받지 않습니다.
+Cloud Run에서는 public ingress 없이 배포하고, 외부 HTTPS Load Balancer + IAP 뒤에 두는 구성을 권장합니다
+(`CONSOLE_AUTH_MODE=iap`, `IAP_AUDIENCE` 설정). 단계별 명령은 [docs/auth.md](./docs/auth.md) "Cloud Run + IAP setup notes"와
+[docs/adoption.md](./docs/adoption.md)를 참고하세요.
 
 ---
 
-## 5. 폴더 구조
+## 7. 문서
 
-```
-operations-web/
-├── src/
-│   ├── app/
-│   │   ├── page.tsx                 # / 랜딩 (콘셉트 선택 + 실시간 미니 프리뷰)
-│   │   ├── flowline/ atlas/ lanes/  # 콘셉트별 라우트 (layout + 화면별 page.tsx)
-│   │   └── api/v1/**/route.ts       # Mock Operations API (얇은 핸들러, SSE 포함)
-│   ├── components/
-│   │   ├── flowline/ atlas/ lanes/  # 콘셉트별 화면 컴포넌트
-│   │   ├── landing/                 # 랜딩 페이지·프리뷰
-│   │   └── shared/                  # EChart, StatusPill, 테마, 아이콘, 모션 등 공용
-│   ├── lib/
-│   │   ├── types.ts                 # 도메인·API 타입 (클라이언트/서버 단일 출처)
-│   │   ├── catalog.ts               # 정적 카탈로그 (단계, 상태 메타, DAG 템플릿, 색상…)
-│   │   ├── format.ts                # KST 포매터
-│   │   └── client/                  # api 페처, useApi, LiveStream(SSE), CSV, URL 쿼리 상태, 운영자
-│   ├── server/
-│   │   ├── mock/                    # 결정적 시뮬레이터 엔진 (mock-data.js 포팅) + 런타임/프로젝션
-│   │   ├── services/                # 도메인별 검증·비즈니스 규칙
-│   │   └── http.ts                  # 오류 형식, 쿼리 파서, RBAC, Idempotency
-│   ├── fonts/index.ts               # next/font 정의 (Pretendard, SUIT, Wanted Sans, JetBrains Mono, IBM Plex Mono, Fira Code)
-│   └── styles/                      # 콘셉트별 CSS (data-variant 스코프) + landing.css
-├── e2e/                             # Playwright 스펙
-├── scripts/                         # oracle.mjs (엔진 동일성 검증), gen-catalog.mjs
-├── FOUNDATION.md                    # 개발자 레퍼런스
-└── .env.example                     # API 전환용 환경 변수 예시
-```
+| 문서 | 내용 |
+| --- | --- |
+| [docs/architecture.md](./docs/architecture.md) | 폴더 구조, 요청·데이터 흐름, 어댑터, 라우트, SSE, URL 계약, 화면 추가 방법, Gotchas |
+| [docs/data-contract.md](./docs/data-contract.md) | `/api/v1` 계약: 기간, Pipeline·sub-pipeline, 파일 검색, SSE (`docs/openapi.yaml` 포함) |
+| [docs/auth.md](./docs/auth.md) | 세션, 인증 모드, 역할·권한, Hermes, Cloud Run + IAP |
+| [docs/i18n.md](./docs/i18n.md) | i18n API, 용어집, 어조, 숫자·날짜 형식 |
+| [docs/adoption.md](./docs/adoption.md) | 다른 프로젝트에 이 콘솔을 도입하는 방법 |
+| [docs/integration-spec.md](./docs/integration-spec.md) | 시스템 연동 스펙: Platform·Workflows·Vertex AI·Data·Operations API 팀이 구현할 계약 |
 
 ---
 
-## 6. 알려진 제한 사항
+## 8. 알려진 제한 사항
 
-- **상태는 서버 프로세스 메모리**: 재시작하면 14:30 시나리오로 초기화되고, 서버 인스턴스마다 시뮬레이터가 따로 돕니다. 가상 시계는 1×에서 실제 시간의 약 16.7배로 흐르며, 약 34분 뒤 가상 자정을 넘기면 "오늘" KPI가 초기화됩니다.
-- **유휴 정지**: SSE 연결과 API 요청이 2분간 없으면 시뮬레이터 틱을 건너뜁니다. 다음 요청이 오면 다시 진행합니다.
-- **평가 결과의 모델 버전 필터**: `GET /results`에 `model_version` 파라미터가 없습니다. Flowline에는 모델 필터가 없고, Atlas는 모델을 Pipeline 버전으로 대응시켜 클라이언트에서 거릅니다(Mock은 버전당 모델이 하나라서 가능).
-- **설정 변경 이력 메타**: `GET /config`의 `drift[].changedBy/changedAt/reason`이 PATCH 후에도 초기 시드 값을 돌려줍니다. Lanes는 `/audit`를 겹쳐 최신 값을 보여 주지만, Flowline·Atlas는 시드 값을 그대로 표시합니다.
-- **GCS 목록 `delimiter=""`**: 클라이언트 `qs()`가 빈 문자열 파라미터를 생략하므로, 평면 목록이 필요할 때는 다른 구분자를 써야 합니다(Lanes는 `|` 사용).
-- **단계별 GCS 객체**: `/stages/{id}`는 `gcs_input`·`vertex`·`results`·`dlq`에 대해서만 `gcsObjects`를 돌려줍니다. Atlas는 그 밖의 단계에서 입력 버킷 목록으로 대체합니다.
-- **Retry/DLQ 로그 빈도**: 시뮬레이터가 `RETRY_*`/`DLQ` 로그를 드물게 만들기 때문에, 해당 단계 인스펙터의 로그는 몇 초 동안 새 줄이 없을 수 있습니다(가짜 로그는 만들지 않음).
-- **Atlas 세부 동작**: Explorer 브레드크럼은 이 탭에서 마지막으로 저장된 탐색 쿼리로 돌아갑니다. 존재하지 않는 Workflow ID로 들어가면 브라우저 콘솔에 404 리소스 오류 4건이 남고 폴링이 멈춥니다. 토스트가 Log Explorer 선택 상자를 일시적으로 가릴 수 있습니다.
-- **Flowline 계획 DAG**: PipelineJob이 생기기 전 흐리게 보이는 예정 DAG 노드는 키보드 포커스는 받지만 동작하지 않습니다.
-- **인증**: `x-operator` 헤더 기반 데모 RBAC이며 실제 인증이 아닙니다.
+- **Mock 상태는 서버 프로세스 메모리에 있습니다.** 재시작하면 시드 시나리오(가상 시계 14:30 KST, 30일 이력)로 돌아가고, 서버 인스턴스마다 시뮬레이터가 따로 돕니다.
+- **가상 시계**: 1x에서 1.2초마다 20초씩 흐릅니다. 가상 자정을 넘기면 엔진이 새 날짜로 다시 시드되어 "오늘" 수치가 바뀝니다. API 요청과 SSE 연결이 2분간 없으면 틱을 건너뜁니다.
+- **SSE는 HTTP 상태를 볼 수 없습니다.** 스트림 연결이 끊기면 `/api/v1/auth/session`으로 세션 만료를 확인한 뒤 로그인 화면으로 이동합니다. 재연결 시 `Last-Event-ID`로 최근 5분(최대 5,000건) 메시지를 backfill하고, 그보다 오래되었으면 화면 데이터를 다시 불러옵니다. Backfill 버퍼는 서버 프로세스 메모리에 있습니다.
+- **캔버스 배치 토큰**은 legacy 단계 위치만 알기 때문에, 모든 단계를 갖춘 root Pipeline DAG를 선택했을 때만 Vertex AI 노드 안에 그려집니다. 다른 Pipeline을 고르면 노드별 실행 수 배지로 대신합니다.
+- **Capacity 변경 결과 메시지**(PATCH 응답의 `message`, 영향 분석 문구)는 아직 한국어로만 제공됩니다. 사용자가 입력한 사유 등 자유 텍스트는 입력한 그대로 저장됩니다(기본 취소 사유는 언어 중립 코드로 저장되어 화면 언어로 표시됩니다).
+- **감사 로그**는 Mock 엔진 메모리에 있습니다. proxy/Hermes/login 감사는 `OPERATIONS_API_URL`로 실제 API를 쓰는 경우에도 콘솔의 Mock 감사 로그에 기록됩니다.
+- **IAP JWT 검증**은 위조·누락 토큰으로만 확인했습니다. 첫 배포 후 실제 IAP로 한 번 검증해 주세요.
+- **403 화면**: HTTP 상태가 403이므로 브라우저 콘솔에 문서 리소스 403 오류 한 줄이 남습니다 (브라우저 기본 동작).
+- `oidc-header` 모드와 `IAP_AUDIENCE` 없는 `iap` 모드는 헤더를 그대로 신뢰합니다. 콘솔에 인증 프록시를 거쳐서만 접근할 수 있어야 합니다.
 - 개발 모드 화면 좌하단의 "N" 배지는 Next.js 개발 표시기이며 프로덕션 빌드에는 나타나지 않습니다.

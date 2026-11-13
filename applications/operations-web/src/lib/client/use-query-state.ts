@@ -11,7 +11,7 @@
  * router.replace (no history entry) unless { history: "push" }; scroll is preserved.
  *
  * NOTE: uses useSearchParams() → wrap the component in <Suspense> (Next requires it for pages that
- * are statically prerendered) — see FOUNDATION.md "Gotchas".
+ * are statically prerendered) — see docs/architecture.md "Gotchas".
  */
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useMemo } from "react";

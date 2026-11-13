@@ -5,9 +5,9 @@
  * - useApiErrorHandler(): 401 → /login?next=…, 403 → localized message, else the server message
  * - RangeTag: inline "period" chip for plate headers
  */
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo } from "react";
 import { ApiClientError, useTimeRange } from "@/lib/client";
+import { redirectToLogin } from "@/lib/client/auth-redirect";
 import { RANGE_PRESETS } from "@/lib/time-range";
 import type { ResolvedRange } from "@/lib/types";
 import { useFmt, useLocale, useT } from "@/i18n/client";
@@ -51,12 +51,12 @@ export function useRangeInfo(server?: ResolvedRange | null) {
   return useMemo(() => ({ ...tr, range: r, span, label: label(r), bucket: bucketFor(span) }), [tr, r, span, label]);
 }
 
-/** Returns an error reporter for catch blocks: 401 → login redirect, 403 → localized toast. */
-/** Session expired → /login?next=<current URL>. */
+/** Session expired → /login?next=<current URL> (full navigation, loop-guarded; see lib/client/auth-redirect). */
 export function useLoginRedirect() {
-  const router = useRouter();
-  return useCallback(() => router.replace("/login?next=" + encodeURIComponent(window.location.pathname + window.location.search)), [router]);
+  return redirectToLogin;
 }
+
+/** Returns an error reporter for catch blocks: 401 → login redirect, 403 → localized toast. */
 
 export function useApiErrorHandler() {
   const toast = useToast();

@@ -3,7 +3,10 @@ import Link from "next/link";
 import { forbidden, redirect } from "next/navigation";
 import { getConsoleConfig } from "@/config";
 import { getT } from "@/i18n/server";
+import { headers } from "next/headers";
+import { legacyRoleOf } from "@/config/schema";
 import { can, getSession } from "@/server/auth";
+import { recordAudit } from "@/server/services/audit";
 
 export async function generateMetadata(): Promise<Metadata> {
   const t = await getT("nav");
@@ -17,13 +20,26 @@ export const dynamic = "force-dynamic";
  *   no `hermes:access`    → forbidden() → src/app/forbidden.tsx with HTTP 403 (nothing else renders)
  *   HERMES_DASHBOARD_URL  → 307 to that URL
  *   otherwise             → "not configured" placeholder
+ * Each attempt is written to the audit log (HERMES_ACCESS, result success | denied).
  * src/proxy.ts enforces the same rules before this renders; this page re-checks (defense in depth).
  */
 export default async function HermesPage() {
   const session = await getSession();
   if (!session) redirect("/login?next=/hermes");
   const link = getConsoleConfig().externalLinks.hermes;
-  if (!can(session, link.requiredPermission)) forbidden();
+  const allowed = can(session, link.requiredPermission);
+  // every entry attempt is audited (the proxy already audits and blocks most denials before this runs)
+  recordAudit({
+    action: "HERMES_ACCESS",
+    actor: session.user.id,
+    actorName: session.user.name,
+    role: legacyRoleOf(session.permissions),
+    target: "hermes",
+    after: { allowed, configured: !!link.url },
+    result: allowed ? "success" : "denied",
+    req: { headers: await headers() },
+  });
+  if (!allowed) forbidden();
   if (link.url) redirect(link.url);
 
   const t = await getT("hermes");

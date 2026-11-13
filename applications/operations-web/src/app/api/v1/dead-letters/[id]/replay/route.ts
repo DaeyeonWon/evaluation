@@ -9,7 +9,7 @@ export const POST = handle<{ id: string }>(async (req, ctx) =>
   idempotent(req, async () => {
     const { id } = await ctx.params;
     const op = resolveOperator(req);
-    requirePermission(op, "replay.request");
+    requirePermission(op, "dlq:replay");
     const body = await readJson(req);
     const reason = V.reason(body);
     const version = validateVersion(V.str(body, "pipeline_version"));

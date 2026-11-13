@@ -116,7 +116,7 @@ export function resultDetail(id: string): ResultDetail {
   const wfId = "wf-" + id.replace(/^utt-/, "").replace(/-\d{4}$/, "");
   const owner = e.getWorkflow(wfId);
   const row = owner ? e.results.rowsFor(owner).find((r) => r.utterance_id === id) : undefined;
-  if (!row) throw notFound(`발화 결과를 찾을 수 없습니다: ${id}`);
+  if (!row) throw notFound({ key: "domain.resultNotFound", vars: { id } });
   const wf = e.getWorkflow(row.workflow_id);
   let inputLine: string | null = null;
   if (wf) {

@@ -12,7 +12,7 @@ export const PATCH = handle(async (req) =>
   idempotent(req, async () => {
     const op = resolveOperator(req);
     const body = await readJson(req);
-    requirePermission(op, body.defaultPipelineVersion || body.versionTraffic ? "version.promote" : "config.write");
+    requirePermission(op, "config:write");
     return ok(patchConfig(body, op.id));
   }),
 );

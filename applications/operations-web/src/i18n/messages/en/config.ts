@@ -141,6 +141,12 @@ const config = {
     title: "Audit log",
     search: "Search the audit log",
     searchPh: "Search action, target, operator, reason",
+    result: {
+      success: "Success",
+      denied: "Denied",
+      error: "Error",
+    },
+    idempotencyKey: "Idempotency-Key of the request",
     cols: {
       time: "Time",
       actor: "Operator",

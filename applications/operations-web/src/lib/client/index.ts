@@ -13,3 +13,4 @@ export { useTimeRange } from "./use-query-state";
 export type { Parser } from "./use-query-state";
 export { SessionProvider, useSession } from "./session";
 export { useOperator, getOperatorId, setOperatorId } from "./operator";
+export { redirectToLogin, sessionExpired } from "./auth-redirect";

@@ -5,7 +5,9 @@
  *  1. adapter verification (IAP JWT when IAP_AUDIENCE is set) → 401
  *  2. no session: pages → 307 /login?next=…, API → 401 JSON
  *  3. API permission table (src/server/auth/policy.ts) → 403 JSON
- *  4. pages: session without `view` → /403; /hermes without `hermes:access` → 403 (rewritten to /403)
+ *  4. pages: session without `view` → /403; /hermes without `hermes:access` → 403 (rewritten to the
+ *     server-rendered /403 page with HTTP status 403, so the theme script is in the HTML)
+ *     Refusals of state-changing APIs and of /hermes are written to the audit log (result "denied").
  *  5. forwards identity to upstream as x-console-user-* request headers (stripped from the client)
  *
  * Fine-grained checks stay in the routes (src/server/http.ts) and pages (hermes/page.tsx).
@@ -14,14 +16,19 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getConsoleConfig, hasPermission } from "@/config";
 import { sessionFromRequest, verifyRequest } from "@/server/auth/core";
 import { requiredFor } from "@/server/auth/policy";
+import { legacyRoleOf } from "@/config/schema";
+import { recordAudit } from "@/server/services/audit";
+import { tFor } from "@/i18n/request";
 
 const PUBLIC_PAGES = ["/login", "/403"];
 const FORWARDED = ["x-console-user-id", "x-console-user-email", "x-console-user-roles", "x-console-user-permissions"];
 /** page → permission, checked here in addition to the page itself */
 const PAGE_PERMISSIONS: [prefix: string, permission: string][] = [["/hermes", "hermes:access"]];
 
-function apiError(status: number, code: string, message: string) {
-  return Response.json({ error: { code, message } }, { status, headers: { "cache-control": "no-store" } });
+/** JSON error body in the request's locale (same shape as src/server/http.ts errorResponse). */
+function apiError(req: NextRequest, status: number, code: string, key: string, vars?: Record<string, string>) {
+  const message = tFor(req, "errors").dynamic(key, vars);
+  return Response.json({ error: { code, message, key } }, { status, headers: { "cache-control": "no-store" } });
 }
 
 function forwardHeaders(req: NextRequest, s: ReturnType<typeof sessionFromRequest>) {
@@ -42,6 +49,8 @@ export async function proxy(req: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const cfg = getConsoleConfig().auth;
 
+  // /403 is server-rendered (src/app/403/page.tsx) and always answers with HTTP 403
+  if (pathname === "/403") return NextResponse.rewrite(new URL("/403", req.url), { status: 403 });
   if (!isApi && PUBLIC_PAGES.some((p) => pathname === p || pathname.startsWith(p + "/"))) return forwardHeaders(req, null);
 
   if (isApi) {
@@ -52,13 +61,13 @@ export async function proxy(req: NextRequest) {
   const verified = await verifyRequest(req);
   if (!verified.ok) {
     console.warn(`[auth] rejected ${req.method} ${pathname}: ${verified.reason}`);
-    if (isApi) return apiError(401, "UNAUTHENTICATED", "인증 정보를 확인할 수 없습니다.");
+    if (isApi) return apiError(req, 401, "UNAUTHENTICATED", "permission.unverified");
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
   const session = sessionFromRequest(req);
   if (!session) {
-    if (isApi) return apiError(401, "UNAUTHENTICATED", "로그인이 필요합니다.");
+    if (isApi) return apiError(req, 401, "UNAUTHENTICATED", "code.UNAUTHENTICATED");
     if (cfg.mode !== "mock") return new NextResponse("Unauthorized — no identity header from the auth proxy.", { status: 401 });
     const login = new URL("/login", req.url);
     login.search = "";
@@ -69,14 +78,19 @@ export async function proxy(req: NextRequest) {
   if (isApi) {
     const need = requiredFor(req.method, pathname, cfg.protectReadApi ?? true) ?? [];
     if (need.length && !need.some((p) => hasPermission(session.permissions, p))) {
-      return apiError(403, "FORBIDDEN", `권한이 없습니다 (${session.user.name}). 필요 권한: ${need.join(" | ")}`);
+      // state-changing request refused: audit it (GETs need only `view`; their 403s aren't audited)
+      if (!["GET", "HEAD", "OPTIONS"].includes(req.method))
+        recordAudit({ action: "PERMISSION_DENIED", actor: session.user.id, actorName: session.user.name, role: legacyRoleOf(session.permissions), target: `${req.method} ${pathname}`, after: { required: need.join(" | ") }, result: "denied", req });
+      return apiError(req, 403, "FORBIDDEN", "permission.apiDenied", { operator: session.user.name, permission: need.join(" | ") });
     }
     return forwardHeaders(req, session);
   }
 
   const pagePerm = PAGE_PERMISSIONS.find(([p]) => pathname === p || pathname.startsWith(p + "/"))?.[1];
   if (!hasPermission(session.permissions, "view") || (pagePerm && !hasPermission(session.permissions, pagePerm))) {
-    return NextResponse.rewrite(new URL("/403", req.url));
+    if (pagePerm === "hermes:access" && req.method === "GET" && !req.headers.has("next-router-prefetch"))
+      recordAudit({ action: "HERMES_ACCESS", actor: session.user.id, actorName: session.user.name, role: legacyRoleOf(session.permissions), target: "hermes", after: { allowed: false, required: pagePerm }, result: "denied", req });
+    return NextResponse.rewrite(new URL("/403", req.url), { status: 403 });
   }
   return forwardHeaders(req, session);
 }

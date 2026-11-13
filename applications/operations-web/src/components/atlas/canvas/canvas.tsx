@@ -10,6 +10,9 @@
  *   ?tab=gcs  inspector tab (set when a file-search hit is picked)
  *   ?q=       file-name search: highlights matching stages + batch tokens; the inspector's GCS tab
  *             filters to the same text
+ *   ?pipeline= pipeline drawn inside the expanded Vertex AI node (default: busiest root). Batch
+ *             tokens only know their legacy phase, so on a DAG that isn't phase-aligned (sub-pipelines)
+ *             the Vertex tokens are hidden and the node shows per-node running counts instead.
  *   ?range= / ?from=&to=  global period (shell RangePicker): counters + search follow it; tokens,
  *             slots and the ticker stay real-time.
  */
@@ -25,7 +28,7 @@ import { LANG_CODES, STAGES, STATE_TO_STAGE, STATUS_META, TERMINAL_STATES } from
 import { api, parseAsString, useApi, useLiveStream, useQueryStates, useSimNow, useStreamEvent, useTimeRange } from "@/lib/client";
 import type { ActiveWorkflowPos, FileSearchHit, StageId, TransitionMessage, WorkflowStatus } from "@/lib/types";
 import { bounds, computePositions, edgeKeysFor, edgesDef, layout, overflowPos, primaryNode, startPointFor, type NodeBox, type NodeId } from "./geometry";
-import { NodeShell, type Metrics, type NodeData } from "./nodes";
+import { NodeShell, vertexPick, type Metrics, type NodeData } from "./nodes";
 import { Inspector } from "./inspector";
 import { useSim } from "../shell";
 import { useRangeHref, useRangeLabel } from "../time-range";
@@ -38,7 +41,7 @@ const TERMINAL = new Set<WorkflowStatus>(TERMINAL_STATES);
 const MIN_K = 0.16;
 const MAX_K = 2.4;
 const SEARCH_LIMIT = 400;
-const URL_PARSERS = { stage: parseAsString, tab: parseAsString, q: parseAsString };
+const URL_PARSERS = { stage: parseAsString, tab: parseAsString, q: parseAsString, pipeline: parseAsString };
 
 interface View {
   x: number;
@@ -377,6 +380,9 @@ export function CanvasScreen() {
   const live = useMemo(() => (snapshot?.active ?? []).filter((w) => !TERMINAL.has(w.status)), [snapshot]);
   const lingerList = useMemo(() => [...linger.values()].filter((l) => !live.some((w) => w.workflow_id === l.wf.workflow_id)), [linger, live]);
   const placed = useMemo(() => computePositions(N, expanded, live, lingerList), [N, expanded, live, lingerList]);
+  // Vertex tokens sit on legacy phase slots: draw them only when the selected inner DAG uses those slots
+  const vxByPipeline = (stagesQ.data?.vertex as { byPipeline?: unknown } | undefined)?.byPipeline;
+  const hideVertexTokens = expanded && !vertexPick(vxByPipeline, url.pipeline).aligned;
   const tokenWf = useMemo(() => {
     const m = new Map<string, ActiveWorkflowPos>();
     live.forEach((w) => m.set(w.workflow_id, w));
@@ -761,7 +767,7 @@ export function CanvasScreen() {
               <AnimatePresence initial={false}>
                 {[...placed.pos.entries()].map(([id, [x, y]]) => {
                   const w = tokenWf.get(id);
-                  if (!w) return null;
+                  if (!w || (hideVertexTokens && w.stage === "vertex")) return null;
                   const meta = STATUS_META[w.status];
                   const [sx, sy] = startPointFor(N, w, [x, y]);
                   const ringless = ["QUEUED", "RECEIVED", "VALIDATED"].includes(w.status);
@@ -800,6 +806,7 @@ export function CanvasScreen() {
                 })}
               </AnimatePresence>
               {Object.entries(placed.overflow).map(([k, v]) => {
+                if (hideVertexTokens && k.startsWith("v-")) return null;
                 const [x, y] = overflowPos(N, k);
                 return (
                   <text key={k} x={x} y={y} textAnchor="end" style={{ font: "600 11px var(--f-mono)", fill: "var(--ink-2)" }}>
@@ -875,7 +882,7 @@ export function CanvasScreen() {
               })}
               {[...placed.pos.entries()].map(([id, [x, y]]) => {
                 const w = tokenWf.get(id);
-                return w ? <circle key={id} cx={x} cy={y} r={9} fill={`var(--lg-${w.language})`} /> : null;
+                return w && !(hideVertexTokens && w.stage === "vertex") ? <circle key={id} cx={x} cy={y} r={9} fill={`var(--lg-${w.language})`} /> : null;
               })}
               <rect ref={miniViewRef} className="mini-v" />
             </svg>

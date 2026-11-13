@@ -12,6 +12,11 @@
  *   new virtual day and 30 days of history are regenerated behind it. SSE subscribers, speed and
  *   pause carry over; a "sim" message tells clients to refetch.
  * - Every engine bus event is re-broadcast to SSE subscribers in a compact, JSON-safe form.
+ * - SSE ids: every broadcast message gets a process-wide monotonic `seq` (the SSE `id:`), and every
+ *   message except `tick` is kept in a bounded ring buffer (STREAM_BUFFER_MAX messages, at most
+ *   STREAM_BUFFER_TTL_MS old) so a reconnecting client (Last-Event-ID) gets what it missed — see
+ *   replaySince(). `tick` is a full snapshot, so only the latest one is replayed. The seq + buffer live
+ *   on globalThis and survive the day re-seed.
  */
 import type {
   ActiveWorkflowPos,
@@ -37,7 +42,25 @@ export const TICK_MS = 1200;
 export const IDLE_AFTER_MS = 120_000;
 export const SIM_SEED = 4242;
 
-type Listener = <K extends StreamEventType>(type: K, data: StreamEventMap[K]) => void;
+type Listener = <K extends StreamEventType>(type: K, data: StreamEventMap[K], id: number) => void;
+
+export const STREAM_BUFFER_MAX = 5000;
+export const STREAM_BUFFER_TTL_MS = 5 * 60_000;
+
+interface Buffered {
+  id: number;
+  at: number;
+  type: StreamEventType;
+  data: unknown;
+}
+interface StreamLog {
+  /** per-process prefix of the SSE id, so ids from a restarted server are recognised as unknown */
+  epoch: string;
+  seq: number;
+  buf: Buffered[];
+  /** highest seq ever dropped from the buffer (size cap or TTL); backfill needs lastId ≥ this */
+  evictedUpTo: number;
+}
 
 export interface Runtime {
   engine: MockEngine;
@@ -53,12 +76,55 @@ export interface Runtime {
   createdAt: number;
 }
 
-const G = globalThis as unknown as { __aipoRuntime?: Runtime };
+const G = globalThis as unknown as { __aipoRuntime?: Runtime; __aipoStreamLog?: StreamLog };
+
+function streamLog(): StreamLog {
+  return (G.__aipoStreamLog ??= { epoch: Date.now().toString(36), seq: 0, buf: [], evictedUpTo: 0 });
+}
+
+/** SSE `id:` for a seq: "<epoch>-<seq>". */
+export function streamId(seq: number): string {
+  return `${streamLog().epoch}-${seq}`;
+}
+
+/** seq of the most recent message (0 before the first). */
+export function currentStreamSeq(): number {
+  return streamLog().seq;
+}
+
+function evict(log: StreamLog, now: number) {
+  while (log.buf.length && (log.buf.length > STREAM_BUFFER_MAX || now - log.buf[0].at > STREAM_BUFFER_TTL_MS)) {
+    log.evictedUpTo = log.buf.shift()!.id;
+  }
+}
+
+/**
+ * Buffered messages after the client's last SSE id, in order. `null` = can't backfill (malformed id,
+ * id from another server process, or messages after it were already evicted) → client must resync.
+ * Ticks are never buffered (they're full snapshots); the stream route sends a fresh tick after replay.
+ */
+export function replaySince(lastEventId: string): { seq: number; type: StreamEventType; data: unknown }[] | null {
+  const log = streamLog();
+  const m = /^([0-9a-z]+)-(\d+)$/.exec(lastEventId.trim());
+  if (!m || m[1] !== log.epoch) return null;
+  const last = Number(m[2]);
+  if (last > log.seq) return null;
+  evict(log, Date.now());
+  if (last < log.evictedUpTo) return null;
+  return log.buf.filter((x) => x.id > last).map((x) => ({ seq: x.id, type: x.type, data: x.data }));
+}
 
 function broadcast<K extends StreamEventType>(rt: Runtime, type: K, data: StreamEventMap[K]) {
+  const log = streamLog();
+  const id = ++log.seq;
+  if (type !== "tick") {
+    const now = Date.now();
+    log.buf.push({ id, at: now, type, data });
+    evict(log, now);
+  }
   for (const l of rt.listeners) {
     try {
-      l(type, data);
+      l(type, data, id);
     } catch {
       /* a broken subscriber must never break the simulator */
     }

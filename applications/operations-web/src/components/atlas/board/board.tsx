@@ -94,6 +94,9 @@ const PARSERS = {
   col: parseAsInt,
   pipeline: parseAsString,
   file: parseAsString,
+  /** stage inspector tab + objects filter (owned by the inspector; cleared when it closes) */
+  tab: parseAsString,
+  q: parseAsString,
 };
 
 function Tween({
@@ -198,7 +201,7 @@ export function BoardScreen() {
     [setQs, stage],
   );
   const closeStage = useCallback(
-    () => setQs({ stage: null, col: null }),
+    () => setQs({ stage: null, col: null, tab: null, q: null }),
     [setQs],
   );
 

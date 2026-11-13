@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
+    "i18n:check": "tsx src/i18n/check-messages.ts",
     "test:e2e": "playwright test",
     "gen:catalog": "node scripts/gen-catalog.mjs"
   },
@@ -20,10 +21,8 @@
     "lucide-react": "1.72.0",
     "motion": "14.13.0",
     "next": "16.4.6",
-    "pretendard": "1.3.9",
     "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "wanted-sans": "1.0.3"
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@playwright/test": "1.65.0",
@@ -36,6 +35,7 @@
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.15",
     "typescript": "5.9.3"
   },
   "engines": {

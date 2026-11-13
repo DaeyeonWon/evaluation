@@ -27,7 +27,7 @@ ENV OPERATIONS_API_URL=${OPERATIONS_API_URL} \
     NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# next/font/google fetches IBM Plex Mono / JetBrains Mono / Fira Code at build time (network required).
+# next/font/google fetches IBM Plex Mono at build time (network required); SUIT is bundled from node_modules.
 RUN mkdir -p public && npm run build
 
 # ── runtime: standalone server only, non-root ────────────────────────────────────

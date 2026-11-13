@@ -187,6 +187,8 @@ const pipelines = {
     runningBadge: "{count} RUNNING",
     retryRate: "Retry {pct}",
     vertexFooter: "GPU {gpu} L4 · {utt} utterances in flight · avg {avg} · {children} child jobs",
+    nodeRunning: "Running on this node: {count}",
+    tokensHidden: "Batch tokens are drawn only on root DAGs with every phase · per-node running counts ({count} total)",
     innerDag: "PipelineJob DAG · {id}@{version} · running per node",
     pickerAria: "Running jobs per pipeline · pick one to draw its inner DAG",
     pickAria: "{id}: {count} running · show inner DAG",

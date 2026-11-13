@@ -117,7 +117,7 @@ function sum(a: number[]) {
 
 export function stageDetail(id: string, req: NextRequest): StageDetail {
   const e = getEngine();
-  if (!C.STAGE_BY_ID[id as StageId]) throw notFound(`알 수 없는 단계입니다: ${id}`);
+  if (!C.STAGE_BY_ID[id as StageId]) throw notFound({ key: "domain.unknownStage", vars: { id } });
   const stageId = id as StageId;
   const st = C.STAGE_BY_ID[stageId];
   const q = Query.of(req);
@@ -256,8 +256,8 @@ export function buckets(): GcsBucket[] {
 
 function bucketOr404(name: string | undefined): string {
   const e = getEngine();
-  if (!name) throw badRequest("bucket 파라미터가 필요합니다.", { allowed: e.gcs.buckets.map((b) => b.name) });
-  if (!e.gcs.buckets.some((b) => b.name === name)) throw notFound(`버킷을 찾을 수 없습니다: ${name}`);
+  if (!name) throw badRequest({ key: "validation.missingParam", vars: { name: "bucket" } }, { allowed: e.gcs.buckets.map((b) => b.name) });
+  if (!e.gcs.buckets.some((b) => b.name === name)) throw notFound({ key: "domain.bucketNotFound", vars: { name } });
   return name;
 }
 
@@ -295,9 +295,9 @@ export function gcsObject(req: NextRequest): GcsObjectContent {
   const q = Query.of(req);
   const bucket = bucketOr404(q.str("bucket"));
   const name = q.str("name");
-  if (!name) throw badRequest("name 파라미터가 필요합니다.");
+  if (!name) throw badRequest({ key: "validation.missingParam", vars: { name: "name" } });
   const o = e.gcs.get(bucket, name);
-  if (!o || o.timeCreated > e.now()) throw notFound(`객체를 찾을 수 없습니다: gs://${bucket}/${name}`);
+  if (!o || o.timeCreated > e.now()) throw notFound({ key: "domain.objectNotFound", vars: { uri: `gs://${bucket}/${name}` } });
   const limit = q.int("limit", { min: 1, max: 500, def: 20 });
   return { object: o, content: e.gcs.read(bucket, name, { limit }) };
 }
@@ -331,9 +331,11 @@ export function auditPage(req: NextRequest): Paginated<AuditEntry> & { range: Re
   const actor = q.str("actor");
   const actions = q.list("action");
   const target = q.str("target");
+  const results = q.enumList("result", ["success", "denied", "error"] as const);
   const text = q.str("q")?.toLowerCase();
   const range = readRange(req);
   const rows = e.audit.filter((a) => {
+    if (results && !results.includes(a.result ?? "success")) return false;
     if (actor && a.actor !== actor && a.actorName !== actor) return false;
     if (actions && !actions.includes(a.action)) return false;
     if (target && !a.target.includes(target)) return false;
@@ -378,9 +380,9 @@ export function replays(req: NextRequest): RangedList<Replay> {
 export function ackAlert(id: string, operatorId: string, note: string | null): Alert {
   const e = getEngine();
   const a = e.alerts.find((x) => x.alert_id === id);
-  if (!a) throw notFound(`알림을 찾을 수 없습니다: ${id}`);
-  if (a.status === "RESOLVED") throw conflict(`이미 해소된 알림입니다: ${id}`);
-  if (a.status === "ACKNOWLEDGED") throw conflict(`이미 확인 처리된 알림입니다: ${id}`);
+  if (!a) throw notFound({ key: "domain.alertNotFound", vars: { id } });
+  if (a.status === "RESOLVED") throw conflict({ key: "domain.alertAlreadyResolved", vars: { id } });
+  if (a.status === "ACKNOWLEDGED") throw conflict({ key: "domain.alertAlreadyAcked", vars: { id } });
   e.actions.acknowledgeAlert(id, operatorId);
   e._internal.pushAudit(e._internal.audit(e.now(), operatorId, "ALERT_ACKNOWLEDGED", "alert:" + id, { status: "OPEN" }, { status: "ACKNOWLEDGED" }, note));
   return a;
@@ -389,8 +391,8 @@ export function ackAlert(id: string, operatorId: string, note: string | null): A
 export function resolveAlert(id: string, operatorId: string, note: string | null): Alert {
   const e = getEngine();
   const a = e.alerts.find((x) => x.alert_id === id);
-  if (!a) throw notFound(`알림을 찾을 수 없습니다: ${id}`);
-  if (a.status === "RESOLVED") throw conflict(`이미 해소된 알림입니다: ${id}`);
+  if (!a) throw notFound({ key: "domain.alertNotFound", vars: { id } });
+  if (a.status === "RESOLVED") throw conflict({ key: "domain.alertAlreadyResolved", vars: { id } });
   const before = a.status;
   e.actions.resolveAlert(id);
   e._internal.pushAudit(e._internal.audit(e.now(), operatorId, "ALERT_RESOLVED", "alert:" + id, { status: before }, { status: "RESOLVED" }, note));

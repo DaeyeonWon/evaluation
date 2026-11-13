@@ -9,14 +9,15 @@
  * Strings: orchestration.nodes.* (range-labelled counters) + pipelines.canvas.* (node bodies).
  */
 import { useRouter } from "next/navigation";
-import { memo, useMemo, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { memo, useMemo, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { CatalogIcon } from "@/components/shared";
 import { failureCategoryLabel, stageLabel, type Locale } from "@/i18n";
 import { useFmt, useLocale, useT } from "@/i18n/client";
-import { COMPONENTS, LANG_CODES, PIPELINE_BY_ID, PIPELINE_REGISTRY, STAGE_BY_ID } from "@/lib/catalog";
+import { COMPONENTS, DAG_TEMPLATE, LANG_CODES, PIPELINE_BY_ID, PIPELINE_REGISTRY, STAGE_BY_ID } from "@/lib/catalog";
 import type { LocaleFmt } from "@/lib/format";
 import type { CapacitySnapshot, DeadLetter, PipelineDef, Replay, ResultFileMeta, StageId, Tone } from "@/lib/types";
 import { layeredLayout } from "../dag/layout";
+import { useQueryState } from "@/lib/client";
 import { useRangeHref } from "../time-range";
 import "@/styles/atlas-pipelines.css";
 import { dagLayout, LANE_H, LANE_Y0, ROW, type Layout, type NodeBox, type NodeId, type Rect } from "./geometry";
@@ -139,13 +140,38 @@ function liveVersion(p: PipelineDef) {
 const nodeLabel = (n: PipelineDef["versions"][number]["nodes"][number]) =>
   n.label ?? (n.kind === "component" ? (COMPONENTS[n.component]?.label ?? n.component) : (PIPELINE_BY_ID[n.ref.pipeline]?.label ?? n.ref.pipeline));
 
+/** root pipeline whose live version maps 1:1 onto the legacy phases (preprocess … persist) */
+function onLegacyPhases(p: PipelineDef): boolean {
+  const phases = liveVersion(p).nodes.map((x) => x.legacyPhase);
+  return p.kind === "root" && phases.every(Boolean) && new Set(phases).size === phases.length;
+}
+/** …and covers EVERY legacy phase, so each batch token (positioned by phase) lands on a drawn box */
+function coversAllPhases(p: PipelineDef): boolean {
+  return onLegacyPhases(p) && liveVersion(p).nodes.length === DAG_TEMPLATE.length;
+}
+
+/**
+ * Which pipeline the expanded Vertex AI node draws (?pipeline= on the canvas URL, else the busiest
+ * root) and whether its inner DAG occupies every legacy phase slot. Batch tokens (SSE tick) only carry
+ * a legacy `current_node`, so the canvas draws them inside Vertex only when `aligned`; otherwise
+ * (sub-pipelines, or a root such as quick that skips phases) it hides them and the node shows
+ * per-node running count badges instead.
+ */
+export function vertexPick(byPipeline: unknown, picked: string | null): { sel: string | undefined; aligned: boolean } {
+  const by = (byPipeline ?? {}) as ByPipeline;
+  const roots = PIPELINE_REGISTRY.filter((p) => p.kind === "root");
+  const valid = picked && PIPELINE_BY_ID[picked] ? picked : null;
+  const busiest = [...roots].sort((a, b) => (by[b.id]?.running ?? 0) - (by[a.id]?.running ?? 0))[0]?.id;
+  const sel = valid ?? busiest ?? roots[0]?.id;
+  const def = sel ? PIPELINE_BY_ID[sel] : undefined;
+  return { sel, aligned: !!def && coversAllPhases(def) };
+}
+
 /** inner DAG boxes inside the node frame; root nodes reuse the legacy-phase slots when they map 1:1 so batch tokens line up */
 function innerBoxes(p: PipelineDef, frame: Rect, n: NodeBox): Record<string, Rect> {
   const v = liveVersion(p);
   const legacy = dagLayout(n);
-  const phases = v.nodes.map((x) => x.legacyPhase);
-  const unique = p.kind === "root" && phases.every(Boolean) && new Set(phases).size === phases.length;
-  if (unique) return Object.fromEntries(v.nodes.map((x) => [x.id, legacy[x.legacyPhase!]]));
+  if (onLegacyPhases(p)) return Object.fromEntries(v.nodes.map((x) => [x.id, legacy[x.legacyPhase!]]));
   const L = layeredLayout(
     v.nodes.map((x) => ({ id: x.id, deps: x.deps, w: 120, h: 54 })),
     { colGap: 30, rowGap: 14 },
@@ -198,9 +224,9 @@ function VertexBody({ n, d, lod, expanded, c }: { n: NodeBox; d: NodeData; lod: 
   const W = n.w;
   const roots = PIPELINE_REGISTRY.filter((p) => p.kind === "root");
   const subs = PIPELINE_REGISTRY.filter((p) => p.kind === "sub");
-  const busiest = useMemo(() => [...roots].sort((a, b) => (by[b.id]?.running ?? 0) - (by[a.id]?.running ?? 0))[0]?.id, [roots, by]);
-  const [picked, setPicked] = useState<string | null>(null);
-  const sel = picked ?? busiest ?? roots[0]?.id;
+  // selection lives in the URL so the canvas (token layer) and this node agree on it
+  const [picked, setPicked] = useQueryState("pipeline");
+  const { sel, aligned } = useMemo(() => vertexPick(by, picked), [by, picked]);
   const def = sel ? PIPELINE_BY_ID[sel] : undefined;
   const openHref = rh(`/pipelines/${encodeURIComponent(sel ?? "")}`);
   const open = () => router.push(openHref);
@@ -304,6 +330,11 @@ function VertexBody({ n, d, lod, expanded, c }: { n: NodeBox; d: NodeData; lod: 
       <T x={frame.x + 6} y={frame.y + 12} c="n-tag" style={{ fontSize: 9 }}>
         {t("canvas.innerDag", { id: sel ?? "", version: v?.version ?? "" })}
       </T>
+      {!aligned ? (
+        <T x={frame.x + frame.w - 6} y={frame.y + frame.h - 6} c="n-tag" a="end" style={{ fontSize: 9, fill: "var(--ink-3)" }}>
+          {t("canvas.tokensHidden", { count: running })}
+        </T>
+      ) : null}
       {v
         ? v.nodes.flatMap((nd) =>
             nd.deps.map((p) => {
@@ -341,9 +372,20 @@ function VertexBody({ n, d, lod, expanded, c }: { n: NodeBox; d: NodeData; lod: 
                 <text x={b.x + 7} y={b.y + 29} style={{ font: "400 9.5px var(--f-mono)", fill: sub ? "var(--accent)" : "var(--ink-3)" }}>
                   {sub ? `⧉ ${nd.ref.pipeline}@${nd.ref.version}`.slice(0, Math.floor((b.w - 12) / 5.8)) : `${meta?.machineType ?? ""}${meta?.gpu ? " · L4" : ""}`}
                 </text>
-                <text x={b.x + (sub ? b.w - 6 : b.w) - 6} y={b.y + 16} textAnchor="end" style={{ font: "600 12px var(--f-mono)", fill: k ? "var(--st-running)" : "var(--ink-3)" }}>
-                  {k}
-                </text>
+                {!aligned && k > 0 ? (
+                  // tokens are hidden on non-phase DAGs: a filled count badge marks where batches are
+                  <g className="vx-nbadge" transform={`translate(${b.x + (sub ? b.w - 6 : b.w) - 4},${b.y - 7})`}>
+                    <title>{t("canvas.nodeRunning", { count: k })}</title>
+                    <rect x={-(14 + String(k).length * 7)} y={0} width={14 + String(k).length * 7} height={15} rx={7.5} fill="var(--st-running)" />
+                    <text x={-(7 + String(k).length * 3.5)} y={11} textAnchor="middle" style={{ font: "700 10px var(--f-mono)", fill: "var(--sheet)" }}>
+                      {k}
+                    </text>
+                  </g>
+                ) : (
+                  <text x={b.x + (sub ? b.w - 6 : b.w) - 6} y={b.y + 16} textAnchor="end" style={{ font: "600 12px var(--f-mono)", fill: k ? "var(--st-running)" : "var(--ink-3)" }}>
+                    {k}
+                  </text>
+                )}
                 {lod === 2 && meta ? (
                   <text x={b.x + 7} y={b.y + b.h + 11} style={{ font: "400 8px var(--f-mono)", fill: "var(--ink-3)" }}>
                     {meta.image}

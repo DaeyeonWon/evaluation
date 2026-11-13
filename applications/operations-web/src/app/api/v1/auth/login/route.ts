@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getConsoleConfig } from "@/config";
 import { safeNext, sessionInfo, signSession, toSession } from "@/server/auth/core";
+import { badRequest, errorResponse, notFound } from "@/server/http";
+import { recordAudit } from "@/server/services/audit";
+import { legacyRoleOf } from "@/config/schema";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,7 +15,7 @@ export const dynamic = "force-dynamic";
 const seeOther = (path: string) => new NextResponse(null, { status: 303, headers: { location: path } });
 
 const NO_STORE = { "cache-control": "no-store" };
-const err = (status: number, code: string, message: string) => Response.json({ error: { code, message } }, { status, headers: NO_STORE });
+
 
 /**
  * POST /api/v1/auth/login — mock mode only (404 otherwise).
@@ -21,7 +24,7 @@ const err = (status: number, code: string, message: string) => Response.json({ e
  */
 export async function POST(req: NextRequest) {
   const cfg = getConsoleConfig().auth;
-  if (cfg.mode !== "mock") return err(404, "NOT_FOUND", "mock 로그인은 auth.mode=mock 에서만 사용할 수 있습니다.");
+  if (cfg.mode !== "mock") return errorResponse(notFound({ key: "domain.mockLoginDisabled" }), req);
 
   const isForm = (req.headers.get("content-type") ?? "").includes("form");
   let userId: string | undefined;
@@ -37,13 +40,14 @@ export async function POST(req: NextRequest) {
       next = typeof b.next === "string" ? b.next : undefined;
     }
   } catch {
-    return err(400, "INVALID_ARGUMENT", "요청 본문이 올바르지 않습니다.");
+    return errorResponse(badRequest({ key: "validation.invalidBody" }), req);
   }
 
   const user = cfg.mockUsers.find((u) => u.id === userId);
-  if (!user) return err(400, "INVALID_ARGUMENT", `알 수 없는 사용자입니다: ${userId ?? ""}`);
+  if (!user) return errorResponse(badRequest({ key: "domain.unknownUser", vars: { id: userId ?? "" } }, { field: "userId" }), req);
 
   const session = toSession({ id: user.id, email: user.email, name: user.name, team: user.team, source: "mock", baseRoles: user.roles });
+  recordAudit({ action: "AUTH_LOGIN", actor: user.id, actorName: user.name, role: legacyRoleOf(session.permissions), target: "session", after: { mode: cfg.mode, roles: session.roles }, req });
   const res = isForm
     ? seeOther(safeNext(next))
     : NextResponse.json(sessionInfo(session), { headers: NO_STORE });

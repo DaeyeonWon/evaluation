@@ -6,7 +6,15 @@
  *   const ov = await api.overview();
  *   await api.patchLanguageCapacity("ko", { max_concurrent: 12, reason: "유입 증가" });
  *
- * Errors: non-2xx → throws ApiClientError { status, code, message (Korean), details }.
+ * Errors: non-2xx → throws ApiClientError { status, code, message (server-localized), details }.
+ * A 401 also starts a full navigation to /login?next=<current page> (see ./auth-redirect).
+ *
+ * Idempotency-Key (POST/PATCH): one key per USER ACTION, not per call. The key is remembered per
+ * action fingerprint (method + path + JSON body) until a definitive answer arrives — 2xx or 4xx drops
+ * it — so retrying the same action after a network error, abort/timeout or 5xx re-sends the SAME key
+ * and the server (src/server/http.ts idempotent(), 10-minute window) replays the first result instead
+ * of applying it twice. Remembered keys expire after the same 10 minutes. Pass `idempotencyKey` to
+ * choose the key yourself (e.g. one per dialog), or `false` to send none.
  */
 import type {
   Alert,
@@ -78,13 +86,13 @@ import type {
 } from "@/lib/types";
 import { serializeRange } from "@/lib/time-range";
 import type { RangeSpec } from "@/lib/time-range";
-import { getOperatorId } from "./operator";
+import { redirectToLogin } from "./auth-redirect";
 
 /**
  * Operations API base URL. Default "/api/v1" = this app's built-in mock API (src/app/api/v1).
  * To talk to the real FastAPI Operations API instead, set at BUILD time either
  *   NEXT_PUBLIC_API_BASE=https://ops.example.com/api/v1   (browser calls it directly; needs CORS
- *                                                          for x-operator / idempotency-key headers)
+ *                                                          for the idempotency-key header)
  * or keep this default and set OPERATIONS_API_URL (server-side proxy, see next.config.ts).
  */
 export const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || "/api/v1").replace(/\/+$/, "");
@@ -127,10 +135,32 @@ export interface RequestOpts {
   method?: "GET" | "POST" | "PATCH";
   body?: unknown;
   signal?: AbortSignal;
-  /** override the acting operator id (default: the one chosen via useOperator / localStorage) */
+  /** @deprecated ignored — identity comes from the server-side session (docs/auth.md) */
   operator?: string;
   /** sent as Idempotency-Key (auto-generated for POST/PATCH unless false) */
   idempotencyKey?: string | false;
+}
+
+/** action fingerprint → { key, at } — see "Idempotency-Key" in the header comment */
+const IDEM_TTL_MS = 10 * 60_000;
+const pendingKeys = new Map<string, { key: string; at: number }>();
+const newKey = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now().toString(36));
+
+/** Key for this action: reused while an earlier attempt of the same action is unresolved. */
+function actionKey(fingerprint: string): string {
+  const now = Date.now();
+  for (const [k, v] of pendingKeys) if (now - v.at > IDEM_TTL_MS) pendingKeys.delete(k);
+  const hit = pendingKeys.get(fingerprint);
+  if (hit) return hit.key;
+  const key = newKey();
+  pendingKeys.set(fingerprint, { key, at: now });
+  return key;
+}
+
+/** errors.client.requestFailed for a non-JSON failure (this module can't use useT; the UI locale is on <html lang>). */
+function requestFailedText(status: number): string {
+  const en = typeof document !== "undefined" && document.documentElement.lang.startsWith("en");
+  return en ? `The request failed (${status}).` : `요청을 처리하지 못했습니다 (${status}).`;
 }
 
 /** Low-level fetch → JSON; throws ApiClientError on non-2xx. `path` is relative to /api/v1. */
@@ -138,19 +168,12 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
   const method = opts.method ?? "GET";
   const headers: Record<string, string> = { accept: "application/json" };
   if (opts.body !== undefined) headers["content-type"] = "application/json";
-  const op = opts.operator ?? getOperatorId();
-  if (op) headers["x-operator"] = encodeURIComponent(op);
-  if (method !== "GET" && opts.idempotencyKey !== false) {
-    headers["idempotency-key"] =
-      opts.idempotencyKey || (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : String(Math.random()).slice(2));
-  }
-  const res = await fetch(API_BASE + path, {
-    method,
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    signal: opts.signal,
-    cache: "no-store",
-  });
+  const body = opts.body !== undefined ? JSON.stringify(opts.body) : undefined;
+  // auto key per action: dropped on a definitive (2xx/4xx) answer, kept for retries otherwise
+  const fingerprint = method !== "GET" && !opts.idempotencyKey && opts.idempotencyKey !== false ? `${method} ${path} ${body ?? ""}` : null;
+  if (method !== "GET" && opts.idempotencyKey !== false) headers["idempotency-key"] = opts.idempotencyKey || actionKey(fingerprint!);
+  const res = await fetch(API_BASE + path, { method, headers, body, signal: opts.signal, cache: "no-store" });
+  if (fingerprint && res.status < 500) pendingKeys.delete(fingerprint);
   const text = await res.text();
   let data: unknown = null;
   try {
@@ -160,7 +183,9 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
   }
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string; details?: unknown } } | null)?.error;
-    throw new ApiClientError(res.status, err?.code ?? "HTTP_" + res.status, err?.message ?? `요청이 실패했습니다 (${res.status}).`, err?.details);
+    // session expired / missing → /login?next=… for every caller (background refetches included)
+    if (res.status === 401 && !path.startsWith("/auth/")) redirectToLogin();
+    throw new ApiClientError(res.status, err?.code ?? "HTTP_" + res.status, err?.message ?? requestFailedText(res.status), err?.details);
   }
   return data as T;
 }
@@ -290,6 +315,8 @@ export interface AuditQuery extends QueryParams {
   actor?: string;
   action?: string | string[];
   target?: string;
+  /** success | denied | error (comma-separated) */
+  result?: string | string[];
   q?: string;
   range?: string;
   from?: number | string;

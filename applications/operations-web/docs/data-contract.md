@@ -2,7 +2,7 @@
 
 Audience: UI engineers building on the Atlas console. This is the contract of the data layer
 (`src/lib/types.ts`, `src/lib/time-range.ts`, `src/lib/client/*`, `/api/v1/**`, `src/config/domain.ts`).
-It supersedes FOUNDATION.md §4 wherever they differ. All types named here are exported from
+It is the authoritative API contract (the old FOUNDATION.md was removed; see `docs/architecture.md` for the app structure). All types named here are exported from
 `@/lib/types` unless stated otherwise.
 
 > **Auth.** `/api/v1/**` now requires the session cookie from engineer B's auth layer (`docs/auth.md`).
@@ -42,13 +42,14 @@ It supersedes FOUNDATION.md §4 wherever they differ. All types named here are e
 
 - "now" is always the **virtual clock** (`engine.now()` on the server, `useSimNow()` on the client). Never use `Date.now()`.
 - Bounds are inclusive: `from ≤ ts ≤ to`.
-- Invalid input returns **400** `INVALID_ARGUMENT` with a Korean message, plus `details.field` and `details.allowed`.
+- Invalid input returns **400** `INVALID_ARGUMENT` with a message in the request locale (`console_locale` cookie → `Accept-Language` → ko) and its `key` (`errors.validation.range*` / `validation.timestamp`), plus `details.field` and `details.allowed`. `response.range.label` is also built in the request locale.
 
 ### 1.2 `ResolvedRange`
 
 ```ts
 interface ResolvedRange { from: EpochMs; to: EpochMs; label: string; preset: string; fromIso: string; toIso: string }
 // label: "오늘 · 11월 12일 (목)" | "어제 · 11월 11일 (수)" | "최근 7일" | "최근 12시간" | "2026-11-10 09:00 ~ 2026-11-12 14:30"
+//        en: "Today · Thu, Nov 12" | "Yesterday · Wed, Nov 11" | "Last 7 days" | "Last 12 hours" | "… ~ now"
 // preset: "today" | "yesterday" | "1h" | "6h" | "24h" | "7d" | "30d" | "12h" (last-N) | "custom"
 ```
 
@@ -366,9 +367,24 @@ What gets indexed, per stage:
 | `job` **new** | `PipelineJobTransition { job_id, root_job_id, parent_job_id, workflow_id, language, pipeline_id, pipeline_version, node_path, depth, from, to, at, error_code, error_path }` | root job RUNNING / SUCCEEDED / FAILED / CANCELLED, and each child job start / succeed / fail / cancel |
 | `event`, `log` | as before, plus job context fields (§3.4) | `CHILD_PIPELINE_*` and `TASK_<EV>_*` events for every leaf |
 
-`job` is part of the default stream and of `?types=job`.
+`job` is part of the default stream and of `?types=job` (and registered in `live-stream.tsx` `STREAM_TYPES`).
 
-> **Action needed (outside the data layer):** `src/lib/client/live-stream.tsx` registers a fixed `STREAM_TYPES` list. Add `"job"` there so that `useStreamEvent("job", …)` and `useApi(…, { revalidateOn: ["job"] })` fire. The type `StreamEventMap.job` already exists.
+**Ids, backfill and resync.** Every message has `id: <epoch>-<seq>`: `seq` is monotonic across all event
+types for one server process, `epoch` changes when the process restarts. The server keeps a ring buffer of
+every non-`tick` message (≤ 5,000 messages, ≤ 5 min; `src/server/mock/runtime.ts` `replaySince()`); `tick`
+is a full snapshot, so it is never buffered and a fresh one follows every (re)connect.
+
+- Native EventSource reconnect (server sends `retry: 3000`) carries `Last-Event-ID`; a manually recreated
+  EventSource passes `?last_event_id=`. If the id is buffered, `hello` has `resumed: true` and the missed
+  messages follow in order, then `tick`, then live messages.
+- Unknown / expired / other-process id → `hello.resync: true` and no replay. `live-stream.tsx` then
+  revalidates every mounted `useApi` query.
+- The client keeps the native reconnect for transient drops and only recreates the EventSource (backoff
+  1 s → 30 s, `?last_event_id=`) when it reaches `readyState CLOSED` (e.g. an HTTP error status).
+
+`WorkflowEvent` has two optional fields: `seq` (emission order in the engine, for events with equal `ts`)
+and `causation_id` (the command id when known, e.g. `replay_id` on `REPLAY_*`, else the previous event of
+the same Workflow).
 
 ---
 

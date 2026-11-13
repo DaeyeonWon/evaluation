@@ -35,6 +35,8 @@ function LangCard({ L, sel, onEdit, onPause, now }: { L: LanguageCapacity; sel: 
   const t = useT("capacity");
   const f = useFmt();
   const locale = useLocale();
+  const { can } = usePerms();
+  const canWrite = can(CAP_PERM);
   const tone = { OK: "success", SATURATED: "retry", BACKLOGGED: "retry", PAUSED: "cancelled", DISABLED: "cancelled" }[L.status];
   const cells = Array.from({ length: Math.max(L.max, L.active) }, (_, i) => (i < L.running ? "on" : i < L.active ? "res" : ""));
   const slo = L.p95WaitSloSec;
@@ -129,7 +131,7 @@ function LangCard({ L, sel, onEdit, onPause, now }: { L: LanguageCapacity; sel: 
             <SlidersHorizontal />
             {t("card.edit")}
           </button>
-          <button className="btn sm" onClick={onPause}>
+          <button className="btn sm" onClick={onPause} disabled={!canWrite} title={canWrite ? undefined : t("edit.needPerm")}>
             {L.paused ? <Play /> : <Pause />}
             {L.paused ? t("card.resume") : t("card.pause")}
           </button>

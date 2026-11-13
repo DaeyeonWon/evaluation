@@ -15,7 +15,7 @@ import { useFmt, useLocale, useT } from "@/i18n/client";
 import { ACTIVE_STATES, FAILURE_CATEGORY_META, LANG_CODES, PIPELINE_VERSIONS, STATES, STATUS_META } from "@/lib/catalog";
 import { api, qs, parseAsBool, parseAsInt, parseAsList, parseAsString, useApi, useQueryStates, useTimeRange, type WorkflowQuery } from "@/lib/client";
 import type { FailureCategory, LangCode, WorkflowStatus } from "@/lib/types";
-import { RangeEmpty, RangeTag } from "./time-range";
+import { RangeEmpty, RangeTag, useRangeHref } from "./time-range";
 import { ErrorNote, Plate, Sheet, SheetHead, Skeleton, EXPLORER_RETURN_KEY } from "./ui";
 
 const PARSERS = {
@@ -48,6 +48,7 @@ const TEXT_KEYS = ["q", "workflow_id", "pipeline_job_id", "batch_id"] as const;
 type TextKey = (typeof TEXT_KEYS)[number];
 
 export function ExplorerScreen() {
+  const rh = useRangeHref();
   const router = useRouter();
   const t = useT("explorer");
   const c = useT("common");
@@ -107,7 +108,7 @@ export function ExplorerScreen() {
     } catch {
       /* storage unavailable — crumb falls back to the bare explorer */
     }
-    router.push(`/workflows/${id}`);
+    router.push(rh(`/workflows/${id}`));
   };
   const anyFilter =
     TEXT_KEYS.some((k) => f[k]) || f.status.length || f.language.length || f.version || f.event_type || f.error_code || f.error_category || f.pipeline_id || f.model_version || f.has_retries || f.replay;

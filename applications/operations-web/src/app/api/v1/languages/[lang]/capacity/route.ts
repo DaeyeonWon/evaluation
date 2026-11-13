@@ -22,8 +22,7 @@ export const PATCH = handle<{ lang: string }>(async (req, ctx) =>
     const { lang } = await ctx.params;
     const op = resolveOperator(req);
     const body = await readJson(req);
-    const onlyPause = Object.keys(body).every((k) => k === "paused" || k === "reason");
-    requirePermission(op, onlyPause ? "language.pause" : "config.write");
+    requirePermission(op, "capacity:write");
     const dryRun = Query.of(req).bool("dry_run") ?? false;
     return ok(patchLanguageCapacity(lang, body, op.id, dryRun));
   }),

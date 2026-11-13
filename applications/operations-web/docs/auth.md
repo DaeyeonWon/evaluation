@@ -106,17 +106,17 @@ Default role map in `console.config.ts`. Change it there.
 - **Unknown mutating endpoints are deny-by-default (`admin`).** When you add a POST, PATCH or DELETE route,
   add a row to `src/server/auth/policy.ts`.
 - `GET` APIs require `view` (`auth.protectReadApi: true`). `/api/v1/auth/*` is public.
-- Legacy keys are still accepted by `requirePermission(op, key)` and `useSession().can(key)`, so existing
-  route handlers and UI keep working. The mapping:
+- Route handlers check the **same canonical keys** as the proxy table (`capacity:write`, `config:write`,
+  `dlq:replay`, `workflow:cancel`, `sim:control`; alert ack/resolve pass the any-of list
+  `OPERATIONAL_PERMISSIONS`): `requirePermission(op, key | keys[])`. There is no per-path special case.
+- Legacy catalog keys are still mapped by `canonicalPermission()` for backward compatibility of
+  external callers and old UI code (`useSession().can(key)`); new code shouldn't use them:
   - `read`, `export` → `view`
   - `cancel` → `workflow:cancel`
   - `replay.request`, `replay.approve` → `dlq:replay`
   - `language.pause` → `capacity:write`
   - `config.write`, `version.promote` → `config:write`
   - `iam` → `admin`
-
-  One exception: on the capacity endpoints, legacy `config.write` is read as `capacity:write`.
-  Route handlers can move to the new keys at any time.
 
 ## Adding users (role assignment)
 
@@ -172,7 +172,17 @@ is no loading flash. **Hiding UI is cosmetic. The server checks are the gate.**
 `useOperator()` returns the session user, and `setOperatorId()` navigates to `/login`.
 
 Audit: `resolveOperator()` registers the session user in the engine's operator index. Each `AuditEntry`
-therefore records `actor` (mock id or email), `actorName` and `role` from the session.
+therefore records `actor` (mock id or email), `actorName` and `role` from the session, plus the request's
+`idempotency_key`, `user_agent` and `source_ip` (`x-forwarded-for`) and a `result` of `success`,
+`denied` or `error`. Besides every state change, the console audits (`src/server/services/audit.ts`):
+
+| Action | When | `result` |
+| --- | --- | --- |
+| `AUTH_LOGIN` / `AUTH_LOGOUT` | `POST /api/v1/auth/login` (mock) / `logout` | success |
+| `HERMES_ACCESS` | every `/hermes` attempt (proxy for refusals, the page for allowed entries) | success / denied |
+| `PERMISSION_DENIED` | 403 on a state-changing API, from the proxy table or a route's `requirePermission` (target `"<METHOD> <path>"`, `after.required`) | denied |
+
+Filter with `GET /api/v1/audit?result=denied`.
 
 ## Hermes link
 
@@ -181,7 +191,7 @@ therefore records `actor` (mock id or email), `actorName` and `role` from the se
 | Situation | Result |
 | --- | --- |
 | no session | 307 → `/login?next=/hermes` (`mock`); 401 (`iap`, `oidc-header`) |
-| session without `hermes:access` | **403**. `forbidden()` renders `src/app/forbidden.tsx`; the proxy rewrites to `/403` first |
+| session without `hermes:access` | **403**. The proxy rewrites to the server-rendered `/403` page with status 403 (theme applied pre-paint). `forbidden()` in the page stays as defense in depth and would render `src/app/forbidden.tsx` |
 | allowed, `HERMES_DASHBOARD_URL` set | **307** → that URL |
 | allowed, URL unset | "not configured yet" placeholder |
 

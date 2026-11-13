@@ -19,7 +19,8 @@ import { STATE_TO_STAGE, TERMINAL_STATES } from "@/lib/catalog";
 import { ApiClientError, api, downloadText, parseAsInt, parseAsString, revalidateKey, useApi, useQueryStates, useSession } from "@/lib/client";
 import type { Attempt, LogEntry, Workflow, WorkflowEvent } from "@/lib/types";
 import { FailPath, JobExplorer, type LogScope } from "./pipelines/job-explorer";
-import { useRangeHref } from "./time-range";
+import { useCoverHref, useRangeHref } from "./time-range";
+import { reasonText } from "@/lib/reason";
 import { Empty, ErrorNote, JsonView, OperatorSelect, PermNote, Plate, Sheet, SheetHead, Skeleton, copyText, opName, useExplorerHref, useToast } from "./ui";
 import "@/styles/atlas-pipelines.css";
 
@@ -164,6 +165,7 @@ function History({ wf, replays, onFailure }: { wf: Workflow; replays: ReplayRow[
   const t = useT("workflow");
   const f = useFmt();
   const locale = useLocale();
+  const rh = useRangeHref();
   const atts = wf.attempts;
   const errs = atts.filter((a) => a.error_code);
   const prev = errs[errs.length - 2];
@@ -283,9 +285,9 @@ function History({ wf, replays, onFailure }: { wf: Workflow; replays: ReplayRow[
             <dt>replay_cycle</dt>
             <dd className="mono">{wf.replay_cycle}</dd>
             <dt>replay_of</dt>
-            <dd>{wf.replay_of ? <Link className="mono" href={`/workflows/${wf.replay_of}`}>{wf.replay_of}</Link> : "—"}</dd>
+            <dd>{wf.replay_of ? <Link className="mono" href={rh(`/workflows/${wf.replay_of}`)}>{wf.replay_of}</Link> : "—"}</dd>
             <dt>replayed_by</dt>
-            <dd>{wf.replayed_by ? <Link className="mono" href={`/workflows/${wf.replayed_by}`}>{wf.replayed_by}</Link> : "—"}</dd>
+            <dd>{wf.replayed_by ? <Link className="mono" href={rh(`/workflows/${wf.replayed_by}`)}>{wf.replayed_by}</Link> : "—"}</dd>
           </dl>
           {replays.length ? (
             replays.map((r) => (
@@ -318,6 +320,7 @@ const attTone = (a: Attempt) => (a.status === "SUCCEEDED" ? "success" : a.status
 
 export function DetailScreen() {
   const t = useT("workflow");
+  const te = useT("errors");
   const tc = useT("common");
   const f = useFmt();
   const locale = useLocale();
@@ -326,6 +329,7 @@ export function DetailScreen() {
   const router = useRouter();
   const rh = useRangeHref();
   const explorerHref = rh(useExplorerHref());
+  const cover = useCoverHref();
   const toast = useToast();
   const { can } = useSession();
   const [p, setF] = useQueryStates(PARSERS);
@@ -503,7 +507,7 @@ export function DetailScreen() {
               )
             ) : null}
             {wf.result ? (
-              <Link className="btn" href={rh(`/results?workflow_id=${wf.workflow_id}`)}>
+              <Link className="btn" href={cover(`/results?workflow_id=${wf.workflow_id}`, wf.created_at, wf.completed_at)}>
                 <Table />
                 {t("results")}
               </Link>
@@ -701,7 +705,7 @@ export function DetailScreen() {
         ) : null}
         {wf.cancel_reason ? (
           <div className="note" style={{ marginTop: 10 }}>
-            {t("summary.cancelled", { by: opName(wf.cancelled_by), reason: wf.cancel_reason })}
+            {t("summary.cancelled", { by: opName(wf.cancelled_by), reason: reasonText(wf.cancel_reason, te) })}
           </div>
         ) : null}
       </section>

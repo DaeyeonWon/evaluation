@@ -7,11 +7,16 @@
  * highlighting) · events as Pub/Sub envelopes (expandable JSON) · live log stream (SSE `log` +
  * `event` + `transition`) · metrics (vertex broken down by pipeline). All data follows the global
  * time range (URL ?range= / ?from=&to=).
+ *
+ * URL state (both hosts): ?tab= (wf | gcs | ev | log | met; "gcs" is the objects tab, "obj" is
+ * accepted as an alias; default wf is omitted) and ?q= (objects-tab file-name filter, debounced).
+ * Deep links such as /?stage=gcs_input&tab=gcs&q=batch-0007 open pre-filtered.
  */
 import clsx from "clsx";
 import { Search, X } from "lucide-react";
 import Link from "next/link";
 import {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -40,7 +45,9 @@ import {
 } from "@/lib/catalog";
 import {
   api,
+  parseAsString,
   useApi,
+  useQueryStates,
   useSimNow,
   useStreamEvent,
   useTimeRange,
@@ -76,6 +83,10 @@ const ADR: Partial<Record<StageId, string>> = {
 };
 const OBJECTS_LIMIT = 100;
 const TABS = ["wf", "obj", "ev", "log", "met"] as const;
+/** URL spelling of each tab (the objects tab is "gcs" in links from the canvas search and /files). */
+const TAB_URL: Record<(typeof TABS)[number], string | null> = { wf: null, obj: "gcs", ev: "ev", log: "log", met: "met" };
+const URL_TAB: Record<string, (typeof TABS)[number]> = { wf: "wf", gcs: "obj", obj: "obj", ev: "ev", log: "log", met: "met" };
+const INSPECTOR_URL = { tab: parseAsString, q: parseAsString };
 type Tab = (typeof TABS)[number];
 
 type TI = Translator<MessageKey<Schema["inspector"]>>;
@@ -557,13 +568,24 @@ function InspectorPanel({
   const tr = useTimeRange();
   const rangeLabel = useRangeLabel(tr.spec, tr.resolved);
   const href = useRangeHref();
-  const [tab, setTab] = useState<Tab>("wf");
-  const [qIn, setQIn] = useState("");
-  const [q, setQ] = useState("");
+  // tab + objects filter live in the URL (deep links: ?tab=gcs&q=…); typing is local and debounced
+  const [url, setUrl] = useQueryStates(INSPECTOR_URL);
+  const tab: Tab = URL_TAB[url.tab ?? ""] ?? "wf";
+  const setTab = useCallback((k: Tab) => setUrl({ tab: TAB_URL[k] }), [setUrl]);
+  const q = url.q?.trim() ?? "";
+  const [qIn, setQIn] = useState(q);
+  // follow outside changes of ?q= (canvas search box, back/forward) without clobbering typing
+  const [seenQ, setSeenQ] = useState(q);
+  if (seenQ !== q) {
+    setSeenQ(q);
+    if (qIn.trim() !== q) setQIn(q);
+  }
   useEffect(() => {
-    const h = setTimeout(() => setQ(qIn.trim()), 250);
+    const v = qIn.trim();
+    if (v === q) return;
+    const h = setTimeout(() => setUrl({ q: v || null }), 250);
     return () => clearTimeout(h);
-  }, [qIn]);
+  }, [qIn, q, setUrl]);
 
   const st = STAGE_BY_ID[stage];
   const qr = useApi(

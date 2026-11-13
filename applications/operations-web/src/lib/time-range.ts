@@ -36,10 +36,14 @@ export const DEFAULT_RANGE: RangeSpec = { kind: "preset", preset: "today" };
 /** Max span of a "last N" range. */
 export const MAX_LAST_HOURS = 90 * 24;
 
+/** Why a range failed to parse — the server maps it to an `errors.validation.*` key (src/server/range.ts). */
+export type RangeErrorReason = "invalid" | "span" | "timestamp" | "order";
+
 export class RangeParseError extends Error {
   constructor(
     message: string,
     public field: "range" | "from" | "to",
+    public reason: RangeErrorReason = "invalid",
   ) {
     super(message);
     this.name = "RangeParseError";
@@ -61,6 +65,13 @@ const DOW = ["일", "월", "화", "수", "목", "금", "토"];
 export function kstDateLabel(ts: EpochMs): string {
   const p = kstParts(ts);
   return `${p.mo}월 ${p.d}일 (${DOW[p.dow]})`;
+}
+const DOW_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MON_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "Thu, Nov 12" (KST) */
+export function kstDateLabelEn(ts: EpochMs): string {
+  const p = kstParts(ts);
+  return `${DOW_EN[p.dow]}, ${MON_EN[p.mo - 1]} ${p.d}`;
 }
 export function kstDateTime(ts: EpochMs): string {
   const p = kstParts(ts);
@@ -89,7 +100,7 @@ export function parseRangeToken(token: string): RangeSpec {
   if (m) {
     const amount = Number(m[1]);
     const hours = m[2] === "d" ? amount * 24 : amount;
-    if (amount < 1 || hours > MAX_LAST_HOURS) throw new RangeParseError(`range는 1h~${MAX_LAST_HOURS / 24}d 사이여야 합니다: ${token}`, "range");
+    if (amount < 1 || hours > MAX_LAST_HOURS) throw new RangeParseError(`range는 1h~${MAX_LAST_HOURS / 24}d 사이여야 합니다: ${token}`, "range", "span");
     return { kind: "last", amount, unit: m[2] as "h" | "d" };
   }
   throw new RangeParseError(`range 값이 올바르지 않습니다: ${token} (today, yesterday, 1h, 6h, 24h, 7d, 30d 또는 from/to)`, "range");
@@ -114,11 +125,11 @@ export function parseRangeParams(src: ParamSource): RangeSpec {
   if ((fromRaw && fromRaw.trim()) || (toRaw && toRaw.trim())) {
     const from = fromRaw && fromRaw.trim() ? parseTime(fromRaw) : null;
     const to = toRaw && toRaw.trim() ? parseTime(toRaw) : null;
-    if (fromRaw && fromRaw.trim() && from == null) throw new RangeParseError("from은 epoch ms 또는 ISO-8601 시각이어야 합니다.", "from");
-    if (toRaw && toRaw.trim() && to == null) throw new RangeParseError("to는 epoch ms 또는 ISO-8601 시각이어야 합니다.", "to");
+    if (fromRaw && fromRaw.trim() && from == null) throw new RangeParseError("from은 epoch ms 또는 ISO-8601 시각이어야 합니다.", "from", "timestamp");
+    if (toRaw && toRaw.trim() && to == null) throw new RangeParseError("to는 epoch ms 또는 ISO-8601 시각이어야 합니다.", "to", "timestamp");
     const f = from ?? 0;
     const tt = to ?? Number.POSITIVE_INFINITY;
-    if (f > tt) throw new RangeParseError("from이 to보다 늦을 수 없습니다.", "from");
+    if (f > tt) throw new RangeParseError("from이 to보다 늦을 수 없습니다.", "from", "order");
     return { kind: "custom", from: f, to: tt };
   }
   const r = getParam(src, "range");
@@ -167,7 +178,12 @@ export function sameRange(a: RangeSpec, b: RangeSpec): boolean {
 }
 
 // ───────────────────────────────────────── resolve ──
-export function resolveRange(spec: RangeSpec, virtualNow: EpochMs): ResolvedRange {
+/**
+ * Resolve a spec against the virtual clock. `label` is built in `locale` (server: the request locale,
+ * see src/server/range.ts; default ko for backward compatibility). UIs may still rebuild labels.
+ */
+export function resolveRange(spec: RangeSpec, virtualNow: EpochMs, locale: "ko" | "en" = "ko"): ResolvedRange {
+  const en = locale === "en";
   const now = virtualNow;
   let from: number;
   let to: number;
@@ -180,31 +196,33 @@ export function resolveRange(spec: RangeSpec, virtualNow: EpochMs): ResolvedRang
       case "today":
         from = today;
         to = now;
-        label = `오늘 · ${kstDateLabel(now)}`;
+        label = en ? `Today · ${kstDateLabelEn(now)}` : `오늘 · ${kstDateLabel(now)}`;
         break;
       case "yesterday":
         from = today - DAY;
         to = today - 1;
-        label = `어제 · ${kstDateLabel(today - DAY)}`;
+        label = en ? `Yesterday · ${kstDateLabelEn(today - DAY)}` : `어제 · ${kstDateLabel(today - DAY)}`;
         break;
       default: {
         const info = RANGE_PRESETS.find((p) => p.id === spec.preset)!;
         const hours = spec.preset === "1h" ? 1 : spec.preset === "6h" ? 6 : spec.preset === "24h" ? 24 : spec.preset === "7d" ? 168 : 720;
         from = now - hours * HOUR;
         to = now;
-        label = info.label;
+        label = en ? info.labelEn : info.label;
       }
     }
   } else if (spec.kind === "last") {
     preset = `${spec.amount}${spec.unit}`;
     from = now - spec.amount * (spec.unit === "d" ? DAY : HOUR);
     to = now;
-    label = `최근 ${spec.amount}${spec.unit === "d" ? "일" : "시간"}`;
+    label = en
+      ? `Last ${spec.amount} ${spec.unit === "d" ? (spec.amount === 1 ? "day" : "days") : spec.amount === 1 ? "hour" : "hours"}`
+      : `최근 ${spec.amount}${spec.unit === "d" ? "일" : "시간"}`;
   } else {
     preset = "custom";
     from = spec.from;
     to = Number.isFinite(spec.to) ? spec.to : now;
-    label = `${kstDateTime(from)} ~ ${Number.isFinite(spec.to) ? kstDateTime(to) : "현재"}`;
+    label = `${kstDateTime(from)} ~ ${Number.isFinite(spec.to) ? kstDateTime(to) : en ? "now" : "현재"}`;
   }
   return { from, to, label, preset, fromIso: isoKst(from), toIso: isoKst(to) };
 }

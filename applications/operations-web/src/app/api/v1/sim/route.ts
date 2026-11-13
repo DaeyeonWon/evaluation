@@ -1,4 +1,4 @@
-import { V, badRequest, handle, ok, readJson } from "@/server/http";
+import { V, badRequest, handle, ok, readJson, requirePermission, resolveOperator } from "@/server/http";
 import { currentTick, getEngine, setPaused, setSpeed, simState, step } from "@/server/mock/runtime";
 import { toSummary } from "@/server/mock/projections";
 import { LANG_CODES } from "@/lib/catalog";
@@ -17,6 +17,7 @@ export const GET = handle(() => ok({ sim: simState(), snapshot: currentTick() })
  * → { sim: SimState; snapshot?: TickSnapshot; workflow?: WorkflowSummary }
  */
 export const POST = handle(async (req) => {
+  requirePermission(resolveOperator(req), "sim:control");
   const body = await readJson(req);
   const action = V.str(body, "action", { required: true });
   switch (action) {
@@ -26,7 +27,7 @@ export const POST = handle(async (req) => {
       return ok({ sim: setPaused(false) });
     case "speed": {
       const s = body.speed;
-      if (typeof s !== "number" || !Number.isFinite(s) || s < 0.25 || s > 20) throw badRequest("speed는 0.25~20 사이 숫자여야 합니다.");
+      if (typeof s !== "number" || !Number.isFinite(s) || s < 0.25 || s > 20) throw badRequest({ key: "validation.range", vars: { name: "speed", min: 0.25, max: 20 } }, { field: "speed" });
       return ok({ sim: setSpeed(s) });
     }
     case "step": {
@@ -36,11 +37,11 @@ export const POST = handle(async (req) => {
     }
     case "inject": {
       const lang = V.str(body, "language");
-      if (lang && !LANG_CODES.includes(lang as LangCode)) throw badRequest("language는 ko, en, ja, es 중 하나입니다.");
+      if (lang && !LANG_CODES.includes(lang as LangCode)) throw badRequest({ key: "validation.oneOf", vars: { name: "language", values: LANG_CODES.join(", ") } }, { field: "language" });
       const wf = getEngine().actions.injectBatch(lang ? { language: lang as LangCode } : {});
       return ok({ sim: simState(), workflow: toSummary(wf) }, 201);
     }
     default:
-      throw badRequest("action은 pause, resume, speed, step, inject 중 하나입니다.");
+      throw badRequest({ key: "validation.oneOf", vars: { name: "action", values: "pause, resume, speed, step, inject" } }, { field: "action" });
   }
 });

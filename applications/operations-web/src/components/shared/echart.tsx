@@ -71,7 +71,7 @@ function readTokens(el: HTMLElement): ChartTokens {
     grid: read("--chart-grid", theme === "dark" ? "rgba(255,255,255,.08)" : "rgba(15,23,42,.08)"),
     surface: read("--chart-surface", theme === "dark" ? "#131c2b" : "#ffffff"),
     tooltipBg: read("--chart-tooltip-bg", theme === "dark" ? "#1b2536" : "#ffffff"),
-    font: read("--chart-font", "Pretendard Variable, system-ui, sans-serif"),
+    font: read("--chart-font", "SUIT Variable, system-ui, sans-serif"),
     mono: read("--chart-mono", "ui-monospace, monospace"),
     tone: Object.fromEntries(TONES.map((t) => [t, read(`--st-${t}`)])) as Record<Tone, string>,
     lang: Object.fromEntries(LANG_CODES.map((l) => [l, read(`--lang-${l}`)])) as Record<LangCode, string>,

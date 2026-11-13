@@ -121,7 +121,7 @@ function AlertRow({ a }: { a: Alert }) {
           </Link>
         ) : null}
         {a.workflow_id ? (
-          <Link className="btn sm" href={`/workflows/${a.workflow_id}`}>
+          <Link className="btn sm" href={rh(`/workflows/${a.workflow_id}`)}>
             {t("alerts.detail")}
           </Link>
         ) : null}
@@ -447,7 +447,7 @@ export function OverviewScreen() {
                       initial={reduced ? false : { opacity: 0, backgroundColor: "rgba(13,135,166,0.18)" }}
                       animate={{ opacity: 1, backgroundColor: "rgba(13,135,166,0)" }}
                       transition={{ duration: 1.1 }}
-                      onClick={() => e.workflow_id && router.push(`/workflows/${e.workflow_id}`)}
+                      onClick={() => e.workflow_id && router.push(rh(`/workflows/${e.workflow_id}`))}
                     >
                       <td className="mono muted">{spanH <= 26 ? f.time(e.ts) : f.dateTime(e.ts).slice(5, 16)}</td>
                       <td>

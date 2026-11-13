@@ -2,15 +2,13 @@
 /**
  * Board range helpers (the period itself is picked in the shell's global RangePicker):
  * - useRangeLabel(): localized label for the active range (the server's `range.label` is Korean-only).
- * - useRangeHref(): appends the active range query to an internal href so navigation keeps the period.
+ * - useRangeHref(): re-export of the shell helper (../time-range) — keeps the period on internal links.
  * - <RangeTag />: read-only label for the sheet head / inspector.
  */
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useFmt, useLocale, useT } from "@/i18n/client";
-import { useTimeRange } from "@/lib/client";
 import {
   RANGE_PRESETS,
-  serializeRange,
   type RangeSpec,
   type ResolvedRange,
 } from "@/lib/time-range";
@@ -43,19 +41,8 @@ export function useRangeLabel(
   }, [spec, resolved.from, resolved.to, locale, f, t]);
 }
 
-/** href + current range params (today → unchanged). */
-export function useRangeHref(): (path: string) => string {
-  const { spec } = useTimeRange();
-  const qs = useMemo(
-    () => new URLSearchParams(serializeRange(spec)).toString(),
-    [spec],
-  );
-  return useCallback(
-    (path: string) =>
-      qs ? path + (path.includes("?") ? "&" : "?") + qs : path,
-    [qs],
-  );
-}
+/** href + current range params — the shell helper (keeps range/from/to, replaces stale ones, preserves #hash). */
+export { useRangeHref } from "../time-range";
 
 /** Read-only period label for sheet heads (the period is chosen in the shell's global RangePicker). */
 export function RangeTag({ label }: { label: string }) {

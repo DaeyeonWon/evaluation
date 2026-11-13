@@ -25,6 +25,8 @@ const REGION = "asia-northeast3";
 const BUCKET_IN = "bixby-utterance-input";
 const BUCKET_ART = "bixby-pipeline-artifacts";
 const BUCKET_RES = "bixby-eval-results";
+/** raw utterance audio referenced by the input JSONL `audio_uri`; read by Preprocess only (not browsable in the console) */
+const BUCKET_AUDIO = "bixby-utterance-audio";
 const BQ_TABLE = `${PROJECT}.bixby_eval.utterance_results`;
 
 export const domain: DomainConfig = {
@@ -34,7 +36,7 @@ export const domain: DomainConfig = {
   timezone: "Asia/Seoul",
   baseNow: "2026-11-12T14:30:00+09:00",
   historyDays: 30,
-  buckets: { input: BUCKET_IN, artifacts: BUCKET_ART, results: BUCKET_RES },
+  buckets: { input: BUCKET_IN, artifacts: BUCKET_ART, results: BUCKET_RES, audio: BUCKET_AUDIO },
   bigquery: { dataset: `${PROJECT}.bixby_eval`, resultsTable: BQ_TABLE, eventsTable: `${PROJECT}.aipo_ops.workflow_events` },
 
   // ───────────────────────────── languages + capacity defaults ──

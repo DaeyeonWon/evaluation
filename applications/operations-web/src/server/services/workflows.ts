@@ -23,7 +23,7 @@ const SORTS = ["created_desc", "created_asc", "wait_desc", "run_desc", "updated_
 
 export function getWorkflowOr404(id: string): Workflow {
   const w = getEngine().getWorkflow(id);
-  if (!w) throw notFound(`Workflow를 찾을 수 없습니다: ${id}`);
+  if (!w) throw notFound({ key: "domain.workflowNotFound", vars: { id } });
   return w;
 }
 
@@ -187,12 +187,12 @@ export function workflowDag(id: string): WorkflowDag {
 export function cancelWorkflow(id: string, operatorId: string, reason: string) {
   const e = getEngine();
   const w = getWorkflowOr404(id);
-  if (TERMINAL_STATES.includes(w.status)) throw conflict(`이미 종료된 Workflow는 취소할 수 없습니다 (현재 상태: ${w.status}).`);
+  if (TERMINAL_STATES.includes(w.status)) throw conflict({ key: "domain.workflowTerminal", vars: { status: w.status } });
   if (w.status === "RETRY_WAIT" || w.status === "DISPATCHING") {
     // the prototype supports cancel for every non-terminal state; nothing extra to validate
   }
   const res = e.actions.cancelWorkflow(id, { operator: operatorId, reason });
-  if (!res) throw badRequest("Workflow를 취소하지 못했습니다.");
+  if (!res) throw badRequest({ key: "domain.workflowCancelFailed" });
   return toSummary(res);
 }
 

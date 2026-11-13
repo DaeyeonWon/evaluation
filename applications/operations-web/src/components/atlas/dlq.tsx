@@ -21,6 +21,7 @@ import { failureCategoryLabel, failureCategoryPolicy, statusLabel } from "@/i18n
 import { useFmt, useLocale, useT } from "@/i18n/client";
 import { Empty, Plate, Sheet, SheetHead, Skeleton, useToast } from "./ui";
 import { QueryError, RangeTag, useApiErrorHandler, useRangeInfo } from "./analytics/kit";
+import { useRangeHref } from "./time-range";
 
 const PARSERS = { sel: parseAsString, status: parseAsString, language: parseAsList, pipeline: parseAsString, q: parseAsString, category: parseAsString };
 const PERM = "dlq:replay";
@@ -45,6 +46,7 @@ function PermLine() {
 }
 
 function Detail({ id, mode, setMode }: { id: string; mode: null | "replay" | "close"; setMode: (m: null | "replay" | "close") => void }) {
+  const rh = useRangeHref();
   const t = useT("dlq");
   const tc = useT("common");
   const locale = useLocale();
@@ -110,7 +112,7 @@ function Detail({ id, mode, setMode }: { id: string; mode: null | "replay" | "cl
       <dl className="kv">
         <dt>Workflow</dt>
         <dd>
-          <Link className="mono" href={`/workflows/${d.workflow_id}`}>
+          <Link className="mono" href={rh(`/workflows/${d.workflow_id}`)}>
             {d.workflow_id}
           </Link>
         </dd>
@@ -244,7 +246,7 @@ function Detail({ id, mode, setMode }: { id: string; mode: null | "replay" | "cl
                   {r.replay_id} · {r.pipeline_version_from} → {r.pipeline_version_to} {rw ? <StatusPill status={rw.status} size="xs" /> : <span className="chip">{statusLabel("replay", r.status, locale)}</span>}
                 </span>
                 <span className="om">
-                  <span>{rw ? <Link href={`/workflows/${rw.workflow_id}`}>{rw.workflow_id}</Link> : "—"}</span>
+                  <span>{rw ? <Link href={rh(`/workflows/${rw.workflow_id}`)}>{rw.workflow_id}</Link> : "—"}</span>
                   <span>{opName(r.approved_by)}</span>
                   <span>{f.dateTime(r.created_at)}</span>
                 </span>
@@ -364,6 +366,7 @@ function OutsideRange({ out, onWiden, canWiden, label }: { out: { pendingReview:
 }
 
 export function DlqScreen() {
+  const rh = useRangeHref();
   const t = useT("dlq");
   const tc = useT("common");
   const locale = useLocale();
@@ -445,7 +448,7 @@ export function DlqScreen() {
         title="DLQ Operations"
         desc={t("desc")}
         acts={
-          <Link className="btn" href="/?stage=dlq">
+          <Link className="btn" href={rh("/?stage=dlq")}>
             <MapIcon />
             {t("viewBranch")}
           </Link>
@@ -719,8 +722,8 @@ export function DlqScreen() {
                       </button>
                     </td>
                     <td className="mono">
-                      <Link href={`/workflows/${r.original_workflow_id}`}>{r.original_workflow_id}</Link> →{" "}
-                      {r.replay_workflow_id ? <Link href={`/workflows/${r.replay_workflow_id}`}>{r.replay_workflow_id}</Link> : "—"}
+                      <Link href={rh(`/workflows/${r.original_workflow_id}`)}>{r.original_workflow_id}</Link> →{" "}
+                      {r.replay_workflow_id ? <Link href={rh(`/workflows/${r.replay_workflow_id}`)}>{r.replay_workflow_id}</Link> : "—"}
                     </td>
                     <td className="mono">
                       {r.pipeline_version_from} → {r.pipeline_version_to}

@@ -233,6 +233,8 @@ export interface MockEngine {
       reason?: string | null,
     ): AuditEntry;
     pushAudit(a: AuditEntry): AuditEntry;
+    /** provider of request metadata merged into entries pushed during an API request (null = none) */
+    setAuditMeta(fn: (() => Partial<Pick<AuditEntry, "idempotency_key" | "user_agent" | "source_ip" | "request_id">> | null) | null): void;
     refreshRuntime(): void;
     emit(name: string, payload: unknown): void;
     clock: { now: number };

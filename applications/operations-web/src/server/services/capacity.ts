@@ -12,7 +12,7 @@ import { V, badRequest, notFound } from "../http";
 import { getEngine } from "../mock/runtime";
 
 export function parseLang(lang: string): LangCode {
-  if (!LANG_CODES.includes(lang as LangCode)) throw notFound(`지원하지 않는 언어 코드입니다: ${lang} (ko, en, ja, es 중 하나)`);
+  if (!LANG_CODES.includes(lang as LangCode)) throw notFound({ key: "domain.unknownLanguage", vars: { lang, allowed: LANG_CODES.join(", ") } });
   return lang as LangCode;
 }
 
@@ -72,7 +72,7 @@ export function patchLanguageCapacity(
   const patch: Partial<LanguageConfig> = {};
   const mc = V.int(body, "max_concurrent", 0, 100, "max_concurrent");
   if (mc !== undefined) {
-    if (mc > gmax) throw badRequest(`max_concurrent(${mc})는 Global 최대 동시 실행(${gmax})을 넘을 수 없습니다.`, { field: "max_concurrent", max: gmax });
+    if (mc > gmax) throw badRequest({ key: "domain.capacityExceedsGlobal", vars: { value: mc, max: gmax } }, { field: "max_concurrent", max: gmax });
     patch.maxConcurrent = mc;
   }
   const pw = V.int(body, "priority_weight", 1, 10, "priority_weight");
@@ -82,7 +82,7 @@ export function patchLanguageCapacity(
   const paused = V.bool(body, "paused");
   const enabled = V.bool(body, "enabled");
   if (!Object.keys(patch).length && paused === undefined && enabled === undefined)
-    throw badRequest("변경할 항목이 없습니다. max_concurrent, priority_weight, max_starts_per_minute, paused, enabled 중 하나 이상을 지정해 주세요.");
+    throw badRequest({ key: "validation.nothingToChangeFields", vars: { fields: "max_concurrent, priority_weight, max_starts_per_minute, paused, enabled" } });
   const reason = dryRun ? (V.str(body, "reason") ?? "") : V.reason(body);
 
   const L = e._internal.LANG[lang];
@@ -117,10 +117,10 @@ export function patchGlobalCapacity(body: Record<string, unknown>, operatorId: s
   const e = getEngine();
   const mc = V.int(body, "max_concurrent", 1, 200, "max_concurrent");
   const sp = V.int(body, "max_starts_per_minute", 1, 120, "max_starts_per_minute");
-  if (mc === undefined && sp === undefined) throw badRequest("변경할 항목이 없습니다. max_concurrent 또는 max_starts_per_minute를 지정해 주세요.");
+  if (mc === undefined && sp === undefined) throw badRequest({ key: "validation.nothingToChangeFields", vars: { fields: "max_concurrent, max_starts_per_minute" } });
   if (mc !== undefined) {
     const maxLang = Math.max(...e.languages.map((l) => l.maxConcurrent));
-    if (mc < maxLang) throw badRequest(`Global 최대 동시 실행(${mc})은 언어별 최대값(${maxLang})보다 작을 수 없습니다.`, { field: "max_concurrent", min: maxLang });
+    if (mc < maxLang) throw badRequest({ key: "domain.globalBelowLanguage", vars: { value: mc, min: maxLang } }, { field: "max_concurrent", min: maxLang });
   }
   const reason = dryRun ? (V.str(body, "reason") ?? "") : V.reason(body);
   const cap = e.getCapacity();

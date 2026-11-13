@@ -23,6 +23,7 @@ import { useFmt, useLocale, useT } from "@/i18n/client";
 import { ResultCharts } from "./results/charts";
 import { Empty, JsonView, Plate, Sheet, SheetHead, Skeleton, copyText, useToast, useReducedMotionSafe } from "./ui";
 import { QueryError, RangeTag, useLoginRedirect, useRangeInfo } from "./analytics/kit";
+import { useRangeHref } from "./time-range";
 
 const PARSERS = {
   language: parseAsList,
@@ -142,6 +143,7 @@ function CsvModal({ url, label, onClose }: { url: string; label: string; onClose
 }
 
 function UttDrawer({ id, rows, onNav, onClose }: { id: string; rows: ResultRow[]; onNav: (id: string) => void; onClose: () => void }) {
+  const rh = useRangeHref();
   const t = useT("results");
   const tc = useT("common");
   const locale = useLocale();
@@ -279,7 +281,7 @@ function UttDrawer({ id, rows, onNav, onClose }: { id: string; rows: ResultRow[]
                 <dd className="mono">{r.pipeline_job_id}</dd>
                 <dt>Workflow</dt>
                 <dd>
-                  <Link className="mono" href={`/workflows/${r.workflow_id}?node=aggregate`}>
+                  <Link className="mono" href={rh(`/workflows/${r.workflow_id}?node=aggregate`)}>
                     {r.workflow_id} →
                   </Link>
                 </dd>

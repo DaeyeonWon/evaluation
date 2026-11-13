@@ -13,7 +13,8 @@ import { failureCategoryLabel, failureCategoryPolicy, languageName, statusHelp, 
 import { useFmt, useLocale, useT } from "@/i18n/client";
 import { FAILURE_CATEGORY_META } from "@/lib/catalog";
 import { api, revalidateKey, useApi, useTimeRange } from "@/lib/client";
-import type { AppConfig, ConfigPatch, FailureCategory } from "@/lib/types";
+import { reasonText } from "@/lib/reason";
+import type { AppConfig, AuditResult, ConfigPatch, FailureCategory, Tone } from "@/lib/types";
 import { RangeEmpty, RangeTag, useRangeHref } from "./time-range";
 import { ErrorNote, PermNote, Plate, Sheet, SheetHead, Skeleton, opName, usePerms, useToast } from "./ui";
 
@@ -21,6 +22,8 @@ type OperatorsWithRoles = Awaited<ReturnType<typeof api.operators>> & {
   roles?: { name: string; label?: string; description?: string; permissions: string[] }[];
   permissions?: { key: string; label: string }[];
 };
+
+const RESULT_TONE: Record<AuditResult, Tone> = { success: "success", denied: "failed", error: "retry" };
 
 /** PATCH /config needs `config:write` (Admin) on the server */
 const CFG_PERM = "config:write";
@@ -549,6 +552,7 @@ function AuditLog() {
     const h = setTimeout(() => setDq(q), 300);
     return () => clearTimeout(h);
   }, [q]);
+  const te = useT("errors");
   const a = useApi(["audit", tr.key, dq], () => api.audit({ q: dq || undefined, pageSize: 50, ...tr.params }), { revalidateOn: ["audit"] });
   return (
     <Plate
@@ -593,6 +597,12 @@ function AuditLog() {
                 </td>
                 <td className="mono" style={{ fontSize: 11, fontWeight: 600 }}>
                   {x.action}
+                  {x.result && x.result !== "success" ? (
+                    <>
+                      {" "}
+                      <TonePill tone={RESULT_TONE[x.result]}>{t(`audit.result.${x.result}`)}</TonePill>
+                    </>
+                  ) : null}
                 </td>
                 <td className="mono" style={{ fontSize: 11 }}>
                   {x.target}
@@ -601,12 +611,18 @@ function AuditLog() {
                   <span className="muted">{JSON.stringify(x.before)}</span> → {JSON.stringify(x.after)}
                 </td>
                 <td className="wrap" style={{ fontSize: 12 }}>
-                  {x.reason ?? "—"}
+                  {reasonText(x.reason, te) ?? "—"}
                 </td>
-                <td className="mono muted" style={{ fontSize: 10.5 }}>
+                <td className="mono muted" style={{ fontSize: 10.5 }} title={x.user_agent ?? undefined}>
                   {x.audit_id} · {x.request_id}
                   <br />
                   {x.source_ip}
+                  {x.idempotency_key ? (
+                    <>
+                      <br />
+                      <span title={t("audit.idempotencyKey")}>idem {x.idempotency_key.slice(0, 8)}</span>
+                    </>
+                  ) : null}
                 </td>
               </tr>
             ))}

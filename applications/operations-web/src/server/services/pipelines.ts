@@ -69,7 +69,7 @@ export function definitions(): PipelineDefinition[] {
 }
 export function definitionOr404(id: string): PipelineDefinition {
   const d = definitions().find((x) => x.id === id);
-  if (!d) throw notFound(`Pipeline을 찾을 수 없습니다: ${id}`);
+  if (!d) throw notFound({ key: "domain.pipelineNotFound", vars: { id } });
   return d;
 }
 
@@ -189,7 +189,7 @@ export function pipelineDetail(id: string, req: NextRequest): PipelineDetail {
   const range = readRange(req);
   const version = q.str("version") ?? [...def.versions].reverse().find((v) => v.status !== "DEPRECATED")?.version ?? def.versions[def.versions.length - 1].version;
   const ver = def.versions.find((v) => v.version === version);
-  if (!ver) throw notFound(`Pipeline 버전을 찾을 수 없습니다: ${id}@${version}`);
+  if (!ver) throw notFound({ key: "domain.pipelineVersionNotFound", vars: { id, version } });
   const all = jobsInRange(range, id);
   const hits = all.filter((h) => h.job.pipeline_version === version);
   const nodeStats: NodeAggregate[] = ver.nodes.map((n) => {
@@ -266,7 +266,7 @@ export function findJob(jobId: string): { w: Workflow; a: Attempt; tree: Pipelin
   const m = /^(.*)-cycle-\d+-attempt-\d+$/.exec(rootId);
   const w = m ? e.getWorkflow(m[1]) : null;
   const a = w?.attempts.find((x) => x.pipeline_job_id === rootId);
-  if (!w || !a) throw notFound(`PipelineJob을 찾을 수 없습니다: ${jobId}`);
+  if (!w || !a) throw notFound({ key: "domain.pipelineJobNotFound", vars: { id: jobId } });
   const tree = e.pipelines.jobTree(w, a, e.now());
   const path: PipelineJobTree[] = [];
   const dfs = (t: PipelineJobTree): PipelineJobTree | null => {
@@ -280,7 +280,7 @@ export function findJob(jobId: string): { w: Workflow; a: Attempt; tree: Pipelin
     return null;
   };
   const job = dfs(tree);
-  if (!job) throw notFound(`PipelineJob을 찾을 수 없습니다: ${jobId}`);
+  if (!job) throw notFound({ key: "domain.pipelineJobNotFound", vars: { id: jobId } });
   return { w, a, tree, job, path };
 }
 

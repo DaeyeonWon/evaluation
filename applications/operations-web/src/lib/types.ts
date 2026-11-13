@@ -273,7 +273,7 @@ export interface AppConfig {
   alertPolicies: AlertPolicy[];
   operators: Operator[];
   rolePermissions: RolePermission[];
-  buckets: { input: string; artifacts: string; results: string };
+  buckets: { input: string; artifacts: string; results: string; /** raw utterance audio referenced by input JSONL `audio_uri` (read by Preprocess, not listed in the GCS browser) */ audio?: string };
   bigquery: { dataset: string; resultsTable: string; eventsTable: string };
   /** Terraform-declared defaults (flattened keys) */
   terraformDefaults: Record<string, unknown>;
@@ -539,6 +539,16 @@ export interface WorkflowEvent {
   correlation_id: string | null;
   trace_id: string | null;
   payload: Record<string, unknown>;
+  /**
+   * Monotonic emission order within one engine/server instance (optional; not a timestamp order —
+   * seeded history is generated per workflow). Use it to order events with equal `ts`.
+   */
+  seq?: number;
+  /**
+   * What caused this event: the command id when known (e.g. `replay_id` for REPLAY_*), otherwise the
+   * `event_id` of the previous event of the same Workflow. null for the first event. Optional.
+   */
+  causation_id?: string | null;
 }
 
 export interface LogEntry {
@@ -1046,7 +1056,15 @@ export interface AuditEntry {
   reason: string | null;
   request_id: string;
   source_ip: string;
+  /** Idempotency-Key of the API request that made the change (null: seeded/system entries, reads) */
+  idempotency_key: string | null;
+  /** User-Agent of that request (null: seeded/system entries) */
+  user_agent: string | null;
+  /** outcome: success · denied (403, Hermes access refused) · error */
+  result: AuditResult;
 }
+
+export type AuditResult = "success" | "denied" | "error";
 
 // ─────────────────────────────────────────────── results ──
 export interface ResultRow {
@@ -1248,7 +1266,12 @@ export interface StreamEventMap {
   sim: SimState;
   /** root or child PipelineJob status change */
   job: PipelineJobTransition;
-  hello: { sim: SimState; serverTime: number };
+  /**
+   * First message of every connection. `lastEventId` = SSE id at connect time; `resumed` = the server
+   * replayed missed messages after the client's Last-Event-ID; `resync` = it could not (unknown or
+   * expired id) and the client should refetch its data.
+   */
+  hello: { sim: SimState; serverTime: number; lastEventId?: string; resumed?: boolean; resync?: boolean };
 }
 export type StreamEventType = keyof StreamEventMap;
 
@@ -1264,8 +1287,10 @@ export interface ApiErrorBody {
   error: {
     /** machine code, e.g. INVALID_ARGUMENT, NOT_FOUND, CONFLICT, FORBIDDEN */
     code: string;
-    /** Korean, user-presentable */
+    /** user-presentable, in the request's locale (cookie console_locale → Accept-Language → default) */
     message: string;
+    /** `errors.*` message key when the message came from one (e.g. "domain.workflowNotFound") */
+    key?: string;
     details?: unknown;
   };
 }
@@ -1535,7 +1560,7 @@ export interface DomainConfig {
   baseNow: string;
   /** days of seeded history (30d preset) */
   historyDays: number;
-  buckets: { input: string; artifacts: string; results: string };
+  buckets: { input: string; artifacts: string; results: string; /** raw utterance audio referenced by input JSONL `audio_uri` (read by Preprocess, not listed in the GCS browser) */ audio?: string };
   bigquery: { dataset: string; resultsTable: string; eventsTable: string };
   languages: DomainLanguage[];
   capacity: {

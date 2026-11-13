@@ -28,7 +28,7 @@ export const CATEGORIES: FailureCategory[] = [
 
 export function getDeadLetterOr404(id: string): DeadLetter {
   const d = getEngine().getDeadLetter(id);
-  if (!d) throw notFound(`DLQ 항목을 찾을 수 없습니다: ${id}`);
+  if (!d) throw notFound({ key: "domain.dlqNotFound", vars: { id } });
   return d;
 }
 
@@ -104,18 +104,18 @@ export function deadLetterDetail(id: string): DeadLetterDetail {
 
 export function validateVersion(v: string | undefined): string | undefined {
   if (v === undefined) return undefined;
-  if (!PIPELINE_VERSIONS.includes(v)) throw badRequest(`알 수 없는 pipeline_version입니다: ${v}`, { allowed: PIPELINE_VERSIONS });
+  if (!PIPELINE_VERSIONS.includes(v)) throw badRequest({ key: "domain.unknownVersion", vars: { version: v } }, { allowed: PIPELINE_VERSIONS });
   return v;
 }
 
 export function replayOne(id: string, operatorId: string, reason: string, version?: string, priority?: number): ReplayResult {
   const e = getEngine();
   const d = getDeadLetterOr404(id);
-  if (d.status === "REPLAYING") throw conflict(`이미 Replay가 진행 중입니다: ${d.dead_letter_id}`);
-  if (d.status === "REPLAYED") throw conflict(`이미 Replay가 완료된 항목입니다: ${d.dead_letter_id}`);
-  if (d.status === "CLOSED") throw conflict(`종료 처리된 항목은 Replay할 수 없습니다: ${d.dead_letter_id}`);
+  if (d.status === "REPLAYING") throw conflict({ key: "domain.dlqReplayInProgress", vars: { id: d.dead_letter_id } });
+  if (d.status === "REPLAYED") throw conflict({ key: "domain.dlqAlreadyReplayed", vars: { id: d.dead_letter_id } });
+  if (d.status === "CLOSED") throw conflict({ key: "domain.dlqClosed", vars: { id: d.dead_letter_id } });
   const r = e.actions.replayDeadLetter(d.dead_letter_id, { operator: operatorId, reason, pipelineVersion: version, priority });
-  if (!r) throw conflict("Replay를 시작하지 못했습니다.");
+  if (!r) throw conflict({ key: "domain.replayFailed" });
   return { deadLetter: r.deadLetter, replay: r.replay, workflow: toSummary(r.workflow) };
 }
 
@@ -135,17 +135,17 @@ export function replayBatch(ids: string[], operatorId: string, reason: string, v
 export function closeOne(id: string, operatorId: string, resolution: string): DeadLetter {
   const e = getEngine();
   const d = getDeadLetterOr404(id);
-  if (d.status === "CLOSED") throw conflict(`이미 종료 처리된 항목입니다: ${d.dead_letter_id}`);
-  if (d.status === "REPLAYING") throw conflict(`Replay 진행 중인 항목은 종료할 수 없습니다: ${d.dead_letter_id}`);
+  if (d.status === "CLOSED") throw conflict({ key: "domain.dlqAlreadyClosed", vars: { id: d.dead_letter_id } });
+  if (d.status === "REPLAYING") throw conflict({ key: "domain.dlqCloseWhileReplaying", vars: { id: d.dead_letter_id } });
   const r = e.actions.closeDeadLetter(d.dead_letter_id, { operator: operatorId, resolution });
-  if (!r) throw conflict("종료 처리하지 못했습니다.");
+  if (!r) throw conflict({ key: "domain.closeFailed" });
   return r;
 }
 
 export function assignOne(id: string, actorId: string, assigneeId: string | null, reason: string | null): DeadLetter {
   const e = getEngine();
   const d = getDeadLetterOr404(id);
-  if (assigneeId && !e._internal.OP[assigneeId]) throw badRequest(`알 수 없는 운영자 ID입니다: ${assigneeId}`, { field: "operator_id" });
+  if (assigneeId && !e._internal.OP[assigneeId]) throw badRequest({ key: "domain.unknownOperator", vars: { id: assigneeId } }, { field: "operator_id" });
   const before = d.assigned_operator;
   const r = e.actions.assignDeadLetter(d.dead_letter_id, assigneeId)!;
   const t = e.now();

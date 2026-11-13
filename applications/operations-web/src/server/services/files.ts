@@ -147,7 +147,7 @@ export function fileSearch(req: NextRequest): FileSearchResult {
   const stage = q.enumList("stage", STAGE_IDS);
   const bucket = q.str("bucket");
   const e = getEngine();
-  if (bucket && !e.gcs.buckets.some((b) => b.name === bucket)) throw badRequest(`알 수 없는 버킷입니다: ${bucket}`, { allowed: e.gcs.buckets.map((b) => b.name) });
+  if (bucket && !e.gcs.buckets.some((b) => b.name === bucket)) throw badRequest({ key: "domain.unknownBucket", vars: { name: bucket } }, { allowed: e.gcs.buckets.map((b) => b.name) });
   const language = q.enumList("language", LANG_CODES);
   const limit = q.int("limit", { min: 1, max: 1000, def: 100 })!;
   const all = searchRecords({ q: text, range, stage, bucket, language });

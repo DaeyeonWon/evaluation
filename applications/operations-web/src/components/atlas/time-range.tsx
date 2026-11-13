@@ -5,6 +5,8 @@
  *   <RangePicker />                         header control: presets, custom KST from/to, data window ruler
  *   const label = useRangeLabel();          localized { title, span } for the current URL range
  *   const href = useRangeHref();            href("/explorer?status=X") → keeps ?range= / ?from=&to=
+ *   const cover = useCoverHref();           cover("/results?workflow_id=…", wf.created_at, wf.completed_at)
+ *                                           → keeps the range, widened to include [from, to] if needed
  *   <RangeEmpty title=… />                  range-aware empty state ("no items in <label>")
  *
  * The range lives in the URL (useTimeRange → ?range=7d | ?from=…&to=…; "today" is omitted), so it
@@ -19,7 +21,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { useFmt, useT } from "@/i18n/client";
 import { api, useApi, useSimNow, useTimeRange } from "@/lib/client";
 import { kstParts } from "@/lib/format";
-import { PRESET_IDS, kstDayStart, resolveRange, type RangePreset, type RangeSpec, type ResolvedRange } from "@/lib/time-range";
+import { PRESET_IDS, kstDayStart, resolveRange, serializeRange, type RangePreset, type RangeSpec, type ResolvedRange } from "@/lib/time-range";
 import { useReducedMotionSafe } from "./ui";
 
 const DAY = 86_400_000;
@@ -119,6 +121,29 @@ export function useRangeQs(): string {
 export function useRangeHref(): (href: string) => string {
   const q = useRangeQs();
   return useCallback((href: string) => withRange(href, q), [q]);
+}
+
+/**
+ * `href` + a range that is guaranteed to contain [from, to] (e.g. one Workflow's created..completed),
+ * so a link to that Workflow's results is never empty. Inside the current range → same as
+ * useRangeHref(); otherwise → a custom range = union of the current range and [from, to], left open
+ * ("until now") when the current range is live.
+ */
+export function useCoverHref(): (href: string, from: number, to?: number | null) => string {
+  const tr = useTimeRange();
+  const q = useRangeQs();
+  const now = useSimNow();
+  const { from: cf, to: ct } = tr.resolved;
+  return useCallback(
+    (href: string, from: number, to?: number | null) => {
+      const end = to ?? now;
+      if (from >= cf && end <= ct) return withRange(href, q);
+      const live = ct >= now - 60_000;
+      const spec: RangeSpec = { kind: "custom", from: Math.min(cf, from), to: live ? Infinity : Math.max(ct, end + 60_000) };
+      return withRange(href, new URLSearchParams(serializeRange(spec)).toString());
+    },
+    [cf, ct, now, q],
+  );
 }
 
 /** Range-aware empty state: names the range and optionally hints at items outside it. */

@@ -144,6 +144,12 @@ const config = {
     title: "감사 로그",
     search: "감사 로그 검색",
     searchPh: "Action, 대상, 운영자, 사유 검색",
+    result: {
+      success: "Success",
+      denied: "Denied",
+      error: "Error",
+    },
+    idempotencyKey: "요청의 Idempotency-Key",
     cols: {
       time: "시각",
       actor: "운영자",

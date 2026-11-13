@@ -11,7 +11,7 @@ export const GET = handle(() => ok(globalCapacity()));
 export const PATCH = handle(async (req) =>
   idempotent(req, async () => {
     const op = resolveOperator(req);
-    requirePermission(op, "config.write");
+    requirePermission(op, "capacity:write");
     const body = await readJson(req);
     const dryRun = Query.of(req).bool("dry_run") ?? false;
     return ok(patchGlobalCapacity(body, op.id, dryRun));

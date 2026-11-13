@@ -1,6 +1,10 @@
 /**
- * Route-handler helpers: JSON responses, Korean 4xx errors, query parsing, operator/RBAC,
+ * Route-handler helpers: JSON responses, localized 4xx errors, query parsing, operator/RBAC,
  * idempotency. Server-only.
+ *
+ * Errors: throw badRequest/notFound/… with either a plain string (sent as-is) or an `errors.*`
+ * message key `{ key, vars }`. errorResponse() translates keys into the request's locale
+ * (cookie `console_locale` → Accept-Language → default) and echoes the key in the body.
  *
  * Identity: the acting operator comes from the SERVER-SIDE session (src/server/auth — signed cookie in
  * mock mode, IAP / trusted OIDC header otherwise). The legacy client `x-operator` header is ignored.
@@ -14,23 +18,31 @@ import { sessionFromRequest } from "./auth/core";
 import type { Session } from "./auth/types";
 import { OPERATIONAL_PERMISSIONS } from "./auth/policy";
 import { getRuntime } from "./mock/runtime";
+import { recordAudit, requestAuditMeta } from "./services/audit";
+import { translatorFor, tFor } from "@/i18n/request";
+import type { Translator } from "@/i18n";
+
+/** A var value may itself be a message key (resolved with the same translator), e.g. { key: "validation.reasonLabel" }. */
+export type ErrorVars = Record<string, string | number | null | undefined | { key: string }>;
+/** Plain text (sent as-is) or a key under the `errors` namespace. */
+export type ErrorText = string | { key: string; vars?: ErrorVars };
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     public code: string,
-    message: string,
+    public text: ErrorText,
     public details?: unknown,
   ) {
-    super(message);
+    super(typeof text === "string" ? text : text.key);
   }
 }
 
-export const badRequest = (message: string, details?: unknown) => new ApiError(400, "INVALID_ARGUMENT", message, details);
-export const notFound = (message: string) => new ApiError(404, "NOT_FOUND", message);
-export const conflict = (message: string, details?: unknown) => new ApiError(409, "CONFLICT", message, details);
-export const forbidden = (message: string) => new ApiError(403, "FORBIDDEN", message);
-export const unauthorized = (message = "로그인이 필요합니다.") => new ApiError(401, "UNAUTHENTICATED", message);
+export const badRequest = (m: ErrorText, details?: unknown) => new ApiError(400, "INVALID_ARGUMENT", m, details);
+export const notFound = (m: ErrorText, details?: unknown) => new ApiError(404, "NOT_FOUND", m, details);
+export const conflict = (m: ErrorText, details?: unknown) => new ApiError(409, "CONFLICT", m, details);
+export const forbidden = (m: ErrorText, details?: unknown) => new ApiError(403, "FORBIDDEN", m, details);
+export const unauthorized = (m: ErrorText = { key: "code.UNAUTHENTICATED" }) => new ApiError(401, "UNAUTHENTICATED", m);
 
 const NO_STORE = { "cache-control": "no-store" };
 
@@ -38,8 +50,22 @@ export function ok<T>(data: T, status = 200): Response {
   return Response.json(data, { status, headers: NO_STORE });
 }
 
-export function errorResponse(e: ApiError): Response {
-  const body: ApiErrorBody = { error: { code: e.code, message: e.message, ...(e.details !== undefined ? { details: e.details } : {}) } };
+/** Translate an ErrorText with an `errors` translator (unknown key → the code's fallback text). */
+export function errorMessage(text: ErrorText, code: string, t: Pick<Translator, "dynamic">): string {
+  if (typeof text === "string") return text;
+  const vars = text.vars
+    ? Object.fromEntries(Object.entries(text.vars).map(([k, v]) => [k, v && typeof v === "object" ? t.dynamic(v.key, undefined, v.key) : v]))
+    : undefined;
+  return t.dynamic(text.key, vars, t.dynamic(`code.${code}`, undefined, code));
+}
+
+/** JSON error body in the request's locale (ko without a request). */
+export function errorResponse(e: ApiError, req?: Request): Response {
+  const t = req ? tFor(req, "errors") : translatorFor("ko", "errors");
+  const key = typeof e.text === "string" ? undefined : e.text.key;
+  const body: ApiErrorBody = {
+    error: { code: e.code, message: errorMessage(e.text, e.code, t), ...(key ? { key } : {}), ...(e.details !== undefined ? { details: e.details } : {}) },
+  };
   return Response.json(body, { status: e.status, headers: NO_STORE });
 }
 
@@ -52,12 +78,13 @@ const requestScope = new AsyncLocalStorage<{ req: NextRequest }>();
 export function handle<P = Record<string, never>>(fn: (req: NextRequest, ctx: Ctx<P>) => Promise<Response> | Response) {
   return async (req: NextRequest, ctx: Ctx<P>): Promise<Response> => {
     try {
-      getRuntime();
+      // engine actions inside this request record its Idempotency-Key / User-Agent / IP in the audit log
+      getRuntime().engine._internal.setAuditMeta(currentAuditMeta);
       return await requestScope.run({ req }, () => fn(req, ctx));
     } catch (e) {
-      if (e instanceof ApiError) return errorResponse(e);
+      if (e instanceof ApiError) return errorResponse(e, req);
       console.error("[api]", req.method, req.nextUrl.pathname, e);
-      return errorResponse(new ApiError(500, "INTERNAL", "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."));
+      return errorResponse(new ApiError(500, "INTERNAL", { key: "code.INTERNAL" }), req);
     }
   };
 }
@@ -84,31 +111,31 @@ export class Query {
     const l = this.list(name);
     if (!l) return undefined;
     const bad = l.filter((v) => !allowed.includes(v as T));
-    if (bad.length) throw badRequest(`${label} 값이 올바르지 않습니다: ${bad.join(", ")}`, { allowed });
+    if (bad.length) throw badRequest({ key: "validation.enumInvalid", vars: { name: label, values: bad.join(", ") } }, { allowed });
     return l as T[];
   }
   enumOne<T extends string>(name: string, allowed: readonly T[], def?: T): T | undefined {
     const v = this.str(name);
     if (v == null) return def;
-    if (!allowed.includes(v as T)) throw badRequest(`${name} 값이 올바르지 않습니다: ${v}`, { allowed });
+    if (!allowed.includes(v as T)) throw badRequest({ key: "validation.enumInvalid", vars: { name, values: v } }, { allowed });
     return v as T;
   }
   int(name: string, opts: { min?: number; max?: number; def?: number } = {}): number | undefined {
     const v = this.str(name);
     if (v == null) return opts.def;
     const n = Number(v);
-    if (!Number.isInteger(n)) throw badRequest(`${name}는 정수여야 합니다.`);
-    if (opts.min != null && n < opts.min) throw badRequest(`${name}는 ${opts.min} 이상이어야 합니다.`);
-    if (opts.max != null && n > opts.max) throw badRequest(`${name}는 ${opts.max} 이하여야 합니다.`);
+    if (!Number.isInteger(n)) throw badRequest({ key: "validation.integer", vars: { name } });
+    if (opts.min != null && n < opts.min) throw badRequest({ key: "validation.min", vars: { name, min: opts.min } });
+    if (opts.max != null && n > opts.max) throw badRequest({ key: "validation.max", vars: { name, max: opts.max } });
     return n;
   }
   num(name: string, opts: { min?: number; max?: number } = {}): number | undefined {
     const v = this.str(name);
     if (v == null) return undefined;
     const n = Number(v);
-    if (!Number.isFinite(n)) throw badRequest(`${name}는 숫자여야 합니다.`);
-    if (opts.min != null && n < opts.min) throw badRequest(`${name}는 ${opts.min} 이상이어야 합니다.`);
-    if (opts.max != null && n > opts.max) throw badRequest(`${name}는 ${opts.max} 이하여야 합니다.`);
+    if (!Number.isFinite(n)) throw badRequest({ key: "validation.number", vars: { name } });
+    if (opts.min != null && n < opts.min) throw badRequest({ key: "validation.min", vars: { name, min: opts.min } });
+    if (opts.max != null && n > opts.max) throw badRequest({ key: "validation.max", vars: { name, max: opts.max } });
     return n;
   }
   bool(name: string): boolean | undefined {
@@ -116,14 +143,14 @@ export class Query {
     if (v == null) return undefined;
     if (["1", "true", "yes", "y"].includes(v.toLowerCase())) return true;
     if (["0", "false", "no", "n"].includes(v.toLowerCase())) return false;
-    throw badRequest(`${name}는 true/false 여야 합니다.`);
+    throw badRequest({ key: "validation.boolean", vars: { name } });
   }
   /** epoch ms number OR ISO-8601 string */
   time(name: string): number | undefined {
     const v = this.str(name);
     if (v == null) return undefined;
     const n = /^\d+$/.test(v) ? Number(v) : Date.parse(v);
-    if (!Number.isFinite(n)) throw badRequest(`${name}는 epoch ms 또는 ISO-8601 시각이어야 합니다.`);
+    if (!Number.isFinite(n)) throw badRequest({ key: "validation.timestamp", vars: { name } });
     return n;
   }
   page(defSize = 50, maxSize = 500) {
@@ -144,38 +171,41 @@ export async function readJson(req: NextRequest): Promise<Record<string, unknown
     if (!v || typeof v !== "object" || Array.isArray(v)) throw new Error("not an object");
     return v as Record<string, unknown>;
   } catch {
-    throw badRequest("요청 본문이 올바른 JSON 객체가 아닙니다.");
+    throw badRequest({ key: "validation.invalidJson" });
   }
 }
 
+/** Field label for V.*: the field name, or an `errors.*` key resolved in the request locale. */
+type Label = string | { key: string };
+
 export const V = {
-  int(body: Record<string, unknown>, key: string, min: number, max: number, label = key): number | undefined {
+  int(body: Record<string, unknown>, key: string, min: number, max: number, label: Label = key): number | undefined {
     const v = body[key];
     if (v === undefined || v === null) return undefined;
-    if (typeof v !== "number" || !Number.isInteger(v)) throw badRequest(`${label}는 정수여야 합니다.`, { field: key });
-    if (v < min || v > max) throw badRequest(`${label}는 ${min}~${max} 범위여야 합니다.`, { field: key, min, max });
+    if (typeof v !== "number" || !Number.isInteger(v)) throw badRequest({ key: "validation.integer", vars: { name: label } }, { field: key });
+    if (v < min || v > max) throw badRequest({ key: "validation.range", vars: { name: label, min, max } }, { field: key, min, max });
     return v;
   },
-  bool(body: Record<string, unknown>, key: string, label = key): boolean | undefined {
+  bool(body: Record<string, unknown>, key: string, label: Label = key): boolean | undefined {
     const v = body[key];
     if (v === undefined || v === null) return undefined;
-    if (typeof v !== "boolean") throw badRequest(`${label}는 true/false 여야 합니다.`, { field: key });
+    if (typeof v !== "boolean") throw badRequest({ key: "validation.boolean", vars: { name: label } }, { field: key });
     return v;
   },
-  str(body: Record<string, unknown>, key: string, opts: { required?: boolean; max?: number; label?: string } = {}): string | undefined {
+  str(body: Record<string, unknown>, key: string, opts: { required?: boolean; max?: number; label?: Label } = {}): string | undefined {
     const v = body[key];
     const label = opts.label ?? key;
     if (v === undefined || v === null || (typeof v === "string" && !v.trim())) {
-      if (opts.required) throw badRequest(`${label}을(를) 입력해 주세요.`, { field: key });
+      if (opts.required) throw badRequest({ key: "validation.required", vars: { name: label } }, { field: key });
       return undefined;
     }
-    if (typeof v !== "string") throw badRequest(`${label}는 문자열이어야 합니다.`, { field: key });
-    if (opts.max && v.length > opts.max) throw badRequest(`${label}는 ${opts.max}자 이하여야 합니다.`, { field: key });
+    if (typeof v !== "string") throw badRequest({ key: "validation.string", vars: { name: label } }, { field: key });
+    if (opts.max && v.length > opts.max) throw badRequest({ key: "validation.maxLength", vars: { name: label, max: opts.max } }, { field: key });
     return v.trim();
   },
   /** change reason — required for every state-changing call (plan §6.3 / §8 audit) */
   reason(body: Record<string, unknown>, key = "reason"): string {
-    return V.str(body, key, { required: true, max: 500, label: "변경 사유(reason)" })!;
+    return V.str(body, key, { required: true, max: 500, label: { key: "validation.reasonLabel" } })!;
   },
 };
 
@@ -212,29 +242,46 @@ export function resolveOperator(req: NextRequest): Operator {
   return op;
 }
 
-function currentPath(): string {
-  return requestScope.getStore()?.req.nextUrl.pathname ?? "";
+/** Audit metadata of the request being handled (null outside handle()). */
+function currentAuditMeta() {
+  const r = requestScope.getStore()?.req;
+  return r ? requestAuditMeta(r) : null;
+}
+
+/** Record a PERMISSION_DENIED audit entry for the current request (route-level 403). */
+function auditDenied(op: Operator, required: string) {
+  const r = requestScope.getStore()?.req;
+  recordAudit({
+    action: "PERMISSION_DENIED",
+    actor: op.id,
+    actorName: op.name,
+    role: op.role,
+    target: r ? `${r.method} ${r.nextUrl.pathname}` : "-",
+    after: { required },
+    result: "denied",
+    req: r,
+  });
 }
 
 /**
- * Throws 403 unless the operator holds `key`. Accepts console permissions (`capacity:write`, …) and
- * legacy catalog keys (`config.write`, `cancel`, … — mapped via LEGACY_PERMISSION_ALIASES). On the
- * capacity endpoints the legacy `config.write` key means `capacity:write`.
+ * Throws 403 (and audits the denial) unless the operator holds `key` — or, for an array, at least
+ * one of the keys. Route handlers pass the canonical console permissions used by
+ * src/server/auth/policy.ts (`capacity:write`, `config:write`, `dlq:replay`, `workflow:cancel`,
+ * `sim:control`, …). Legacy catalog keys (`config.write`, `cancel`, …) are still mapped through
+ * canonicalPermission() for backward compatibility of external callers only.
  */
-export function requirePermission(op: Operator, key: string): void {
-  let perm = canonicalPermission(key);
-  if (key === "config.write" && /^\/api\/v1\/(languages\/[^/]+\/capacity|capacity\/global)$/.test(currentPath())) perm = "capacity:write";
+export function requirePermission(op: Operator, key: string | readonly string[]): void {
+  const wanted = (typeof key === "string" ? [key] : [...key]).map(canonicalPermission);
   const perms = permissionsOfOperator(op);
-  if (hasPermission(perms, perm)) return;
-  const label = ROLE_PERMISSIONS.find((r) => r.key === key)?.permission ?? perm;
-  throw forbidden(`'${label}' 권한이 없습니다 (${op.name} · ${op.role}). 필요 권한: ${perm}`);
+  if (wanted.some((p) => hasPermission(perms, p))) return;
+  const permission = wanted.join(" | ");
+  auditDenied(op, permission);
+  throw forbidden({ key: "permission.denied", vars: { action: permission, operator: op.name, role: op.role, permission } });
 }
 
-/** Alert ack/resolve and other operational actions without a catalog permission key: any operational write permission. */
-export function requireOperatorRole(op: Operator, what: string): void {
-  const perms = permissionsOfOperator(op);
-  if (OPERATIONAL_PERMISSIONS.some((p) => hasPermission(perms, p))) return;
-  throw forbidden(`'${what}' 권한이 없습니다 (${op.name} · ${op.role}). Operator 이상 필요합니다.`);
+/** @deprecated use requirePermission(op, OPERATIONAL_PERMISSIONS) — any operational write permission. */
+export function requireOperatorRole(op: Operator): void {
+  requirePermission(op, OPERATIONAL_PERMISSIONS);
 }
 
 function permissionsOfOperator(op: Operator): string[] {
@@ -261,8 +308,10 @@ export function permissionsOf(op: Operator): Record<string, boolean> {
 // ───────────────────────────────────────── idempotency ──
 const IDEM_TTL = 10 * 60_000;
 /**
- * Optional `Idempotency-Key` header on POST/PATCH: the first response for a key is cached for
- * 10 minutes and replayed verbatim (with `idempotent-replay: true`) for retries.
+ * Optional `Idempotency-Key` header on POST/PATCH: the first 2xx/4xx JSON response for a key
+ * (including ApiErrors thrown by the handler) is cached for 10 minutes and replayed verbatim (with
+ * `idempotent-replay: true`) for retries. 5xx responses are not stored. The client keeps one key per
+ * user action until it gets a 2xx/4xx (src/lib/client/api.ts).
  */
 export async function idempotent(req: NextRequest, fn: () => Promise<Response>): Promise<Response> {
   const key = req.headers.get("idempotency-key");
@@ -273,12 +322,21 @@ export async function idempotent(req: NextRequest, fn: () => Promise<Response>):
   const cacheKey = `${req.method} ${req.nextUrl.pathname} ${key}`;
   const hit = rt.idempotency.get(cacheKey);
   if (hit) return Response.json(hit.body, { status: hit.status, headers: { ...NO_STORE, "idempotent-replay": "true" } });
-  const res = await fn();
+  let res: Response;
   try {
-    const body = await res.clone().json();
-    rt.idempotency.set(cacheKey, { at: now, status: res.status, body });
-  } catch {
-    /* non-JSON: not cached */
+    res = await fn();
+  } catch (e) {
+    if (!(e instanceof ApiError)) throw e; // unexpected → handle() answers 500, nothing cached
+    res = errorResponse(e, req);
+  }
+  // 2xx and 4xx are final answers for this key; 5xx is not stored so a retry can succeed
+  if (res.status < 500) {
+    try {
+      const body = await res.clone().json();
+      rt.idempotency.set(cacheKey, { at: now, status: res.status, body });
+    } catch {
+      /* non-JSON: not cached */
+    }
   }
   return res;
 }

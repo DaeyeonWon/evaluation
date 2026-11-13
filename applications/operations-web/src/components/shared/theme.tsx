@@ -14,7 +14,7 @@
  * data-active attributes and accepts className; there is no built-in visual style.
  */
 import { Monitor, Moon, Sun } from "lucide-react";
-import { useEffect, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useSyncExternalStore, type ReactNode } from "react";
 import clsx from "clsx";
 import { useT } from "@/i18n/client";
 
@@ -92,10 +92,32 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-/** Inline, render-blocking script for <head>: sets data-theme before paint. */
+const THEME_CODE = `(function(){try{var p=localStorage.getItem('${KEY}');if(p!=='light'&&p!=='dark')p='system';var d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;e.dataset.theme=d?'dark':'light';e.dataset.themePref=p;e.style.colorScheme=d?'dark':'light';}catch(_){}})();`;
+
+const noopSubscribe = () => () => {};
+
+/**
+ * Inline, render-blocking script for <head>: sets data-theme before paint.
+ *
+ * The <script> exists only in server HTML (and during hydration, so the markup matches). When React
+ * renders the root on the client WITHOUT hydrating — Next does that for `forbidden()` / `notFound()`
+ * thrown before the shell (the `__next_error__` shell) — a client-created <script> never runs and React
+ * warns "Encountered a script tag…". In that path we render nothing and apply the theme in a layout
+ * effect instead, which still runs before the first paint of the client-rendered tree.
+ */
 export function ThemeScript() {
-  const code = `(function(){try{var p=localStorage.getItem('${KEY}');if(p!=='light'&&p!=='dark')p='system';var d=p==='dark'||(p==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);var e=document.documentElement;e.dataset.theme=d?'dark':'light';e.dataset.themePref=p;e.style.colorScheme=d?'dark':'light';}catch(_){}})();`;
-  return <script dangerouslySetInnerHTML={{ __html: code }} />;
+  // true while server-rendering and hydrating; false for a client-only render and after hydration
+  const fromServer = useSyncExternalStore(noopSubscribe, () => false, () => true);
+  useLayoutEffect(() => {
+    const el = document.documentElement;
+    if (el.dataset.theme) return;
+    const p = readPref();
+    const dark = p === "dark" || (p === "system" && systemDark());
+    el.dataset.theme = dark ? "dark" : "light";
+    el.dataset.themePref = p;
+    el.style.colorScheme = dark ? "dark" : "light";
+  }, []);
+  return fromServer ? <script dangerouslySetInnerHTML={{ __html: THEME_CODE }} suppressHydrationWarning /> : null;
 }
 
 export function ThemeToggle({ className, iconSize = 16, title }: { className?: string; iconSize?: number; title?: string }) {

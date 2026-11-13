@@ -9,9 +9,9 @@ export const POST = handle<{ id: string }>(async (req, ctx) =>
   idempotent(req, async () => {
     const { id } = await ctx.params;
     const op = resolveOperator(req);
-    requirePermission(op, "replay.request");
+    requirePermission(op, "dlq:replay");
     const body = await readJson(req);
-    if (!("operator_id" in body)) throw badRequest("operator_id를 지정해 주세요 (담당 해제는 null).");
+    if (!("operator_id" in body)) throw badRequest({ key: "domain.operatorIdRequired" }, { field: "operator_id" });
     const assignee = body.operator_id === null ? null : V.str(body, "operator_id", { required: true })!;
     return ok(assignOne(decodeURIComponent(id), op.id, assignee, V.str(body, "reason") ?? null));
   }),

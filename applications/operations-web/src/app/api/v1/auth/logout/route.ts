@@ -1,5 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getConsoleConfig } from "@/config";
+import { legacyRoleOf } from "@/config/schema";
+import { sessionFromRequest } from "@/server/auth/core";
+import { recordAudit } from "@/server/services/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +22,8 @@ export async function POST(req: NextRequest) {
   const cfg = getConsoleConfig().auth;
   const redirect = cfg.mode === "iap" ? "/_gcp_iap/clear_login_cookie" : "/login";
   const isForm = (req.headers.get("content-type") ?? "").includes("form");
+  const s = sessionFromRequest(req);
+  if (s) recordAudit({ action: "AUTH_LOGOUT", actor: s.user.id, actorName: s.user.name, role: legacyRoleOf(s.permissions), target: "session", after: { mode: cfg.mode }, req });
   const res = isForm
     ? seeOther(redirect)
     : NextResponse.json({ ok: true, redirect }, { headers: { "cache-control": "no-store" } });

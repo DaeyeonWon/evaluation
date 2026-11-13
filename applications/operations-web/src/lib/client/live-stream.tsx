@@ -7,13 +7,22 @@
  *   useStreamEvent("transition", (t) => flash(t.workflow_id));   // subscribe to a message type
  *   const { subscribe } = useLiveStream();                // imperative: subscribe(type, cb) → unsubscribe
  *
- * Reconnects with exponential backoff (1s → 30s). Snapshot/status are exposed through
+ * Reconnect: transient drops use the browser's native EventSource reconnect (server `retry: 3000`),
+ * which sends `Last-Event-ID`, so the server replays what was missed (ids "<epoch>-<seq>", see
+ * src/app/api/v1/stream/route.ts). Only when the EventSource gives up (readyState CLOSED, e.g. an
+ * HTTP error status) is it recreated manually with exponential backoff (1s → 30s) and
+ * `?last_event_id=<last seen id>` so backfill still works. A `hello` with `resync: true` (id unknown /
+ * expired) revalidates every useApi query. EventSource can't see HTTP status, so after a connection
+ * error the store asks /api/v1/auth/session; if the session is gone it redirects to /login?next=…
+ * (src/lib/client/auth-redirect.ts). Snapshot/status are exposed through
  * useSyncExternalStore so components re-render only when they change.
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { BASE_NOW } from "@/lib/catalog";
 import type { StreamEventMap, StreamEventType, TickSnapshot } from "@/lib/types";
 import { API_BASE } from "./api";
+import { redirectToLogin, sessionExpired } from "./auth-redirect";
+import { revalidateKey } from "./use-api";
 
 export type StreamStatus = "idle" | "connecting" | "open" | "reconnecting" | "closed";
 
@@ -28,6 +37,8 @@ class LiveStreamStore {
   private retry = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private refs = 0;
+  /** last SSE id seen (for ?last_event_id= when the EventSource has to be recreated) */
+  private lastEventId: string | null = null;
   snapshot: TickSnapshot | null = null;
   status: StreamStatus = "idle";
   lastMessageAt = 0;
@@ -85,7 +96,8 @@ class LiveStreamStore {
   private connect() {
     if (typeof window === "undefined" || this.es) return;
     this.setStatus(this.retry ? "reconnecting" : "connecting");
-    const es = new EventSource(this.url);
+    const url = this.lastEventId ? `${this.url}${this.url.includes("?") ? "&" : "?"}last_event_id=${encodeURIComponent(this.lastEventId)}` : this.url;
+    const es = new EventSource(url);
     this.es = es;
     es.onopen = () => {
       this.retry = 0;
@@ -93,15 +105,29 @@ class LiveStreamStore {
     };
     for (const t of STREAM_TYPES) {
       es.addEventListener(t, (ev) => {
+        const me = ev as MessageEvent<string>;
+        if (me.lastEventId) this.lastEventId = me.lastEventId;
+        let data: unknown;
         try {
-          this.dispatch(t, JSON.parse((ev as MessageEvent<string>).data));
+          data = JSON.parse(me.data);
         } catch (e) {
           console.error("[live-stream parse]", t, e);
+          return;
         }
+        // the server couldn't replay what we missed → refetch everything that is mounted
+        if (t === "hello" && (data as { resync?: boolean }).resync) revalidateKey(() => true);
+        this.dispatch(t, data);
       });
     }
     es.onerror = () => {
-      // manual backoff instead of the browser's fixed retry
+      // the stream 401s when the session expires; EventSource only reports "error"
+      void sessionExpired(API_BASE).then((gone) => gone && redirectToLogin());
+      if (es.readyState !== EventSource.CLOSED) {
+        // transient drop: the browser reconnects by itself and sends Last-Event-ID
+        this.setStatus("reconnecting");
+        return;
+      }
+      // hard failure (HTTP error / bad content type): recreate with backoff + ?last_event_id=
       es.close();
       this.es = null;
       if (this.refs === 0) return this.setStatus("closed");

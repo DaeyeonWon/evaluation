@@ -192,6 +192,8 @@ const pipelines = {
     runningBadge: "{count} RUNNING",
     retryRate: "Retry율 {pct}",
     vertexFooter: "GPU {gpu} L4 · 평가 중 발화 {utt} · 평균 {avg} · 자식 Job {children}",
+    nodeRunning: "이 노드에서 실행 중: {count}",
+    tokensHidden: "배치 토큰은 모든 단계를 갖춘 root Pipeline DAG에만 표시됩니다 · 노드별 실행 수 (전체 {count})",
     innerDag: "PipelineJob DAG · {id}@{version} · 노드별 실행 중",
     pickerAria: "Pipeline별 실행 중 Job 수 · 선택하면 내부 DAG를 그립니다",
     pickAria: "{id}: 실행 중 {count} · 내부 DAG 보기",

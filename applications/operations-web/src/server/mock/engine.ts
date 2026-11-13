@@ -167,7 +167,7 @@ export function createMockEngine(root, opts) {
 
   // ───────────────────────────────────────────── config ──
   var PROJECT = DOMAIN.project.id, PROJECT_NUM = DOMAIN.project.number, REGION = DOMAIN.project.region;
-  var BUCKET_IN = DOMAIN.buckets.input, BUCKET_ART = DOMAIN.buckets.artifacts, BUCKET_RES = DOMAIN.buckets.results;
+  var BUCKET_IN = DOMAIN.buckets.input, BUCKET_ART = DOMAIN.buckets.artifacts, BUCKET_RES = DOMAIN.buckets.results, BUCKET_AUDIO = DOMAIN.buckets.audio || 'bixby-utterance-audio';
   var BQ_TABLE = DOMAIN.bigquery.resultsTable;
 
   var LANGS = DOMAIN.languages;
@@ -246,7 +246,7 @@ export function createMockEngine(root, opts) {
     alertPolicies: ALERT_POLICIES,
     operators: OPERATORS,
     rolePermissions: ROLE_PERMISSIONS,
-    buckets: { input: BUCKET_IN, artifacts: BUCKET_ART, results: BUCKET_RES },
+    buckets: { input: BUCKET_IN, artifacts: BUCKET_ART, results: BUCKET_RES, audio: BUCKET_AUDIO },
     bigquery: { dataset: PROJECT + '.bixby_eval', resultsTable: BQ_TABLE, eventsTable: PROJECT + '.aipo_ops.workflow_events' },
     terraformDefaults: DOMAIN.capacity.terraformDefaults,
     runtimeConfig: null, // filled below (flattened view of live values)
@@ -776,6 +776,9 @@ export function createMockEngine(root, opts) {
     if (/RETRY|CANCEL/.test(name)) return 'WARNING';
     return 'INFO';
   }
+  // #33: seq = engine-wide monotonic emission counter; causation_id = the command id when known
+  // (replay_id for REPLAY_* events, extra.causation_id), else the previous event of the same workflow.
+  var EVENT_SEQ = 0, LAST_EV_BY_WF = {};
   function addEvent(wf, name, ts, payload, extra) {
     extra = extra || {};
     ts = Math.round(ts);
@@ -788,8 +791,11 @@ export function createMockEngine(root, opts) {
       attempt: att ? att.attempt : null, pipeline_job_id: extra.job ? extra.job.job_id : att ? att.pipeline_job_id : null,
       root_pipeline_job_id: att ? att.pipeline_job_id : null, pipeline_id: extra.job ? extra.job.pipeline_id : att ? (att.pipeline_id || null) : null,
       component: extra.component || null, node_path: extra.job ? extra.job.node_path : null,
-      correlation_id: wf ? wf.correlation_id : null, trace_id: wf ? wf.trace_id : null, payload: payload || {}
+      correlation_id: wf ? wf.correlation_id : null, trace_id: wf ? wf.trace_id : null, payload: payload || {},
+      seq: ++EVENT_SEQ,
+      causation_id: extra.causation_id !== undefined ? extra.causation_id : (payload && payload.replay_id && /^REPLAY_/.test(name)) ? payload.replay_id : (wf && LAST_EV_BY_WF[wf.workflow_id]) || null
     };
+    if (wf) LAST_EV_BY_WF[wf.workflow_id] = ev.event_id;
     if (wf) insertSorted(EVENTS_BY_WF[wf.workflow_id], ev);
     if (BUILDING) EVENTS_ALL.push(ev); else insertSorted(EVENTS_ALL, ev);
     emit('event', ev);
@@ -1669,7 +1675,8 @@ export function createMockEngine(root, opts) {
   }
   function audit(ts, actor, action, target, before, after, reason) {
     return { audit_id: 'aud-' + pad(++AUDIT_SEQ, 5), ts: Math.round(ts), timestamp: isoKst(Math.round(ts)), actor: actor, actorName: OP[actor] ? OP[actor].name : actor, role: OP[actor] ? OP[actor].role : 'System',
-      action: action, target: target, before: before, after: after, reason: reason || null, request_id: 'req-' + R.hex(12), source_ip: '10.20.' + R.int(1, 30) + '.' + R.int(2, 250) };
+      action: action, target: target, before: before, after: after, reason: reason || null, request_id: 'req-' + R.hex(12), source_ip: '10.20.' + R.int(1, 30) + '.' + R.int(2, 250),
+      idempotency_key: null, user_agent: null, result: 'success' };
   }
 
   function runSpec(s) {
@@ -2016,7 +2023,7 @@ export function createMockEngine(root, opts) {
         utterancesPerHour: hourly.utterances[l.code][hourly.ts.length - 2],
         priorityWeight: l.priorityWeight, maxStartsPerMinute: l.maxStartsPerMinute, batchSize: l.batchSize,
         backlogAlertThreshold: l.backlogAlertThreshold, p95WaitSloSec: l.p95WaitSloSec,
-        status: l.paused ? 'PAUSED' : !l.enabled ? 'DISABLED' : active >= l.maxConcurrent ? 'SATURATED' : queued.length > l.backlogAlertThreshold ? 'BACKLOGGED' : 'OK'
+        status: !l.enabled ? 'DISABLED' : l.paused ? 'PAUSED' : active >= l.maxConcurrent ? 'SATURATED' : queued.length > l.backlogAlertThreshold ? 'BACKLOGGED' : 'OK'
       };
     });
     var gActive = sum(langs.map(function (l) { return l.active; }));
@@ -2073,7 +2080,7 @@ export function createMockEngine(root, opts) {
     var h = hashStr(r.utterance_id);
     return JSON.stringify({ utterance_id: r.utterance_id, session_id: 'sess-' + (h % 0xffffff).toString(16), language: r.language, locale: LANG[r.language].locale, device_type: r.device_type,
       capsule_hint: r.capsule_id, utterance_text: r.utterance_text, asr_text: r.asr_text, asr_confidence: r.failure_reason === 'ASR_ERROR' ? round(0.41 + (h % 30) / 100, 2) : round(0.86 + (h % 13) / 100, 2),
-      expected_intent: r.intent_expected, expected_response: r.expected_response, audio_uri: 'gs://bixby-utterance-audio/' + kstDate(wf.created_at) + '/' + r.language + '/' + r.utterance_id + '.opus',
+      expected_intent: r.intent_expected, expected_response: r.expected_response, audio_uri: 'gs://' + BUCKET_AUDIO + '/' + kstDate(wf.created_at) + '/' + r.language + '/' + r.utterance_id + '.opus',
       client_ts: isoKst(wf.created_at - DAY + i * 4000 + (h % 4000)), app_version: 'bixby-' + (r.device_type === 'Galaxy S26' ? '4.2.18' : '4.1.' + (h % 9)) });
   }
   function sampleLines(wfId, n) {
@@ -2125,7 +2132,15 @@ export function createMockEngine(root, opts) {
 
   // ───────────────────────────────────────────── actions ──
   function refreshRuntime() { config.runtimeConfig = flattenRuntime(); }
-  function pushAudit(a) { AUDIT.unshift(a); emit('audit', a); return a; }
+  // request metadata (Idempotency-Key, User-Agent, client IP) for entries pushed while an API request
+  // is being handled — provider set by src/server/http.ts handle(); only fills fields still null
+  var auditMeta = null;
+  function setAuditMeta(fn) { auditMeta = typeof fn === 'function' ? fn : null; }
+  function pushAudit(a) {
+    var m = auditMeta ? auditMeta() : null;
+    if (m) for (var k in m) if (m[k] != null && (a[k] == null || k === 'source_ip' || k === 'request_id')) a[k] = m[k];
+    AUDIT.unshift(a); emit('audit', a); return a;
+  }
   function injectBatch(o) {
     o = o || {};
     var lang = o.language || G.weighted({ ko: 0.5, en: 0.25, ja: 0.15, es: 0.1 });
@@ -2141,7 +2156,7 @@ export function createMockEngine(root, opts) {
     injectBatch: injectBatch,
     cancelWorkflow: function (id, o) {
       o = o || {}; var wf = WF[id]; if (!wf || TERMINAL_STATES.indexOf(wf.status) >= 0) return null;
-      var by = o.operator || 'op-park-jh', reason = o.reason || '운영자 요청에 의한 취소', t = clock.now, from = wf.status;
+      var by = o.operator || 'op-park-jh', reason = o.reason || 'code:OPERATOR_REQUEST' /* DEFAULT_CANCEL_REASON (src/lib/reason.ts) */, t = clock.now, from = wf.status;
       if (wf.status === 'RUNNING') {
         var att = wf.attempts[wf.attempts.length - 1];
         requestCancelEvents(wf, t, by, reason);
@@ -2380,7 +2395,7 @@ export function createMockEngine(root, opts) {
     return config.global;
   };
   var _internal = {
-    audit: audit, pushAudit: pushAudit, addEvent: addEvent, addLog: addLog, refreshRuntime: refreshRuntime, emit: emit,
+    audit: audit, pushAudit: pushAudit, setAuditMeta: setAuditMeta, addEvent: addEvent, addLog: addLog, refreshRuntime: refreshRuntime, emit: emit,
     clock: clock, OP: OP, LANG: LANG, WF: WF, gcsGet: gcsGet, inputLine: inputLine, genUtterances: genUtterances, kstDayStart: kstDayStart,
     DRIFT_NOTES: DRIFT_NOTES, rowCacheStats: function () { return { workflows: ROW_CACHE.size, rows: ROW_CACHE_ROWS, max: ROW_CACHE_MAX, hits: ROW_STATS.hits, misses: ROW_STATS.misses, evictions: ROW_STATS.evictions }; },
     RESULTS_BY_WF: RESULTS_BY_WF, PIPELINE_VERSIONS: PIPELINE_VERSIONS, SERVICES: SERVICES, ALERT_POLICIES: ALERT_POLICIES,

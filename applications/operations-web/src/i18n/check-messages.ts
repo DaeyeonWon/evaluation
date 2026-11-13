@@ -1,14 +1,16 @@
 /**
  * Message parity check — run from applications/operations-web:
  *
- *   node --experimental-strip-types src/i18n/check-messages.ts      (Node ≥ 22.6; flag optional on ≥ 23.6)
+ *   npm run i18n:check          (= tsx src/i18n/check-messages.ts; no Node type-stripping warnings)
+ *   node --experimental-strip-types src/i18n/check-messages.ts      (also works on Node ≥ 22.6, but
+ *                                                                   prints the typeless-module warning)
  *
  * Asserts, for every locale directory under src/i18n/messages and every namespace:
  *   1. the same namespace files exist in every locale, and all are registered in messages/index.ts
  *   2. identical deep key sets (TypeScript `satisfies` catches this too; this catches bypasses)
  *   3. ko (the schema) has only string leaves; other locales: string or plural { one, other, zero? }
  *   4. every locale uses the same {placeholders} as ko for each key (plural `#` counts as {count})
- * Exit code 1 on any problem. Plain node: message files may only use `import type` (erased).
+ * Exit code 1 on any problem. Under plain node, message files may only use `import type` (erased).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

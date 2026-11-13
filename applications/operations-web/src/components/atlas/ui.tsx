@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useT } from "@/i18n/client";
 import { OPERATORS, ROLE_PERMISSIONS } from "@/lib/catalog";
 import { ApiClientError, useSession } from "@/lib/client";
+import { redirectToLogin } from "@/lib/client/auth-redirect";
 import type { Tone } from "@/lib/types";
 
 /* ───────────── sheet chrome ───────────── */
@@ -107,14 +108,7 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
 }
 
 /* ───────────── auth-aware errors ───────────── */
-/** Full navigation to /login?next=<current page> (session expired / missing). */
-export function redirectToLogin() {
-  if (typeof window === "undefined") return;
-  const next = window.location.pathname + window.location.search;
-  // full navigation on purpose: drop every client cache/stream tied to the expired session
-  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
-}
+export { redirectToLogin };
 const isStatus = (e: unknown, s: number) => e instanceof ApiClientError && e.status === s;
 
 /** Inline API error. 401 → redirects to /login?next=…; 403 → localized permission message. */

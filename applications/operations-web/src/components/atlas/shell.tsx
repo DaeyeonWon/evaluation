@@ -82,10 +82,11 @@ function useTabs() {
 
 function Brand() {
   const t = useT("shell");
+  const rh = useRangeHref();
   const nav = useT("nav");
   const c = useT("common");
   return (
-    <Link className="brand" href="/" aria-label={nav("home")}>
+    <Link className="brand" href={rh("/")} aria-label={nav("home")}>
       <svg viewBox="0 0 32 32" aria-hidden="true">
         <rect x="1.5" y="1.5" width="29" height="29" fill="none" stroke="currentColor" strokeWidth="1.5" />
         <path d="M6 24 L13 8 L20 24 M9 18h8" fill="none" stroke="currentColor" strokeWidth="2" />
@@ -538,7 +539,7 @@ function Palette({ onClose }: { onClose: () => void }) {
         label: w.workflow_id,
         mono: true,
         sub: [w.batch_id, statusLabel("workflow", w.status, locale), w.pipeline_id, w.pipeline_job_id].filter(Boolean).join(" · "),
-        href: `/workflows/${w.workflow_id}`,
+        href: rh(`/workflows/${w.workflow_id}`),
       }),
     );
     remote.dls.forEach((d) =>

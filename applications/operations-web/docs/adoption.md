@@ -79,7 +79,7 @@ export default defineConsoleConfig({
 
 proxy 모드 주의 사항:
 
-- 실제 API는 **FOUNDATION.md §4의 `/api/v1` 계약**(경로, 쿼리 파라미터, 응답 타입 `src/lib/types.ts`, 한국어 오류 `{ error: { code, message } }`, `Idempotency-Key`)을 구현해야 합니다.
+- 실제 API는 **`docs/data-contract.md`의 `/api/v1` 계약**(경로, 쿼리 파라미터, 응답 타입 `src/lib/types.ts`, 오류 본문 `{ error: { code, message, key? } }` — `message`는 요청 언어(`console_locale` 쿠키 → `Accept-Language`)로 현지화, `Idempotency-Key`)을 구현해야 합니다.
 - `/api/v1/auth/**`(session·login·logout)는 rewrite 대상에서 제외되어 **항상 콘솔이 직접** 응답합니다. 그 외 `/api/v1/*`는 `/api/v1/me`, `/api/v1/operators`를 포함해 모두 upstream으로 갑니다. 따라서 FastAPI는 `/me`를 `x-console-user-*` 헤더로 구현해야 합니다. 새 UI는 `/api/v1/auth/session`(`useSession()`) 사용을 권장합니다.
 - `src/proxy.ts`가 rewrite **이전에** 실행되므로 인증과 권한 표(`policy.ts`)가 proxy 모드에서도 그대로 적용됩니다.
 - 프록시는 사용자 정보를 `x-console-user-id`, `x-console-user-email`, `x-console-user-roles`, `x-console-user-permissions` 요청 헤더로 넘깁니다. 클라이언트가 보낸 같은 이름의 헤더는 제거됩니다.

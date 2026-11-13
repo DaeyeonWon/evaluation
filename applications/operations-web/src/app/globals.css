@@ -1,10 +1,10 @@
 /*
- * AIPO Operations Web — GLOBAL foundation styles (shared; variants must not edit this file).
+ * AIPO Operations Web — GLOBAL foundation styles (shared base under the Atlas skin).
  *
  * Contains: Tailwind v4 entry, theme switching variant, shared design tokens (status + language
- * colors, chart fallbacks, font aliases), Korean typesetting defaults, and minimal base styles for
- * the shared primitives (.st-pill, .lang-badge). Variant skins live in src/styles/<variant>.css and
- * are scoped under [data-variant="<variant>"].
+ * colors, chart fallbacks, font utilities), Korean typesetting defaults, and minimal base styles for
+ * the shared primitives (.st-pill, .lang-badge). The Atlas skin lives in src/styles/atlas*.css and
+ * is scoped under [data-variant="atlas"].
  */
 @import "tailwindcss";
 
@@ -34,16 +34,12 @@
   --chart-grid: rgba(15, 23, 42, 0.08);
   --chart-surface: #ffffff;
   --chart-tooltip-bg: #ffffff;
-  --chart-font: var(--font-pretendard), system-ui, sans-serif;
+  --chart-font: var(--font-atlas-sans), system-ui, sans-serif;
   --chart-mono: ui-monospace, monospace;
 
   /* neutral page fallback (landing + placeholders; variants define their own palettes) */
   --app-bg: #f6f7f9;
   --app-fg: #15181e;
-
-  /* font aliases — Pretendard is loaded once and shared by Flowline and Lanes */
-  --font-flowline-sans: var(--font-pretendard);
-  --font-lanes-sans: var(--font-pretendard);
 
   color-scheme: light;
 }
@@ -96,19 +92,12 @@
 
 /* ─────────────────────────────────────────── Tailwind theme bridge ── */
 @theme inline {
-  /* font-* utilities. NOTE: keys must not equal the next/font variable names (self-reference),
-     hence "-code"/"-title":  font-landing · font-flowline · font-flowline-code · font-atlas ·
-     font-atlas-code · font-lanes · font-lanes-title · font-lanes-code */
-  --font-sans: var(--font-pretendard), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  --font-landing: var(--font-pretendard);
-  --font-flowline: var(--font-flowline-sans);
-  --font-flowline-code: var(--font-flowline-mono);
+  /* font-* utilities (src/fonts). NOTE: keys must not equal the next/font variable names
+     (self-reference), hence "-code": font-sans · font-mono · font-atlas · font-atlas-code */
+  --font-sans: var(--font-atlas-sans), "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: var(--font-atlas-mono), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --font-atlas: var(--font-atlas-sans);
   --font-atlas-code: var(--font-atlas-mono);
-  --font-lanes-title: var(--font-lanes-display);
-  --font-lanes: var(--font-lanes-sans);
-  --font-lanes-code: var(--font-lanes-mono);
 
   /* color utilities: text-st-running, bg-st-failed/15, border-lang-ko, … */
   --color-st-success: var(--st-success);
