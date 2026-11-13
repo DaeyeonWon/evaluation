@@ -1,0 +1,145 @@
+/*
+ * Issue Report — SHARED tokens + the /issues chooser. Owned by the data/platform engineer.
+ * Candidates put their styles in atlas-issues-a|b|c.css (and may read these tokens).
+ *
+ * Tokens (light + dark):
+ *   --sev-p0 … --sev-p3        severity colors (P0 critical … P3 low)
+ *   --cls-safety --cls-policy --cls-wrong --cls-quality   risk-class colors
+ *   --iss-new                  "new / novel" highlight
+ *   --st-issue-NEW … (use [data-status] + .iss-status if you want the shared pill)
+ * Everything is scoped under [data-variant="atlas"]; keyframes are prefixed `at-iss-`.
+ */
+[data-variant="atlas"] {
+  --sev-p0: #c62f3a;
+  --sev-p1: #d9761a;
+  --sev-p2: #b59a12;
+  --sev-p3: #6f7d93;
+  --cls-safety: #c62f3a;
+  --cls-policy: #8a4bd0;
+  --cls-wrong: #d9761a;
+  --cls-quality: #4f7aa8;
+  --iss-new: #0d9bb8;
+}
+:root[data-theme="dark"] [data-variant="atlas"] {
+  --sev-p0: #ff6b6b;
+  --sev-p1: #ffa94d;
+  --sev-p2: #e6cc4a;
+  --sev-p3: #8b9cb0;
+  --cls-safety: #ff6b6b;
+  --cls-policy: #b78cf0;
+  --cls-wrong: #ffa94d;
+  --cls-quality: #7fa8d6;
+  --iss-new: #3cc7e3;
+}
+
+[data-variant="atlas"] {
+  & .iss-sev {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 26px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 2px;
+    font: 600 10.5px/1 var(--f-mono);
+    letter-spacing: 0.04em;
+    color: #fff;
+    background: var(--sev-p3);
+  }
+  & .iss-sev[data-sev="P0"] { background: var(--sev-p0); }
+  & .iss-sev[data-sev="P1"] { background: var(--sev-p1); }
+  & .iss-sev[data-sev="P2"] { background: var(--sev-p2); color: #1b1b1b; }
+
+  /* ───── chooser ───── */
+  & .iss-index .iss-headline {
+    position: relative;
+    border: 1px solid var(--rule);
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 24px 24px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 24px 24px,
+      var(--sheet);
+    border-radius: var(--r);
+    padding: 16px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 14px 22px;
+  }
+  & .iss-hl-tag {
+    grid-column: 1 / -1;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font: 600 10.5px var(--f-mono);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  & .iss-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--sev-p0); box-shadow: 0 0 0 0 var(--sev-p0); animation: at-iss-pulse 2s infinite; }
+  & .iss-hl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0; margin: 0; border-left: 1px solid var(--rule-2); }
+  & .iss-hl-grid > div { padding: 4px 14px; border-right: 1px solid var(--rule-2); min-width: 0; position: relative; }
+  & .iss-hl-grid > div[data-tone]::before { content: ""; position: absolute; left: -1px; top: 4px; bottom: 4px; width: 2px; background: var(--sev-p0); }
+  & .iss-hl-grid dt { font-size: var(--t-xs); font-weight: 650; color: var(--ink-2); display: flex; gap: 6px; align-items: center; }
+  & .iss-hl-grid dt svg { width: 13px; height: 13px; }
+  & .iss-hl-grid dd { margin: 6px 0 0; font: 500 30px/1.1 var(--f-mono); letter-spacing: -0.03em; color: var(--ink); white-space: nowrap; display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+  & .iss-hl-grid dd small { font-size: 11.5px; color: var(--ink-3); letter-spacing: 0; }
+  & .iss-delta { font: 500 11.5px var(--f-mono); letter-spacing: 0; color: var(--st-success); }
+  & .iss-delta[data-dir="up"] { color: var(--sev-p0); }
+  & .iss-hl-top { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; align-content: start; }
+  & .iss-hl-top li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 10px; background: var(--sheet); border: 1px solid var(--rule-2); border-radius: 2px; }
+  & .iss-hl-title { font-size: var(--t-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  & .iss-hl-score { font: 600 13px var(--f-mono); color: var(--ink-2); }
+  & .iss-lead { margin: 0; color: var(--ink-2); font-size: var(--t-md); }
+  & .iss-cands { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  & .iss-cand {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    padding: 14px;
+    border: 1px solid var(--rule);
+    border-radius: var(--r);
+    background: var(--sheet);
+    color: inherit;
+    text-decoration: none;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+  }
+  & .iss-cand:hover, & .iss-cand:focus-visible { border-color: var(--ink); box-shadow: var(--shadow); transform: translateY(-2px); }
+  & .iss-cand-no { font: 600 10.5px var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+  & .iss-cand-thumb { border: 1px dashed var(--rule); background: var(--sheet-2); padding: 8px; border-radius: 2px; }
+  & .iss-cand-thumb svg { display: block; width: 100%; height: auto; }
+  & .iss-cand h2 { margin: 2px 0 0; font-size: var(--t-lg); }
+  & .iss-cand p { margin: 0; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5; }
+  & .iss-cand-open { margin-top: auto; display: inline-flex; gap: 4px; align-items: center; font-size: var(--t-xs); font-weight: 700; color: var(--accent); }
+  & .iss-cand-open svg { width: 14px; height: 14px; }
+  & .iss-foot { margin: 0; font: 400 11px var(--f-mono); color: var(--ink-3); }
+  & .th-card { fill: var(--sheet); stroke: var(--rule); }
+  & .th-hot { fill: color-mix(in srgb, var(--sev-p0) 16%, var(--sheet)); stroke: var(--sev-p0); }
+  & .th-bar { fill: var(--ink-3); opacity: 0.55; }
+  & .th-ink { fill: var(--ink); }
+  & .th-cell { fill: var(--sev-p0); }
+  & .th-ring { fill: none; stroke: var(--ink); stroke-width: 1.4; stroke-dasharray: 3 2; }
+  & .th-line { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+
+  /* candidate placeholder */
+  & .iss-placeholder { border: 1px dashed var(--rule); padding: 32px 16px; text-align: center; color: var(--ink-3); font: 400 var(--t-sm) var(--f-mono); }
+
+  @media (max-width: 900px) {
+    & .iss-index .iss-headline { grid-template-columns: minmax(0, 1fr); }
+    & .iss-cands { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 480px) {
+    & .iss-hl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    & .iss-hl-grid dd { font-size: 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    & .iss-pulse { animation: none; }
+    & .iss-cand { transition: none; }
+    & .iss-cand:hover { transform: none; }
+  }
+}
+
+@keyframes at-iss-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sev-p0) 55%, transparent); }
+  70% { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}

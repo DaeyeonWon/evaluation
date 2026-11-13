@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { LANG_CODES, PIPELINE_VERSIONS } from "@/lib/catalog";
-import type { FailureReason, ResultDetail, ResultFileMeta, ResultRow, ResultsPage } from "@/lib/types";
+import type { AgentFunction, FailureReason, Market, ResultDetail, ResultFileMeta, ResultRow, ResultsPage } from "@/lib/types";
 import { Query, notFound, paginate } from "../http";
 import { getEngine } from "../mock/runtime";
 import { countBy, resultsAggregates, toSummary } from "../mock/projections";
@@ -49,7 +49,20 @@ export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query; 
   const minLat = q.num("min_latency", { min: 0 });
   const maxLat = q.num("max_latency", { min: 0 });
   const text = q.str("q")?.toLowerCase();
+  // Issue Report columns (docs/data-contract.md "Issue Report")
+  const fns = q.list("agent_function");
+  const markets = q.list("market");
+  const patterns = q.list("utterance_pattern");
+  const predicted = q.list("intent_predicted");
+  const osv = q.list("os_version");
+  const oneUi = q.list("one_ui_version");
   rows = rows.filter((r) => {
+    if (fns && !fns.includes(r.agent_function)) return false;
+    if (markets && !markets.includes(r.market)) return false;
+    if (patterns && !patterns.includes(r.utterance_pattern)) return false;
+    if (predicted && !predicted.includes(r.intent_predicted)) return false;
+    if (osv && !osv.includes(r.os_version)) return false;
+    if (oneUi && !oneUi.includes(r.one_ui_version)) return false;
     if (models && !models.includes(r.model_version)) return false;
     if (pids && !pids.includes(r.pipeline_id)) return false;
     if (langs && !langs.includes(r.language)) return false;
@@ -68,7 +81,7 @@ export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query; 
     if (text) {
       const hay = (
         r.utterance_id + " " + r.utterance_text + " " + r.asr_text + " " + r.actual_response + " " + r.expected_response + " " +
-        r.intent_expected + " " + r.intent_predicted + " " + r.judge_reason + " " + r.workflow_id
+        r.intent_expected + " " + r.intent_predicted + " " + r.judge_reason + " " + r.workflow_id + " " + r.agent_function + " " + r.utterance_pattern
       ).toLowerCase();
       if (!hay.includes(text)) return false;
     }
@@ -106,6 +119,8 @@ export function resultsPage(req: NextRequest): ResultsPage {
       pipeline_id: countBy(rows, (r) => r.pipeline_id),
       version: countBy(rows, (r) => r.pipeline_version),
       language: countBy(rows, (r) => r.language) as Partial<Record<LangCode, number>>,
+      agent_function: countBy(rows, (r) => r.agent_function) as Partial<Record<AgentFunction, number>>,
+      market: countBy(rows, (r) => r.market) as Partial<Record<Market, number>>,
     },
   };
 }

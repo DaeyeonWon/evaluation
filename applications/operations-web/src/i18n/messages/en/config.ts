@@ -134,6 +134,7 @@ const config = {
       workflow_cancel: "Cancel workflows",
       sim_control: "Control the simulator",
       hermes_access: "Open the Hermes dashboard",
+      issues_write: "Triage the Issue Report (status, owner, ticket, note)",
       admin: "Administrator (all permissions)",
     },
   },

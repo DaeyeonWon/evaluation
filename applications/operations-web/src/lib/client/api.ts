@@ -83,6 +83,14 @@ import type {
   RangedList,
   ResolvedRange,
   WorkflowPipelineRuns,
+  InsightList,
+  IssueDetail,
+  IssueFacets,
+  IssueListResponse,
+  IssuePatch,
+  IssuePatchResult,
+  IssueSummary,
+  PatternList,
 } from "@/lib/types";
 import { serializeRange } from "@/lib/time-range";
 import type { RangeSpec } from "@/lib/time-range";
@@ -306,6 +314,13 @@ export interface ResultQuery extends QueryParams {
   from?: number | string;
   to?: number | string;
   ids?: string[];
+  /** Issue Report columns */
+  agent_function?: string | string[];
+  market?: string | string[];
+  utterance_pattern?: string | string[];
+  intent_predicted?: string | string[];
+  os_version?: string | string[];
+  one_ui_version?: string | string[];
   sort?: "eval_desc" | "eval_asc" | "score_asc" | "score_desc" | "latency_desc" | "latency_asc" | "id_asc";
   page?: number;
   pageSize?: number;
@@ -366,6 +381,37 @@ export interface StageQuery extends RangeQuery {
   /** filter `objects` by name (also workflow_id / batch_id) */
   q?: string;
   objects_limit?: number;
+}
+
+/**
+ * Issue Report filters (GET /api/v1/issues/*). Lists are comma-joined by qs(). Row filters apply before
+ * clustering; severity/status/novelty/severity_class/q/min_score filter the scored issues.
+ */
+export interface IssueQuery extends RangeQuery {
+  agent_function?: string | string[];
+  capsule?: string | string[];
+  intent?: string | string[];
+  language?: string | string[];
+  market?: string | string[];
+  device?: string | string[];
+  model_version?: string | string[];
+  pipeline?: string | string[];
+  pipeline_version?: string | string[];
+  failure_reason?: string | string[];
+  os_version?: string | string[];
+  one_ui_version?: string | string[];
+  severity?: string | string[];
+  status?: string | string[];
+  novelty?: string | string[];
+  severity_class?: string | string[];
+  q?: string;
+  min_score?: number;
+  group_by?: "signature" | "pattern";
+  sort?: "score_desc" | "count_desc" | "fail_rate_desc" | "delta_desc" | "recent_desc" | "first_seen_desc";
+  page?: number;
+  pageSize?: number;
+  /** report.md only: console page that opens `?issue=<id>` (e.g. "/issues/a"), adds issue deep links */
+  issue_base?: string;
 }
 
 export type PipelineListItem = PipelineSummary & { definition: PipelineDefinition };
@@ -459,6 +505,27 @@ export const api = {
   results: (q?: ResultQuery, signal?: AbortSignal) => get<ResultsPage>("/results", q, signal),
   result: (utteranceId: string) => get<ResultDetail>(`/results/${enc(utteranceId)}`),
   resultFile: () => get<ResultFileMeta>("/results/file"),
+
+  // issue report
+  issues: (q?: IssueQuery, signal?: AbortSignal) => get<IssueListResponse>("/issues", q, signal),
+  issueSummary: (q?: IssueQuery, signal?: AbortSignal) => get<IssueSummary>("/issues/summary", q, signal),
+  issueFacets: (q?: IssueQuery, signal?: AbortSignal) => get<IssueFacets>("/issues/facets", q, signal),
+  issue: (id: string, q?: IssueQuery, signal?: AbortSignal) => get<IssueDetail>(`/issues/${enc(id)}`, q, signal),
+  issuePatterns: (q?: IssueQuery & { kind?: string | string[]; limit?: number }, signal?: AbortSignal) => get<PatternList>("/issues/patterns", q, signal),
+  issueInsights: (q?: IssueQuery, signal?: AbortSignal) => get<InsightList>("/issues/insights", q, signal),
+  /** issues:write (Operator / Admin) */
+  patchIssue: (id: string, body: IssuePatch) => patch<IssuePatchResult>(`/issues/${enc(id)}`, body),
+  /** Markdown summary as text (for "copy to clipboard") */
+  issueReportMarkdown: async (q?: IssueQuery): Promise<string> => {
+    const res = await fetch(API_BASE + "/issues/report.md" + qs(q), { cache: "no-store", headers: { accept: "text/markdown" } });
+    if (res.status === 401) redirectToLogin();
+    if (!res.ok) throw new ApiClientError(res.status, "HTTP_" + res.status, requestFailedText(res.status));
+    return res.text();
+  },
+  /** URL of the CSV export (use as <a href download>) */
+  issuesCsvUrl: (q?: IssueQuery) => API_BASE + "/issues/export.csv" + qs(q),
+  /** URL of the Markdown report download */
+  issueReportUrl: (q?: IssueQuery) => API_BASE + "/issues/report.md" + qs(q),
 
   // config / audit / alerts
   config: () => get<AppConfig>("/config"),

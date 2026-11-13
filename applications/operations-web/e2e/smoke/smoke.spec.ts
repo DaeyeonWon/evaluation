@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 /**
  * Smoke: every console route renders in ko and en with no console errors, roles are enforced
- * (Viewer gets 403 on /hermes and on write APIs), and the shared fonts load.
+ * (Viewer gets 403 on /hermes and on write APIs, including PATCH /api/v1/issues/{id}), and the shared fonts load.
  * Run: `npm run test:e2e` (starts a dev server, see playwright.config.ts) or point PW_BASE_URL at a
  * running server.
  */
@@ -24,6 +24,10 @@ const ROUTES = [
   "/files?q=batch-0001",
   "/dlq",
   "/results",
+  "/issues",
+  "/issues/a",
+  "/issues/b",
+  "/issues/c",
   "/analytics",
   "/config",
   "/hermes", // Admin: "not configured" placeholder (HERMES_DASHBOARD_URL unset)
@@ -79,6 +83,9 @@ test("Viewer: /hermes and /403 are 403, write APIs are 403 (localized)", async (
   expect((await cancel.json()).error.message).toContain("Required: workflow:cancel");
   const sim = await api.post("/api/v1/sim", { data: { action: "pause" } });
   expect(sim.status()).toBe(403);
+  const patch = await api.patch("/api/v1/issues/iss-does-not-matter", { data: { status: "TRIAGED" } });
+  expect(patch.status()).toBe(403);
+  expect((await patch.json()).error.message).toContain("Required: issues:write");
   expect(errors).toEqual([]);
 });
 

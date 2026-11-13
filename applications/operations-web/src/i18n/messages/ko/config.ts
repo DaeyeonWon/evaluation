@@ -137,6 +137,7 @@ const config = {
       workflow_cancel: "Workflow 취소",
       sim_control: "시뮬레이터 제어",
       hermes_access: "Hermes 대시보드 접근",
+      issues_write: "이슈 리포트 Triage (상태·담당·티켓·메모)",
       admin: "관리자 (전체 권한)",
     },
   },

@@ -17,6 +17,7 @@ export const BUILTIN_PERMISSIONS = [
   "workflow:cancel",
   "sim:control",
   "hermes:access",
+  "issues:write",
   "admin",
 ] as const;
 export type BuiltinPermission = (typeof BUILTIN_PERMISSIONS)[number];
@@ -32,6 +33,7 @@ export const PERMISSION_LABELS: Record<BuiltinPermission, string> = {
   "workflow:cancel": "Workflow 취소",
   "sim:control": "시뮬레이터 제어",
   "hermes:access": "Hermes 대시보드 접근",
+  "issues:write": "이슈 리포트 Triage(상태·담당·티켓·메모)",
   admin: "관리자(전체 권한)",
 };
 

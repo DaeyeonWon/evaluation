@@ -1,15 +1,16 @@
 import type { NextRequest } from "next/server";
 import type { StreamEventType } from "@/lib/types";
 import { currentStreamSeq, currentTick, replaySince, simState, streamId, subscribe } from "@/server/mock/runtime";
+import { ensureIssueWatcher } from "@/server/services/issues";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const KEEPALIVE_MS = 15_000;
-const ALL: StreamEventType[] = ["tick", "transition", "event", "log", "alert", "audit", "dlq", "sim", "job"];
+const ALL: StreamEventType[] = ["tick", "transition", "event", "log", "alert", "audit", "dlq", "sim", "job", "issue"];
 
 /**
- * GET /api/v1/stream?types=tick,transition,event,log,alert,audit,dlq,sim,job
+ * GET /api/v1/stream?types=tick,transition,event,log,alert,audit,dlq,sim,job,issue
  *
  * Server-Sent Events. Each message is `id: <epoch>-<seq>\nevent: <type>\ndata: <json>\n\n` where the
  * payload type is StreamEventMap[type] (src/lib/types.ts) and seq is monotonic across all types for
@@ -31,6 +32,13 @@ export async function GET(req: NextRequest): Promise<Response> {
     .map((s) => s.trim())
     .filter(Boolean) as StreamEventType[];
   const want = new Set<StreamEventType>(requested.length ? requested.filter((t) => ALL.includes(t)) : ALL);
+  if (want.has("issue")) {
+    try {
+      ensureIssueWatcher();
+    } catch (e) {
+      console.error("[stream] issue watcher", e);
+    }
+  }
   const enc = new TextEncoder();
   let cleanup: (() => void) | null = null;
 

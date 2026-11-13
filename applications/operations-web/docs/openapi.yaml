@@ -29,6 +29,7 @@ tags:
   - name: Events & Logs
   - name: DLQ
   - name: Results
+  - name: Issues
   - name: Analytics
   - name: Stages & Files
   - name: Config
@@ -1361,6 +1362,455 @@ paths:
       x-permission: view
       x-range: true
       x-source: Firestore replays
+  /issues:
+    get:
+      tags:
+        - Issues
+      summary: "Ranked issue candidates (FAIL clusters by criticality) \u2014 docs/data-contract.md \u00a78"
+      operationId: get__issues
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+        - $ref: '#/components/parameters/Issue_sort'
+        - $ref: '#/components/parameters/Page'
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 25
+          description: default 25 (list) / 20 (detail utterances, max 200)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/summary:
+    get:
+      tags:
+        - Issues
+      summary: "KPIs, severity / class / status distributions, per-column fail stats with baseline deltas, trend, agent_function \u00d7 language / market matrices, top movers"
+      operationId: get__issues_summary
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/facets:
+    get:
+      tags:
+        - Issues
+      summary: "Filter values with counts (columns: FAIL rows, ignoring the column's own filter; severity/status/novelty/severity_class: issues)"
+      operationId: get__issues_facets
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueFacets'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/patterns:
+    get:
+      tags:
+        - Issues
+      summary: "New utterance patterns (absent from the baseline) + novel terms"
+      operationId: get__issues_patterns
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+        - name: kind
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [new_feature_name, code_switch, new_term, new_phrasing]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatternList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/insights:
+    get:
+      tags:
+        - Issues
+      summary: "Ranked auto-generated insights with evidence (filters, /results params, metrics)"
+      operationId: get__issues_insights
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/export.csv:
+    get:
+      tags:
+        - Issues
+      summary: "CSV of every matching issue (UTF-8 BOM, localized title + reasons, factor contributions)"
+      operationId: get__issues_export_csv
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+        - $ref: '#/components/parameters/Issue_sort'
+      responses:
+        '200':
+          description: OK
+          content:
+            text/csv:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/report.md:
+    get:
+      tags:
+        - Issues
+      summary: "Markdown summary of the report in the request locale"
+      operationId: get__issues_report_md
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+        - name: issue_base
+          in: query
+          required: false
+          description: "Console page that opens `?issue=<id>` (`/issues` or `/issues/<x>`). When set, each issue row also links to it; FAIL-row (`/results`) evidence links are always included and keep the request range."
+          schema:
+            type: string
+            pattern: '^/issues(/[a-z])?$'
+      responses:
+        '200':
+          description: OK
+          content:
+            text/markdown:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/{id}:
+    get:
+      tags:
+        - Issues
+      summary: "Issue detail: factors, paged FAIL utterances, trend, breakdowns, related Workflows, similar issues"
+      operationId: get__issues_id
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+        - $ref: '#/components/parameters/IssueIdPath'
+        - $ref: '#/components/parameters/Page'
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 25
+          description: default 25 (list) / 20 (detail utterances, max 200)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+    patch:
+      tags:
+        - Issues
+      summary: Triage an issue (status / owner / note / ticket_id). Audited ISSUE_UPDATE; SSE `issue`.
+      operationId: patch__issues_id
+      parameters:
+        - $ref: '#/components/parameters/IssueIdPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssuePatch'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssuePatchResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: issues:write
+      x-range: false
   /results:
     get:
       tags:
@@ -2708,7 +3158,7 @@ paths:
             type: string
             examples:
               - tick,transition,job
-          description: comma-separated subset of hello,tick,transition,event,log,alert,audit,dlq,sim,job (default all)
+          description: comma-separated subset of hello,tick,transition,event,log,alert,audit,dlq,sim,job,issue (default all; `issue` payload = IssueStreamMessage)
         - name: last_event_id
           in: query
           schema:
@@ -2768,6 +3218,208 @@ components:
       name: x-goog-iap-jwt-assertion
       description: IAP JWT (verified against IAP_AUDIENCE); upstream identity via x-console-user-* headers
   parameters:
+    Issue_agent_function:
+      name: agent_function
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["device_control", "smartthings_routine", "alarm_timer", "call_message", "media_play", "weather", "navigation", "settings", "calendar", "general_qa", "camera", "galaxy_ai_feature"]
+      description: "Row filter (before clustering): agent_function"
+    Issue_capsule:
+      name: capsule
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): capsule"
+    Issue_intent:
+      name: intent
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): intent"
+    Issue_language:
+      name: language
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["ko", "en", "ja", "es"]
+      description: "Row filter (before clustering): language"
+    Issue_market:
+      name: market
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["KR", "US", "GB", "JP", "ES", "MX"]
+      description: "Row filter (before clustering): market"
+    Issue_device:
+      name: device
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): device"
+    Issue_model_version:
+      name: model_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): model_version"
+    Issue_pipeline:
+      name: pipeline
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): pipeline"
+    Issue_pipeline_version:
+      name: pipeline_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): pipeline_version"
+    Issue_failure_reason:
+      name: failure_reason
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["INTENT_MISMATCH", "SLOT_ERROR", "RESPONSE_QUALITY", "TIMEOUT", "ASR_ERROR", "POLICY_VIOLATION"]
+      description: "Row filter (before clustering): failure_reason"
+    Issue_os_version:
+      name: os_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): os_version"
+    Issue_one_ui_version:
+      name: one_ui_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): one_ui_version"
+    Issue_severity:
+      name: severity
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["P0", "P1", "P2", "P3"]
+      description: "Issue filter (after scoring): severity"
+    Issue_status:
+      name: status
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["NEW", "TRIAGED", "TICKETED", "RESOLVED", "IGNORED"]
+      description: "Issue filter (after scoring): status"
+    Issue_novelty:
+      name: novelty
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["new", "recurring"]
+      description: "Issue filter (after scoring): novelty"
+    Issue_severity_class:
+      name: severity_class
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["safety", "policy", "wrong_action", "quality"]
+      description: "Issue filter (after scoring): severity_class"
+    Issue_q:
+      name: q
+      in: query
+      schema:
+        type: string
+      description: Case-insensitive search over id, signature, patterns, sample utterance, ticket, owner, note
+    Issue_min_score:
+      name: min_score
+      in: query
+      schema:
+        type: number
+        minimum: 0
+        maximum: 100
+    Issue_group_by:
+      name: group_by
+      in: query
+      schema:
+        type: string
+        enum: [signature, pattern]
+        default: signature
+    Issue_sort:
+      name: sort
+      in: query
+      schema:
+        type: string
+        enum: [score_desc, count_desc, fail_rate_desc, delta_desc, recent_desc, first_seen_desc]
+        default: score_desc
+    IssueIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^iss-[0-9a-z]+$'
     Range:
       name: range
       in: query
@@ -7178,6 +7830,692 @@ components:
         - idempotency_key
         - user_agent
         - result
+    AgentFunction:
+      type: string
+      enum: ["device_control", "smartthings_routine", "alarm_timer", "call_message", "media_play", "weather", "navigation", "settings", "calendar", "general_qa", "camera", "galaxy_ai_feature"]
+    Market:
+      type: string
+      enum: ["KR", "US", "GB", "JP", "ES", "MX"]
+    IssueSeverity:
+      type: string
+      enum: ["P0", "P1", "P2", "P3"]
+    IssueStatus:
+      type: string
+      enum: ["NEW", "TRIAGED", "TICKETED", "RESOLVED", "IGNORED"]
+    SeverityClass:
+      type: string
+      enum: ["safety", "policy", "wrong_action", "quality"]
+    IssueText:
+      type: object
+      properties:
+        key:
+          type: string
+          description: key under the `issues` i18n namespace
+        vars:
+          type: object
+          additionalProperties:
+            type: [string, number]
+      required:
+        - key
+    IssueFactor:
+      type: object
+      properties:
+        key:
+          type: string
+          enum: ["volume", "severity", "trend", "regression", "reach", "novelty"]
+        weight:
+          type: number
+        value:
+          type: number
+          description: 0..1
+        contribution:
+          type: number
+          description: value × weight
+        detail:
+          type: object
+          additionalProperties: true
+      required:
+        - key
+        - weight
+        - value
+        - contribution
+        - detail
+    IssueBaseline:
+      type: object
+      properties:
+        from:
+          type: number
+        to:
+          type: number
+        days:
+          type: number
+        mode:
+          type: string
+          enum: ["preceding", "intra_range"]
+        compare:
+          type: object
+          properties:
+            from:
+              type: number
+            to:
+              type: number
+        coverage:
+          type: number
+        sufficient:
+          type: boolean
+      required:
+        - from
+        - to
+        - days
+        - mode
+        - compare
+        - coverage
+        - sufficient
+    IssueRegression:
+      type: object
+      properties:
+        axis:
+          type: string
+          enum: ["model_version", "pipeline_version"]
+        current:
+          type: string
+        previous:
+          type: string
+        currentRate:
+          type: number
+        previousRate:
+          type: number
+        currentTotal:
+          type: integer
+        previousTotal:
+          type: integer
+    IssueHistoryEntry:
+      type: object
+      properties:
+        at:
+          type: number
+        by:
+          type: string
+        by_name:
+          type: string
+        field:
+          type: string
+          enum: ["status", "owner", "note", "ticket_id"]
+        from:
+          type: [string, 'null']
+        to:
+          type: [string, 'null']
+        reason:
+          type: [string, 'null']
+    IssueState:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/IssueStatus'
+        owner:
+          type: [string, 'null']
+        owner_name:
+          type: [string, 'null']
+        note:
+          type: [string, 'null']
+        ticket_id:
+          type: [string, 'null']
+        updated_at:
+          type: [number, 'null']
+        updated_by:
+          type: [string, 'null']
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueHistoryEntry'
+      required:
+        - status
+        - history
+    Issue:
+      type: object
+      properties:
+        id:
+          type: string
+          description: iss- + base36 FNV-1a of the group key (stable)
+        rank:
+          type: integer
+        title:
+          $ref: '#/components/schemas/IssueText'
+        signature:
+          type: object
+          properties:
+            agent_function:
+              $ref: '#/components/schemas/AgentFunction'
+            intent_expected:
+              type: string
+            intent_predicted:
+              type: string
+            failure_reason:
+              type: string
+            utterance_pattern:
+              type: string
+            pattern_template:
+              type: string
+        group_by:
+          type: string
+          enum: ["signature", "pattern"]
+        severity:
+          $ref: '#/components/schemas/IssueSeverity'
+        severity_class:
+          $ref: '#/components/schemas/SeverityClass'
+        score:
+          type: number
+          description: 0..100
+        factors:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueFactor'
+        reasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueText'
+        novelty:
+          type: string
+          enum: ["new", "recurring"]
+        count:
+          type: integer
+        share:
+          type: number
+        scope_total:
+          type: integer
+        fail_rate:
+          type: number
+        baseline_count:
+          type: integer
+        baseline_rate:
+          type: [number, 'null']
+        delta:
+          type: [number, 'null']
+        first_seen:
+          type: number
+        last_seen:
+          type: number
+        languages:
+          type: array
+          items:
+            type: string
+        markets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Market'
+        devices:
+          type: array
+          items:
+            type: string
+        model_versions:
+          type: array
+          items:
+            type: string
+        spark:
+          type: array
+          items:
+            type: integer
+        patterns:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              template:
+                type: string
+              language:
+                type: string
+              count:
+                type: integer
+              novel:
+                type: boolean
+        sample:
+          type: object
+          additionalProperties: true
+          description: newest FAIL row (utterance_id, utterance_text, asr_text, expected_response, actual_response, judge_reason, language, market, device_type, eval_ts)
+        regression:
+          oneOf:
+            - $ref: '#/components/schemas/IssueRegression'
+            - type: 'null'
+        state:
+          $ref: '#/components/schemas/IssueState'
+        results_query:
+          type: object
+          additionalProperties:
+            type: string
+      required:
+        - id
+        - rank
+        - title
+        - signature
+        - severity
+        - severity_class
+        - score
+        - factors
+        - reasons
+        - novelty
+        - count
+        - fail_rate
+        - state
+        - results_query
+    IssueListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        baseline:
+          $ref: '#/components/schemas/IssueBaseline'
+        unfiltered_total:
+          type: integer
+        factor_weights:
+          type: object
+          additionalProperties:
+            type: number
+      required:
+        - items
+        - total
+        - range
+        - baseline
+    IssueColumnStat:
+      type: object
+      properties:
+        value:
+          type: string
+        total:
+          type: integer
+        fails:
+          type: integer
+        fail_rate:
+          type: number
+        baseline_fail_rate:
+          type: [number, 'null']
+        delta:
+          type: [number, 'null']
+        issues:
+          type: integer
+    IssueMatrix:
+      type: object
+      properties:
+        rows:
+          type: array
+          items:
+            type: string
+        cols:
+          type: array
+          items:
+            type: string
+        cells:
+          type: array
+          items:
+            type: object
+            properties:
+              row:
+                type: string
+              col:
+                type: string
+              total:
+                type: integer
+              fails:
+                type: integer
+              fail_rate:
+                type: [number, 'null']
+              baseline_fail_rate:
+                type: [number, 'null']
+              delta:
+                type: [number, 'null']
+              top_issue_id:
+                type: [string, 'null']
+    IssueSummary:
+      type: object
+      properties:
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        baseline:
+          $ref: '#/components/schemas/IssueBaseline'
+        kpis:
+          type: object
+          additionalProperties: true
+          description: utterances, fails, fail_rate, baseline_fail_rate, fail_rate_delta, issues, by_severity, critical_open, safety_issues, new_issues, regressions, new_patterns, markets_affected, avg_score, max_score, resolved
+        severity_distribution:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        class_distribution:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        status_distribution:
+          type: object
+          additionalProperties:
+            type: integer
+        factor_weights:
+          type: object
+          additionalProperties:
+            type: number
+        factor_profile:
+          type: object
+          additionalProperties:
+            type: number
+        columns:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/IssueColumnStat'
+        trend:
+          type: object
+          properties:
+            bucket:
+              type: string
+              enum: [hour, day]
+            points:
+              type: array
+              items:
+                type: object
+                properties:
+                  t:
+                    type: number
+                  total:
+                    type: integer
+                  fails:
+                    type: integer
+                  fail_rate:
+                    type: [number, 'null']
+                  critical_fails:
+                    type: integer
+                  new_pattern_rows:
+                    type: integer
+        matrix:
+          $ref: '#/components/schemas/IssueMatrix'
+        market_matrix:
+          $ref: '#/components/schemas/IssueMatrix'
+        top_movers:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        top_issues:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+        - range
+        - baseline
+        - kpis
+    IssueFacets:
+      type: object
+      properties:
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        facets:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              properties:
+                value:
+                  type: string
+                count:
+                  type: integer
+    IssueDetail:
+      allOf:
+        - $ref: '#/components/schemas/Issue'
+        - type: object
+          properties:
+            range:
+              $ref: '#/components/schemas/ResolvedRange'
+            baseline:
+              $ref: '#/components/schemas/IssueBaseline'
+            utterances:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ResultRow'
+                total:
+                  type: integer
+                page:
+                  type: integer
+                pageSize:
+                  type: integer
+            trend:
+              type: object
+              additionalProperties: true
+            breakdown:
+              type: object
+              additionalProperties:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IssueColumnStat'
+            workflows:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+            similar:
+              type: array
+              items:
+                type: object
+                additionalProperties: true
+    NewPattern:
+      type: object
+      properties:
+        id:
+          type: string
+        template:
+          type: string
+        language:
+          type: string
+        kind:
+          type: string
+          enum: ["new_feature_name", "code_switch", "new_term", "new_phrasing"]
+        terms:
+          type: array
+          items:
+            type: string
+        count:
+          type: integer
+        baseline_count:
+          type: integer
+        growth:
+          type: [number, 'null']
+        daily:
+          type: array
+          items:
+            type: integer
+        daily_t:
+          type: array
+          items:
+            type: number
+        first_seen:
+          type: number
+        fails:
+          type: integer
+        fail_rate:
+          type: number
+        agent_function:
+          $ref: '#/components/schemas/AgentFunction'
+        intent_expected:
+          type: string
+        intents_predicted:
+          type: array
+          items:
+            type: object
+            properties:
+              intent:
+                type: string
+              count:
+                type: integer
+        markets:
+          type: array
+          items:
+            $ref: '#/components/schemas/Market'
+        devices:
+          type: array
+          items:
+            type: string
+        examples:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        issue_ids:
+          type: array
+          items:
+            type: string
+    PatternList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NewPattern'
+        total:
+          type: integer
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        baseline:
+          $ref: '#/components/schemas/IssueBaseline'
+        terms:
+          type: array
+          items:
+            type: object
+            properties:
+              term:
+                type: string
+              count:
+                type: integer
+              baseline_count:
+                type: integer
+              languages:
+                type: array
+                items:
+                  type: string
+              pattern_ids:
+                type: array
+                items:
+                  type: string
+    IssueInsight:
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: ["overall", "critical", "safety", "regression", "spike", "new_pattern", "market", "hotspot", "concentration", "improvement"]
+        key:
+          type: string
+          description: issues.insights.*
+        vars:
+          type: object
+          additionalProperties:
+            type: [string, number]
+        severity:
+          $ref: '#/components/schemas/IssueSeverity'
+        score:
+          type: number
+        evidence:
+          type: object
+          properties:
+            filter:
+              type: object
+              additionalProperties:
+                type: string
+            results:
+              type: [object, 'null']
+              additionalProperties:
+                type: string
+            metrics:
+              type: object
+              additionalProperties: true
+            issue_id:
+              type: string
+            pattern_id:
+              type: string
+    InsightList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueInsight'
+        total:
+          type: integer
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        baseline:
+          $ref: '#/components/schemas/IssueBaseline'
+    IssuePatch:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/IssueStatus'
+        owner:
+          type: [string, 'null']
+          description: operator id; null unassigns
+        note:
+          type: [string, 'null']
+          maxLength: 2000
+        ticket_id:
+          type: [string, 'null']
+          description: e.g. BIXBY-4821 (required for TICKETED)
+        reason:
+          type: string
+          maxLength: 500
+    IssuePatchResult:
+      type: object
+      properties:
+        issue_id:
+          type: string
+        state:
+          $ref: '#/components/schemas/IssueState'
+        changed:
+          type: array
+          items:
+            type: string
+    IssueStreamMessage:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: ["status", "update", "new_critical"]
+        issue_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/IssueStatus'
+        prev_status:
+          type: [string, 'null']
+        severity:
+          $ref: '#/components/schemas/IssueSeverity'
+        score:
+          type: number
+        title:
+          $ref: '#/components/schemas/IssueText'
+        by:
+          type: [string, 'null']
+        at:
+          type: number
+      required:
+        - kind
+        - issue_id
+        - status
+        - at
     ResultRow:
       type: object
       properties:
@@ -7240,6 +8578,19 @@ components:
           type: string
         eval_ts:
           type: number
+        agent_function:
+          $ref: '#/components/schemas/AgentFunction'
+        agent_function_predicted:
+          $ref: '#/components/schemas/AgentFunction'
+        market:
+          $ref: '#/components/schemas/Market'
+        os_version:
+          type: string
+        one_ui_version:
+          type: string
+        utterance_pattern:
+          type: string
+          description: normalized utterance template id (up-{lang}-{hash})
       required:
         - utterance_id
         - workflow_id
@@ -11363,6 +12714,7 @@ components:
             - dlq
             - sim
             - job
+            - issue
         data: {}
     SseHello:
       type: object

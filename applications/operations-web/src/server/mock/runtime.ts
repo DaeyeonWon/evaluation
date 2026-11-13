@@ -131,6 +131,11 @@ function broadcast<K extends StreamEventType>(rt: Runtime, type: K, data: Stream
   }
 }
 
+/** Broadcast a message from outside the engine bus (e.g. the `issue` channel from services/issues.ts). */
+export function publish<K extends StreamEventType>(type: K, data: StreamEventMap[K]): void {
+  broadcast(getRuntime(), type, data);
+}
+
 function kstDay(rt: Runtime, t: number): string {
   return rt.engine._internal.isoKst(t).slice(0, 10);
 }

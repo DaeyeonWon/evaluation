@@ -32,6 +32,10 @@ AIPO 플랫폼의 **빅스비 실발화 평가** 파이프라인을 관제하는
 | `/files` | 모든 단계의 GCS 객체를 파일명으로 검색 |
 | `/dlq` | DLQ: 검토, 단건·일괄 Replay, 종료 처리, 담당 지정 |
 | `/results` | 평가 결과 (PASS/FAIL): 발화별 판정 근거, CSV 내보내기 |
+| `/issues` | **이슈 리포트** 후보안 선택 화면: 실시간 헤드라인(미해결 P0·P1, 안전 이슈, FAIL 비율, 신규 발화 패턴)과 디자인 후보안 A/B/C 카드 |
+| `/issues/a` | 이슈 리포트 A · **Triage Deck**: Criticality 순 이슈 카드(점수 분해 도넛, 추세 sparkline, 근거 발화), KPI 스트립, 인사이트 티커, 신규 발화 패턴 캐러셀, Kanban 보기, 상세 드로어에서 Triage |
+| `/issues/b` | 이슈 리포트 B · **Market Brief**: 편집형 주간 브리핑 문서(핵심 요약, 핵심 이슈 Dossier, 신규 발화 패턴, 시장·디바이스 영향, 회귀 감시, 통계 부록, 근거 각주) |
+| `/issues/c` | 이슈 리포트 C · **Signal Lab**: 연동 뷰 분석 워크스페이스(FAIL 비율 히트맵, 이슈 클러스터 버블, FAIL Treemap, 신규 발화 패턴, 이슈 원장, 분할 상세 패널) |
 | `/analytics` | 장기 분석: 품질, 오류, Component, Version, 비용 |
 | `/config` | 운영 설정: Retry·Timeout, Version 트래픽, 서비스, 알림 정책, 권한, 감사 로그 |
 | `/hermes` | 외부 Hermes 대시보드 진입점 (권한이 있으면 307 이동, 없으면 403) |

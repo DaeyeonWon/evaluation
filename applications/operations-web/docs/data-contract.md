@@ -21,6 +21,7 @@ It is the authoritative API contract (the old FOUNDATION.md was removed; see `do
 | Pipelines | Versioned registry with sub-pipelines (`src/config/domain.ts`). Root job + child jobs per attempt. New `/pipelines`, `/pipeline-jobs`, `/workflows/[id]/pipeline-runs`. |
 | Legacy DAG | `Workflow.dag`, `Attempt.dag`, `WorkflowDag.nodes`, `current_node`, `error.node`, `DeadLetter.failed_node` and `metrics.runningByComponent` are kept in the **six legacy phases** as a derived projection. Use the job endpoints for the real DAG. |
 | Search | `GET /files/search` (file name at every stage). `GET /stages/[id]` returns `objects` for every stage and accepts `?q=`. |
+| Issue Report | New `/issues*` endpoints (ranked FAIL clusters, criticality factors, new patterns, insights, triage `PATCH` with `issues:write`, CSV + Markdown export), SSE `issue`, result columns `agent_function`, `agent_function_predicted`, `market`, `os_version`, `one_ui_version`, `utterance_pattern`. See §8. |
 | Results | `model_version` (e.g. `bixby-nlu-2026.10`, independent of `pipeline_version`), plus `pipeline_id`. Both are filters and facets (`aggregates.byModelVersion`, `aggregates.byPipeline`, `facets`). |
 | Fixes | Config drift `changedBy`/`changedAt`/`reason` update on every PATCH (config, language capacity, global capacity). `api.gcsObjects({ delimiter: "" })` now sends `delimiter=` (flat listing). |
 | SSE | New event `job` (`PipelineJobTransition`) for root and child job status changes. |
@@ -365,6 +366,7 @@ What gets indexed, per stage:
 | event | payload | when |
 | --- | --- | --- |
 | `job` **new** | `PipelineJobTransition { job_id, root_job_id, parent_job_id, workflow_id, language, pipeline_id, pipeline_version, node_path, depth, from, to, at, error_code, error_path }` | root job RUNNING / SUCCEEDED / FAILED / CANCELLED, and each child job start / succeed / fail / cancel |
+| `issue` **new** | `IssueStreamMessage { kind: status \| update \| new_critical, issue_id, status, prev_status?, severity?, score?, title?, by?, at }` | every Issue Report triage PATCH; once per newly detected P0/P1 issue in the default view (today, no filters) — §8 |
 | `event`, `log` | as before, plus job context fields (§3.4) | `CHILD_PIPELINE_*` and `TASK_<EV>_*` events for every leaf |
 
 `job` is part of the default stream and of `?types=job` (and registered in `live-stream.tsx` `STREAM_TYPES`).
@@ -420,3 +422,126 @@ the same Workflow).
 - **`TickSnapshot.kpis`** is typed `OverviewKpis`. Its contents are the same as before.
 - **`results.rows`** (engine-internal) is a computed getter over today's rows. Services use `rowsInRange` / `rowsFor`.
 - **Performance** (dev server, warm, 30d): `/results` ≈ 45 ms, `/results/csv` (~21k rows) ≈ 120 ms, `/analytics/summary` ≈ 18 ms, `/pipelines*` ≈ 5 ms, `/files/search` ≈ 10 ms. The first request after boot builds the engine (~0.3 s).
+
+---
+
+## 8. Issue Report (`/issues`, `/api/v1/issues/*`)
+
+Ranks FAIL clusters by a criticality score, detects new utterance patterns and writes data-backed
+insights. Server: `src/server/services/issues.ts` (API), `issues-engine.ts` (clustering + scoring +
+novelty), `issues-store.ts` (triage lifecycle), `issues-text.ts` (tokenizer, lexicons). Types: the
+"Issue Report" block in `src/lib/types.ts`. Client: `api.issues*` + `src/components/atlas/issues-shared/*`.
+
+### 8.1 New result columns (`ResultRow`, CSV, BigQuery)
+
+| Column | Meaning |
+| --- | --- |
+| `agent_function` | Bixby Agent function of the **expected** intent (intent prefix map, capsule fallback): `device_control`, `smartthings_routine` (`smartthings.scene_run`), `alarm_timer`, `call_message`, `media_play`, `weather`, `navigation`, `settings`, `calendar`, `general_qa`, `camera`, `galaxy_ai_feature` |
+| `agent_function_predicted` | function of the predicted intent |
+| `market` | `KR` (ko) · `US`/`GB` (en) · `JP` (ja) · `ES`/`MX` (es) |
+| `os_version`, `one_ui_version` | e.g. `Android 16` / `One UI 8.5`, `Wear OS 6` / `One UI 8 Watch`, `Tizen 9.0` / `One UI Tizen` |
+| `utterance_pattern` | `up-{lang}-{hash}` of the utterance template (slot values replaced by placeholders) |
+
+`GET /results` and `/results/csv` accept `agent_function`, `market`, `utterance_pattern`, `intent_predicted`,
+`os_version`, `one_ui_version` filters; `ResultsPage.facets` adds `agent_function` and `market`.
+
+### 8.2 Endpoints (all GET need `view`; all ranged; errors localized)
+
+| Endpoint | Returns |
+| --- | --- |
+| `GET /issues` | `IssueListResponse` = `{ items: Issue[], total, page, pageSize, range, baseline, unfiltered_total, factor_weights }` |
+| `GET /issues/summary` | `IssueSummary`: `kpis`, `severity_distribution`, `class_distribution`, `status_distribution`, `factor_weights`, `factor_profile`, `columns` (per-column fail stats with baseline deltas), `trend` (hour ≤ 48 h, else day), `matrix` (agent_function × language), `market_matrix` (agent_function × market), `top_movers`, `top_issues` |
+| `GET /issues/facets` | `IssueFacets`: values + FAIL counts per column (each ignoring its own filter) and issue counts per severity / status / novelty / severity_class |
+| `GET /issues/{id}` | `IssueDetail` = `Issue` + `utterances` (paged, newest first, `page`/`pageSize` ≤ 200), `trend`, `breakdown` (language, market, device, model_version, pipeline_version, os_version, one_ui_version with baseline), `workflows`, `similar` |
+| `GET /issues/patterns` | `PatternList` = `{ items: NewPattern[], total, range, baseline, terms: NovelTerm[] }`; extra `kind`, `limit` (≤ 200) |
+| `GET /issues/insights` | `InsightList` = `{ items: IssueInsight[], total, range, baseline }` |
+| `PATCH /issues/{id}` | `IssuePatchResult`; body `IssuePatch { status?, owner?, note?, ticket_id?, reason? }`; needs `issues:write`; Idempotency-Key supported; audited `ISSUE_UPDATE`; SSE `issue` |
+| `GET /issues/export.csv` | every matching issue (no paging), UTF-8 BOM, localized title + reasons, factor contributions |
+| `GET /issues/report.md` | Markdown summary in the request locale (KPIs, insights, top issues with reasons and score breakdown, new patterns, triage counts). Absolute evidence links to `/results` keep the request range; optional `issue_base=/issues/a` adds issue deep links (`?issue=<id>`) |
+
+Query params (all optional): `range`/`from`/`to`; row filters `agent_function, capsule, intent, language,
+market, device, model_version, pipeline, pipeline_version, failure_reason, os_version, one_ui_version`
+(comma lists; applied before clustering); issue filters `severity (P0..P3), status, novelty (new|recurring),
+severity_class, q, min_score`; `group_by=signature|pattern`; `sort=score_desc|count_desc|fail_rate_desc|delta_desc|recent_desc|first_seen_desc`; `page`, `pageSize` (≤ 500, default 25).
+Errors: `domain.issueNotFound` (404), `domain.issueTransition` (409), `domain.issueTicketRequired` /
+`domain.issueTicketInvalid` / `domain.unknownOperator` / `validation.*` (400), `permission.*` (403).
+
+### 8.3 Clustering
+
+FAIL rows in range (after row filters) are grouped by `(agent_function, intent_expected, intent_predicted,
+failure_reason)` (`group_by=signature`, default) or additionally by `utterance_pattern` (`group_by=pattern`).
+Patterns are language-specific, so the default keeps one defect across languages in one issue and lists its
+patterns in `Issue.patterns[]`. Minimum support: 3 FAILs (2 for safety / policy). Issue id =
+`iss-` + base36 FNV-1a of the group key — stable across ranges and calls.
+
+### 8.4 Criticality score
+
+`score = Σ weight × value` (0–100). Every factor is returned in `Issue.factors[]` as `{ key, weight, value (0..1), contribution, detail }`.
+
+| Factor | Weight | Value |
+| --- | ---: | --- |
+| `volume` | 20 | `ln(1 + count) / ln(1 + max(40, largest cluster))` |
+| `severity` | 25 | severity class: safety 1.0 · policy 0.7 · wrong_action 0.45 · quality 0.2 |
+| `trend` | 15 | Poisson z of FAILs in the compare window vs `expected = (baseline_count + 1) / (baseline_scope + 1) × compare_scope` (scope = rows with the same `intent_expected`; 0.5 when the intent is new); value `z / 5` clipped to [0, 1] |
+| `regression` | 15 | newest vs previous `model_version` and `pipeline_version` (max of both), counted only since the newest version's release (co-existence window), each ≥ 6 scope rows, ≥ 3 FAILs on the newest, one-sided two-proportion z ≥ 1.64; value `clip(max((rate_new − rate_prev) / max(rate_prev, 2%) / 1.5, (rate_new − rate_prev) / 25pp)) × clip(z / 3, 0.6, 1)` (saturates at 2.5× or +25 pp). When no axis qualifies, `detail` carries `why` (`insufficient_sample` · `not_significant` · `no_increase`) with `candidate_axis`, `current`, `previous`, `current_rate`, `previous_rate` of the closest candidate |
+| `reach` | 10 | `0.4·markets/6 + 0.3·devices/5 + 0.3·languages/4` |
+| `novelty` | 15 | new cluster (intent unseen in the baseline, or 0 baseline FAILs where ≥ 1.5 were expected): `0.35 + 0.65 × novel-pattern share`; otherwise `0.7 × novel-pattern share`; 0 without a sufficient baseline |
+
+Severity class (`severity_class`): `POLICY_VIOLATION` on a lock/door/gas/oven/garage/window intent or on
+`device_control` / `smartthings_routine` → **safety**, other `POLICY_VIOLATION` → **policy**; `SLOT_ERROR` on an
+action intent, or `INTENT_MISMATCH` / `ASR_ERROR` whose predicted intent performs an action → **wrong_action**;
+everything else → **quality**.
+
+Level: P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30 · P3. Floors: safety with ≥ 3 FAILs → P0 if ≥ 45, else P1; policy with ≥ 5 FAILs → at least P1.
+
+`reasons[]` are `IssueText { key, vars }` under the `issues` i18n namespace (`reasons.safety, policy,
+wrongAction, wrongSlot (SLOT_ERROR with the right intent: most frequent `want → got` value pair parsed from judge reasons), wrongSlotNoPair, quality, regression, spike, newCluster, novelPattern, concentration, reach, volume,
+baselineInsufficient`), ordered by weight. `title` is `titles.<failure_reason>` or `titles.safety`. Enum-coded vars
+(`fn, reason, axis, column, market, kind, cls, status, severity`) are translated by `formatIssueText()`
+(`src/lib/issue-text.ts`); rates are already percentages.
+
+### 8.5 Baseline window
+
+`baseline = [from − max(len, 7 d), from)` clipped to `dataWindow.earliest`. Coverage < 50 % and range ≥ 14 d
+→ `mode: "intra_range"`: compare = last 7 d of the range, baseline = the rest of it (this is what `range=30d`
+uses, as history is 30 days). Otherwise insufficient → trend / novelty = 0 and reason `baselineInsufficient`.
+Every response carries `baseline: IssueBaseline { from, to, days, mode, compare, coverage, sufficient }`.
+
+### 8.6 New-pattern detection
+
+A pattern is **new** when it has rows in the compare window and none in the baseline window (all rows,
+PASS + FAIL), with ≥ 3 rows. Terms: lowercase tokens (whitespace; Japanese by script runs) minus stop words
+and digits, plus multi-word product names (`PRODUCT_TERMS`); a **novel term** has 0 baseline occurrences and
+≥ 2 (pattern) / ≥ 3 (`terms[]`) current ones. Kind: `new_feature_name` (product lexicon or `galaxy_ai.*`) >
+`code_switch` (Latin word inside ko/ja, English lexicon word inside es) > `new_term` > `new_phrasing`.
+`growth` = rows in the 2nd half / 1st half of the compare window (null = only in the 2nd half).
+
+### 8.7 Insights
+
+`IssueInsight { id, kind, key (issues.insights.*), vars, severity, score, evidence { filter, results, metrics, issue_id?, pattern_id? } }`,
+ranked by `score`. Kinds: `overall`, `safety`, `critical` (top 3 non-safety P0/P1; `insights.criticalSameIntent` when predicted = expected), `regression` (strongest),
+`spike` (largest z among recurring), `new_pattern` (summary + top failing patterns; `insights.newPatternSameIntent` when every
+FAIL kept the expected intent, naming the dominant failure reason and an actual response), `market` (largest market
+delta), `hotspot` (agent_function × language cell), `concentration` (FAILs ≥ 80 % on one One UI / device /
+market that is < 50 % of traffic), `improvement`. `evidence.results` opens `/results`; `evidence.filter`
+reproduces it on `/issues`.
+
+### 8.8 Triage lifecycle
+
+`Issue.state = { status, owner, owner_name, note, ticket_id, updated_at, updated_by, history[] }`.
+Transitions: NEW → TRIAGED | IGNORED · TRIAGED → TICKETED | RESOLVED | IGNORED | NEW · TICKETED → RESOLVED |
+IGNORED | TRIAGED · RESOLVED | IGNORED → NEW. TICKETED needs `ticket_id`. Mock storage is in-memory
+(`globalThis`, survives the day re-seed) and seeds four triaged examples. SSE `issue` (`IssueStreamMessage`) on
+every PATCH (`kind: status | update`) and once per newly detected P0/P1 in the default view (`new_critical`).
+
+### 8.9 Mock data (seeded scenarios)
+
+`engine.ts` `SCENARIOS` re-label existing rows with their own hash-seeded RNG (the base `|utt` stream is
+untouched; ~700 of ~21k rows over 30 d change, **no PASS/FAIL changes**): door-lock unlock without
+confirmation on the rc versions (safety), Galaxy S26 Galaxy AI feature names (Now Brief, Now Nudge, Audio
+Eraser, Creative Studio), es-MX code-switching, Galaxy Watch alarm timezone bug on One UI 8 Watch, general_qa
+medical / financial advice (policy), ko code-switched toggles (`와이파이 off 해줘`), ko SmartThings slot-parser
+regression on v1.2-rc, Gemini hand-off (new, mostly healthy) and a camera baseline. Recent scenarios are gated
+by days before `BASE_NOW`, so they follow the day re-seed.
+
+Performance (dev, warm): `/issues*` 5–25 ms; first call per range ≈ 60–140 ms.

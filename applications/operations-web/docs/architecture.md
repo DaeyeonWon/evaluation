@@ -108,11 +108,20 @@ src/server/mock/*      ── engine state + simulator (one per Node process)
 | `/files` | GCS file search across stages |
 | `/dlq` | Dead letters: review, Replay (single/batch), close, assign |
 | `/results` | Evaluation results (PASS/FAIL), utterance drawer, CSV export |
+| `/issues` | Issue Report chooser (`issues-index.tsx`): live headline from `/api/v1/issues/summary` + cards for design candidates A/B/C. The `I-01` nav tab stays active on every `/issues/*` route |
+| `/issues/a` | Candidate A **Triage Deck** (`components/atlas/issues-a/`, `atlas-issues-a.css`): criticality-ranked issue cards with score-breakdown donut, KPI strip, insight ticker, new-pattern carousel, deck/Kanban views, detail drawer with triage |
+| `/issues/b` | Candidate B **Market Brief** (`issues-b/`, `atlas-issues-b.css`): editorial briefing document (executive summary, critical-issue dossiers, emerging patterns, market & device impact, regression watch, statistical appendix, evidence notes) |
+| `/issues/c` | Candidate C **Signal Lab** (`issues-c/`, `atlas-issues-c.css`): linked-view analyst workspace (FAIL-rate heatmap, issue bubbles, treemap, new patterns, issue ledger, split detail pane) |
 | `/analytics` | Long-range analytics (quality, errors, components, versions, cost) |
 | `/config` | Retry/timeout, version traffic, services, alert policies, roles, audit log |
 | `/hermes` | Entry to the external Hermes dashboard (307 when configured, 403 without `hermes:access`) |
 | `/login` (`src/app/login`) | Mock-mode demo login; explains the auth proxy in other modes |
 | `/403` (`src/app/403`) | Server-rendered forbidden UI (same component as `src/app/forbidden.tsx`); the proxy serves it with HTTP 403, also as the rewrite target for pages the session may not open |
+
+All three Issue Report candidates read the same engine (`src/server/services/issues-engine.ts` → `issues.ts`,
+triage state in `issues-store.ts`) through the shared client layer `src/components/atlas/issues-shared/`
+(URL filters, data hooks, triage/export, evidence links), so filters, `?issue=<id>` selection and triage
+permissions (`issues:write`, Operator and above) behave identically; only the presentation differs.
 
 ### API groups (`/api/v1`)
 
@@ -120,7 +129,7 @@ src/server/mock/*      ── engine state + simulator (one per Node process)
 `logs`, `attempts`, `dag`, `results`, `pipeline-runs`, `cancel`) · `pipelines` (+ `[id]`, `runs`) ·
 `pipeline-jobs/[jobId]` · `stages` (+ `[id]`) · `languages/capacity`, `languages/[lang]/capacity` ·
 `capacity/{global,history}` · `reservations` · `dead-letters` (+ `[id]`, `replay`, `assign`, `close`,
-`replay-batch`) · `replays` · `results` (+ `[utterance_id]`, `csv`, `file`) · `files/search` ·
+`replay-batch`) · `replays` · `results` (+ `[utterance_id]`, `csv`, `file`) · `issues` (+ `summary`, `facets`, `patterns`, `insights`, `[id]`, `export.csv`, `report.md`) · `files/search` ·
 `gcs/{buckets,objects,object}` · `analytics/*` · `config` · `audit` · `alerts` (+ `ack`, `resolve`) ·
 `incidents` · `events` · `logs` · `sim` · `stream`. Full contract: `docs/data-contract.md`, `docs/openapi.yaml`.
 

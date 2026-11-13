@@ -202,6 +202,11 @@ export interface MockEngine {
     rowsFor(wf: Workflow): ResultRow[];
     rowsInRange(from: number, to: number): ResultRow[];
     succeededBetween(from: number, to: number): Workflow[];
+    /** utterance_pattern id → template (registered as rows are generated) */
+    patterns(): Record<string, { id: string; language: LangCode; template: string; intent: string; agent_function: string }>;
+    agentFunctions: string[];
+    /** mock only: the seeded issue scenario a row was re-labelled by (null = base row) */
+    scenarioOf(row: ResultRow): string | null;
   };
   actions: {
     injectBatch(o?: { language?: LangCode; utteranceCount?: number; pipelineVersion?: string; pipelineId?: string; priority?: number }): Workflow;

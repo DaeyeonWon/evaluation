@@ -18,6 +18,7 @@ export const API_RULES: readonly ApiRule[] = [
   { methods: WRITE, path: /^\/api\/v1\/dead-letters(\/.*)?$/, anyOf: ["dlq:replay"] },
   { methods: ["POST"], path: /^\/api\/v1\/workflows\/[^/]+\/cancel$/, anyOf: ["workflow:cancel"] },
   { methods: ["POST"], path: /^\/api\/v1\/sim$/, anyOf: ["sim:control"] },
+  { methods: ["PATCH"], path: /^\/api\/v1\/issues\/[^/]+$/, anyOf: ["issues:write"] },
   { methods: ["POST"], path: /^\/api\/v1\/alerts\/[^/]+\/(ack|resolve)$/, anyOf: OPERATIONAL },
 ];
 

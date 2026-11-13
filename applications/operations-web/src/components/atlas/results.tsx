@@ -41,7 +41,15 @@ const PARSERS = {
   sort: parseAsString.withDefault("eval_desc"),
   page: parseAsInt.withDefault(1),
   utt: parseAsString,
+  // Issue Report drill-down (/issues → /results): exact-match filters shown as removable chips
+  agent_function: parseAsString,
+  market: parseAsString,
+  intent_predicted: parseAsString,
+  utterance_pattern: parseAsString,
+  failure_reason: parseAsString,
 };
+/** URL params set by Issue Report links (each rendered as a removable chip). */
+const ISSUE_SCOPE = ["agent_function", "market", "intent_predicted", "utterance_pattern"] as const;
 const PAGE = 50;
 const RESULTS_BUCKET = "bixby-eval-results";
 
@@ -58,7 +66,11 @@ function toQuery(f: F): ResultQuery {
     model_version: f.model_version ?? undefined,
     pipeline_id: f.pipeline_id ?? undefined,
     result: (f.result as "PASS" | "FAIL" | null) ?? undefined,
-    failure_reason: f.reason ?? undefined,
+    failure_reason: f.reason ?? f.failure_reason ?? undefined,
+    agent_function: f.agent_function ?? undefined,
+    market: f.market ?? undefined,
+    intent_predicted: f.intent_predicted ?? undefined,
+    utterance_pattern: f.utterance_pattern ?? undefined,
     batch_id: f.batch_id ?? undefined,
     workflow_id: f.workflow_id ?? undefined,
     q: f.q ?? undefined,
@@ -496,6 +508,16 @@ export function ResultsScreen() {
                 </button>
               ))}
             </div>
+            {ISSUE_SCOPE.map((k) =>
+              f[k] ? (
+                <span className="chip" key={k}>
+                  {k} {f[k]}
+                  <button className="btn sm ghost icon" style={{ height: 18, width: 18 }} aria-label={`${tc("actions.resetFilters")}: ${k}`} onClick={() => setFilter({ [k]: null })}>
+                    <X />
+                  </button>
+                </span>
+              ) : null,
+            )}
             {f.workflow_id ? (
               <span className="chip">
                 workflow {f.workflow_id}
@@ -509,7 +531,7 @@ export function ResultsScreen() {
               onClick={() => {
                 setQDraft(null);
                 setBatchDraft(null);
-                setF({ language: [], capsule: null, intent: null, device: null, version: null, model_version: null, pipeline_id: null, result: null, reason: null, batch_id: null, workflow_id: null, q: null, page: 1 });
+                setF({ language: [], capsule: null, intent: null, device: null, version: null, model_version: null, pipeline_id: null, result: null, reason: null, batch_id: null, workflow_id: null, q: null, agent_function: null, market: null, intent_predicted: null, utterance_pattern: null, failure_reason: null, page: 1 });
               }}
             >
               <X />

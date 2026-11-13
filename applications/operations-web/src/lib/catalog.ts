@@ -1600,6 +1600,36 @@ export const RESULT_COLUMNS: ResultColumn[] = [
     "key": "eval_timestamp",
     "label": "eval_timestamp",
     "type": "datetime"
+  },
+  {
+    "key": "agent_function",
+    "label": "agent_function",
+    "type": "enum"
+  },
+  {
+    "key": "agent_function_predicted",
+    "label": "agent_function_predicted",
+    "type": "enum"
+  },
+  {
+    "key": "market",
+    "label": "market",
+    "type": "enum"
+  },
+  {
+    "key": "os_version",
+    "label": "os_version",
+    "type": "enum"
+  },
+  {
+    "key": "one_ui_version",
+    "label": "one_ui_version",
+    "type": "enum"
+  },
+  {
+    "key": "utterance_pattern",
+    "label": "utterance_pattern",
+    "type": "string"
   }
 ];
 

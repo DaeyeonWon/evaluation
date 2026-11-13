@@ -91,6 +91,7 @@ that the proxy is missing.
 | `workflow:cancel` | `POST /workflows/{id}/cancel` | proxy + `requirePermission` |
 | `sim:control` | `POST /sim` (pause, resume, speed, step, inject) | proxy |
 | `hermes:access` | `/hermes` | proxy + page (`forbidden()`) |
+| `issues:write` | `PATCH /issues/{id}` (Issue Report triage: status, owner, note, ticket) | proxy + `requirePermission`; audited as `ISSUE_UPDATE` |
 | `admin` | implies every permission | — |
 
 Default role map in `console.config.ts`. Change it there.
@@ -98,7 +99,7 @@ Default role map in `console.config.ts`. Change it there.
 | Role | Permissions |
 | --- | --- |
 | Viewer | `view` |
-| Operator | `view`, `capacity:write`, `dlq:replay`, `workflow:cancel`, `hermes:access` |
+| Operator | `view`, `capacity:write`, `dlq:replay`, `workflow:cancel`, `issues:write`, `hermes:access` |
 | Admin | `*` (everything, incl. `config:write`, `sim:control`, `admin`) |
 | HermesUser | `view`, `hermes:access` (granted by `CONSOLE_HERMES_USERS`) |
 

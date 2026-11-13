@@ -1092,6 +1092,18 @@ export interface ResultRow {
   pipeline_version: PipelineVersion;
   eval_timestamp: string;
   eval_ts: EpochMs;
+  /** Bixby Agent function that owns the EXPECTED intent (deterministic map intent → function, capsule fallback) */
+  agent_function: AgentFunction;
+  /** function the PREDICTED intent belongs to (≠ agent_function when the utterance was routed elsewhere) */
+  agent_function_predicted: AgentFunction;
+  /** market / region of the utterance (language-linked: ko→KR, en→US|GB, ja→JP, es→ES|MX) */
+  market: Market;
+  /** device platform version, e.g. "Android 16", "Wear OS 6", "Tizen 9.0" */
+  os_version: string;
+  /** One UI version, e.g. "One UI 8.5", "One UI 8 Watch", "One UI Tizen" */
+  one_ui_version: string;
+  /** normalized utterance pattern id (the utterance template with slot values replaced), e.g. "up-ko-1x2y3z" */
+  utterance_pattern: string;
 }
 
 export interface ResultsSummary extends RateStat {
@@ -1142,6 +1154,8 @@ export interface ResultsPage {
     pipeline_id: Record<string, number>;
     version: Record<string, number>;
     language: Partial<Record<LangCode, number>>;
+    agent_function: Partial<Record<AgentFunction, number>>;
+    market: Partial<Record<Market, number>>;
   };
 }
 
@@ -1266,6 +1280,8 @@ export interface StreamEventMap {
   sim: SimState;
   /** root or child PipelineJob status change */
   job: PipelineJobTransition;
+  /** issue triage change (PATCH) or a new P0/P1 issue detected */
+  issue: IssueStreamMessage;
   /**
    * First message of every connection. `lastEventId` = SSE id at connect time; `resumed` = the server
    * replayed missed messages after the client's Last-Event-ID; `resync` = it could not (unknown or
@@ -1819,4 +1835,430 @@ export interface CapacityHistory {
   globalActive: number[];
   globalLimit: number;
   range: ResolvedRange;
+}
+
+
+// ═══════════════════════════════════════════════ Issue Report (/issues, /api/v1/issues/*) ══
+// Scoring, novelty and baseline rules: docs/data-contract.md "Issue Report".
+
+/** Bixby Agent functions (ResultRow.agent_function). */
+export type AgentFunction =
+  | "device_control"
+  | "smartthings_routine"
+  | "alarm_timer"
+  | "call_message"
+  | "media_play"
+  | "weather"
+  | "navigation"
+  | "settings"
+  | "calendar"
+  | "general_qa"
+  | "camera"
+  | "galaxy_ai_feature";
+export type Market = "KR" | "US" | "GB" | "JP" | "ES" | "MX";
+/** P0 = critical market issue … P3 = low */
+export type IssueSeverity = "P0" | "P1" | "P2" | "P3";
+/** Triage lifecycle: NEW → TRIAGED → TICKETED → RESOLVED, any open state → IGNORED; RESOLVED/IGNORED → NEW (reopen) */
+export type IssueStatus = "NEW" | "TRIAGED" | "TICKETED" | "RESOLVED" | "IGNORED";
+/** Severity class used by the `severity` factor: safety > policy > wrong_action > quality */
+export type SeverityClass = "safety" | "policy" | "wrong_action" | "quality";
+export type IssueFactorKey = "volume" | "severity" | "trend" | "regression" | "reach" | "novelty";
+export type IssueNovelty = "new" | "recurring";
+/** How FAIL rows are grouped: signature = (agent_function, intent_expected→predicted, failure_reason); pattern = signature + utterance_pattern */
+export type IssueGroupBy = "signature" | "pattern";
+/** Columns with per-value fail statistics (summary.columns) and filters (R4). */
+export type IssueColumn =
+  | "agent_function"
+  | "capsule"
+  | "intent"
+  | "language"
+  | "market"
+  | "device"
+  | "model_version"
+  | "pipeline"
+  | "pipeline_version"
+  | "failure_reason"
+  | "os_version"
+  | "one_ui_version";
+export type PatternKind = "new_feature_name" | "code_switch" | "new_term" | "new_phrasing";
+export type InsightKind =
+  | "overall"
+  | "critical"
+  | "safety"
+  | "regression"
+  | "spike"
+  | "new_pattern"
+  | "market"
+  | "hotspot"
+  | "concentration"
+  | "improvement";
+
+/**
+ * A message key under the `issues` i18n namespace + its variables. Variables named `fn`, `fn2`
+ * (AgentFunction), `reason` (FailureReason), `axis`/`column` (IssueColumn), `market` (Market), `kind`
+ * (PatternKind), `cls` (SeverityClass), `status`, `severity` are enum codes that
+ * issues-shared/format.ts translates before interpolation. Rates are already percentages (0–100, 1 decimal).
+ */
+export interface IssueText {
+  key: string;
+  vars?: Record<string, string | number>;
+}
+
+export interface IssueFactor {
+  key: IssueFactorKey;
+  /** weight in points (all weights sum to 100) */
+  weight: number;
+  /** normalized factor value 0..1 */
+  value: number;
+  /** points added to the score = value × weight */
+  contribution: number;
+  /** raw numbers behind the value (e.g. { z, observed, expected } for trend) */
+  detail: Record<string, string | number | null>;
+}
+
+export interface IssueBaseline {
+  from: EpochMs;
+  to: EpochMs;
+  days: number;
+  /** preceding = same length right before the range (min 7 d); intra_range = the range's last 7 d vs the rest (used when history before the range is too short, e.g. 30d) */
+  mode: "preceding" | "intra_range";
+  /** window compared against the baseline for trend + novelty */
+  compare: { from: EpochMs; to: EpochMs };
+  /** share of the wanted baseline length that has data (0..1) */
+  coverage: number;
+  /** false → trend and novelty contribute 0 (reason `baselineInsufficient`) */
+  sufficient: boolean;
+  /**
+   * release filters (model_version / pipeline / pipeline_version / os_version / one_ui_version) NOT applied to the
+   * baseline window because the selected values had (almost) no rows there — the baseline is then "all versions".
+   * Absent when every filter applies to the baseline.
+   */
+  relaxed_columns?: IssueColumn[];
+}
+
+export interface IssueRegression {
+  axis: "model_version" | "pipeline_version";
+  current: string;
+  previous: string;
+  /** fail rate of this signature within its intent scope, % */
+  currentRate: number;
+  previousRate: number;
+  currentTotal: number;
+  previousTotal: number;
+}
+
+export interface IssueSignature {
+  agent_function: AgentFunction;
+  intent_expected: string;
+  intent_predicted: string;
+  failure_reason: FailureReason;
+  /** dominant pattern (group_by=signature) or THE pattern (group_by=pattern) */
+  utterance_pattern: string;
+  pattern_template: string;
+}
+
+export interface IssueHistoryEntry {
+  at: EpochMs;
+  by: string;
+  by_name: string;
+  field: "status" | "owner" | "note" | "ticket_id";
+  from: string | null;
+  to: string | null;
+  reason?: string | null;
+}
+
+export interface IssueState {
+  status: IssueStatus;
+  owner: string | null;
+  owner_name: string | null;
+  note: string | null;
+  ticket_id: string | null;
+  updated_at: EpochMs | null;
+  updated_by: string | null;
+  history: IssueHistoryEntry[];
+}
+
+export interface IssuePatternShare {
+  id: string;
+  template: string;
+  language: LangCode;
+  count: number;
+  /** pattern absent from the baseline window */
+  novel: boolean;
+}
+
+export interface IssueSample {
+  utterance_id: string;
+  utterance_text: string;
+  asr_text: string;
+  expected_response: string;
+  actual_response: string;
+  judge_reason: string;
+  language: LangCode;
+  market: Market;
+  device_type: string;
+  eval_ts: EpochMs;
+}
+
+export interface Issue {
+  /** stable across ranges and calls: "iss-" + hash(group key) */
+  id: string;
+  /** 1-based rank by score within the filtered list */
+  rank: number;
+  title: IssueText;
+  signature: IssueSignature;
+  group_by: IssueGroupBy;
+  severity: IssueSeverity;
+  severity_class: SeverityClass;
+  /** criticality 0..100 (Σ factors[].contribution) */
+  score: number;
+  factors: IssueFactor[];
+  /** why it was flagged, most important first */
+  reasons: IssueText[];
+  novelty: IssueNovelty;
+  /** FAIL rows in range */
+  count: number;
+  /** share of all FAILs in the (filtered) range, % */
+  share: number;
+  /** rows (PASS+FAIL) in range with the same intent_expected (the issue's scope) */
+  scope_total: number;
+  /** count / scope_total, % */
+  fail_rate: number;
+  baseline_count: number;
+  baseline_rate: number | null;
+  /** fail_rate − baseline_rate, percentage points (null without baseline) */
+  delta: number | null;
+  first_seen: EpochMs;
+  last_seen: EpochMs;
+  languages: LangCode[];
+  markets: Market[];
+  devices: string[];
+  model_versions: string[];
+  /** FAIL count per trend bucket (same buckets as summary.trend) */
+  spark: number[];
+  patterns: IssuePatternShare[];
+  sample: IssueSample;
+  regression: IssueRegression | null;
+  state: IssueState;
+  /** query for /results that selects this issue's rows (add the range yourself) */
+  results_query: Record<string, string>;
+}
+
+export interface IssueListResponse extends RangedList<Issue> {
+  page: number;
+  pageSize: number;
+  baseline: IssueBaseline;
+  /** total before issue-level filters (severity/status/novelty/q/min_score) */
+  unfiltered_total: number;
+  factor_weights: Record<IssueFactorKey, number>;
+}
+
+export interface IssueColumnStat {
+  value: string;
+  total: number;
+  fails: number;
+  /** % */
+  fail_rate: number;
+  baseline_fail_rate: number | null;
+  /** percentage points */
+  delta: number | null;
+  issues: number;
+}
+
+export interface IssueTrendPoint {
+  /** bucket start */
+  t: EpochMs;
+  total: number;
+  fails: number;
+  fail_rate: number | null;
+  /** FAILs that belong to P0/P1 issues */
+  critical_fails: number;
+  /** rows (PASS+FAIL) whose utterance_pattern is new vs the baseline */
+  new_pattern_rows: number;
+}
+
+export interface IssueMatrixCell {
+  row: string;
+  col: string;
+  total: number;
+  fails: number;
+  fail_rate: number | null;
+  baseline_fail_rate: number | null;
+  delta: number | null;
+  top_issue_id: string | null;
+}
+
+export interface IssueMatrix {
+  rows: string[];
+  cols: string[];
+  cells: IssueMatrixCell[];
+}
+
+export interface IssueMover {
+  column: IssueColumn;
+  value: string;
+  fail_rate: number;
+  baseline_fail_rate: number;
+  delta: number;
+  fails: number;
+  direction: "up" | "down";
+}
+
+export interface IssueSummary {
+  range: ResolvedRange;
+  baseline: IssueBaseline;
+  kpis: {
+    utterances: number;
+    fails: number;
+    fail_rate: number | null;
+    baseline_fail_rate: number | null;
+    fail_rate_delta: number | null;
+    issues: number;
+    by_severity: Record<IssueSeverity, number>;
+    /** P0+P1 in NEW/TRIAGED/TICKETED */
+    critical_open: number;
+    safety_issues: number;
+    new_issues: number;
+    regressions: number;
+    new_patterns: number;
+    markets_affected: number;
+    avg_score: number | null;
+    max_score: number | null;
+    resolved: number;
+  };
+  severity_distribution: { severity: IssueSeverity; issues: number; fails: number; by_status: Record<IssueStatus, number> }[];
+  class_distribution: { cls: SeverityClass; issues: number; fails: number }[];
+  status_distribution: Record<IssueStatus, number>;
+  factor_weights: Record<IssueFactorKey, number>;
+  /** average contribution per factor over the top 20 issues (radar / stacked bars) */
+  factor_profile: Record<IssueFactorKey, number>;
+  columns: Record<IssueColumn, IssueColumnStat[]>;
+  trend: { bucket: "hour" | "day"; points: IssueTrendPoint[] };
+  /** agent_function × language */
+  matrix: IssueMatrix;
+  /** agent_function × market */
+  market_matrix: IssueMatrix;
+  top_movers: IssueMover[];
+  top_issues: Pick<Issue, "id" | "rank" | "title" | "severity" | "severity_class" | "score" | "count" | "fail_rate" | "delta" | "novelty" | "signature" | "spark" | "state">[];
+}
+
+export interface IssueFacetValue {
+  value: string;
+  /** FAIL rows (columns) or issues (severity/status/novelty/severity_class) */
+  count: number;
+}
+export type IssueFacetKey = IssueColumn | "severity" | "status" | "novelty" | "severity_class";
+export interface IssueFacets {
+  range: ResolvedRange;
+  facets: Record<IssueFacetKey, IssueFacetValue[]>;
+}
+
+export interface IssueDetail extends Issue {
+  range: ResolvedRange;
+  baseline: IssueBaseline;
+  utterances: Paginated<ResultRow>;
+  trend: { bucket: "hour" | "day"; points: { t: EpochMs; fails: number; total: number; fail_rate: number | null }[] };
+  breakdown: Record<"language" | "market" | "device" | "model_version" | "pipeline_version" | "os_version" | "one_ui_version", IssueColumnStat[]>;
+  workflows: { workflow_id: string; language: LangCode; pipeline_id: string; pipeline_version: string; model_version: string; created_at: EpochMs; completed_at: EpochMs | null; fails: number }[];
+  similar: { id: string; title: IssueText; severity: IssueSeverity; score: number; count: number; relation: "same_intent" | "same_function_reason" | "same_prediction" }[];
+}
+
+export interface NovelTerm {
+  term: string;
+  count: number;
+  baseline_count: number;
+  languages: LangCode[];
+  pattern_ids: string[];
+}
+
+export interface NewPattern {
+  /** utterance_pattern id */
+  id: string;
+  template: string;
+  language: LangCode;
+  kind: PatternKind;
+  /** novel terms found in this pattern's utterances */
+  terms: string[];
+  /** rows in the compare window */
+  count: number;
+  baseline_count: number;
+  /** second half vs first half of the compare window (null = only in the second half) */
+  growth: number | null;
+  /** rows per trend bucket over the compare window */
+  daily: number[];
+  daily_t: EpochMs[];
+  first_seen: EpochMs;
+  fails: number;
+  /** % */
+  fail_rate: number;
+  agent_function: AgentFunction;
+  intent_expected: string;
+  intents_predicted: { intent: string; count: number }[];
+  markets: Market[];
+  devices: string[];
+  examples: Pick<ResultRow, "utterance_id" | "utterance_text" | "asr_text" | "result" | "failure_reason" | "intent_predicted" | "device_type" | "market" | "actual_response">[];
+  issue_ids: string[];
+  /**
+   * established phrasings of the same intent_expected in the baseline window (PASS + FAIL rows), most similar first
+   * (same language, shared words, then volume); max 3. Empty = the intent itself had no baseline traffic.
+   */
+  established?: { pattern_id: string; template: string; language: LangCode; count: number; fail_rate: number; shared_terms: string[] }[];
+}
+
+export interface PatternList extends RangedList<NewPattern> {
+  baseline: IssueBaseline;
+  terms: NovelTerm[];
+}
+
+export interface IssueInsight {
+  id: string;
+  kind: InsightKind;
+  /** key under issues.insights.* (already prefixed: "insights.spike") */
+  key: string;
+  vars: Record<string, string | number>;
+  severity: IssueSeverity;
+  /** ranking weight 0..100 */
+  score: number;
+  evidence: {
+    /** /issues filter params that reproduce it */
+    filter: Record<string, string>;
+    /** /results params (FAIL rows behind it) */
+    results: Record<string, string> | null;
+    metrics: Record<string, number | string | null>;
+    issue_id?: string;
+    pattern_id?: string;
+  };
+}
+
+export interface InsightList extends RangedList<IssueInsight> {
+  baseline: IssueBaseline;
+}
+
+/** PATCH /api/v1/issues/[id] */
+export interface IssuePatch {
+  status?: IssueStatus;
+  /** operator id, or null to unassign */
+  owner?: string | null;
+  note?: string | null;
+  ticket_id?: string | null;
+  reason?: string;
+}
+
+export interface IssuePatchResult {
+  issue_id: string;
+  state: IssueState;
+  changed: string[];
+}
+
+/** SSE `issue` */
+export interface IssueStreamMessage {
+  kind: "status" | "update" | "new_critical";
+  issue_id: string;
+  status: IssueStatus;
+  prev_status?: IssueStatus | null;
+  severity?: IssueSeverity;
+  score?: number;
+  title?: IssueText;
+  by?: string | null;
+  at: EpochMs;
 }

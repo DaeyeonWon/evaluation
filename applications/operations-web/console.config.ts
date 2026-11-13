@@ -31,8 +31,8 @@ export default defineConsoleConfig({
       Viewer: { label: "Viewer", description: "조회·내보내기", permissions: ["view"] },
       Operator: {
         label: "Operator",
-        description: "용량 조정, DLQ Replay, Workflow 취소, Hermes",
-        permissions: ["view", "capacity:write", "dlq:replay", "workflow:cancel", "hermes:access"],
+        description: "용량 조정, DLQ Replay, Workflow 취소, 이슈 Triage, Hermes",
+        permissions: ["view", "capacity:write", "dlq:replay", "workflow:cancel", "issues:write", "hermes:access"],
       },
       Admin: { label: "Admin", description: "전체 권한", permissions: "*" },
       /** granted by CONSOLE_HERMES_USERS: read-only console + Hermes link */
