@@ -8,7 +8,7 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { useT } from "@/i18n/client";
 import type { IssueBreakdownItem } from "@/lib/types";
-import { useIssueFormat, type IssueViewLinks } from "../../issues-shared";
+import { TypeDot, isTypeDim, useIssueFormat, type IssueViewLinks } from "../../issues-shared";
 import type { ValueText } from "./labels";
 import { Delta, SevBar, Spark, deltaDir } from "./marks";
 
@@ -42,6 +42,7 @@ export function CategoryCard({
       <header className="cat-card-head">
         <span className="cat-rank mono">{t("card.rank", { rank: item.rank })}</span>
         <h3>
+          {isTypeDim(dim) ? <TypeDot dim={dim} value={item.value} className="cat-tyd" /> : null}
           <Link href={V.drillHref(dim, item.value)} className="cat-card-link" aria-label={t("card.drill", { value: name })}>
             {name}
           </Link>

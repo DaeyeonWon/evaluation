@@ -85,10 +85,10 @@ f.selected / f.select(id)    // ?issue=<id> quick-look selection (Triage side sh
 const tl = useTriageLens();
 tl.lens        // "user" (default) | "dev"              ?lens=dev
 tl.group       // GroupDim, default "severity" (= 영향도 / Impact level)   ?group=division
-tl.subgroup    // GroupDim | null (never equal to group)                  ?subgroup=user_impact
+tl.subgroup    // GroupDim | null: unset → the lens type; ?subgroup=none → null; never equal to group   ?subgroup=division
 tl.typeDim     // "user_impact" (user lens) | "dev_miss" (dev lens): the card type badge and default secondary grouping
 tl.setLens("dev")      // push history; also sets must_handle=true when it is unset (the dev-lens default)
-tl.setGroup("region"); tl.setSubgroup(null)
+tl.setGroup("region"); tl.setSubgroup(null)   // null writes subgroup=none; setSubgroup(tl.typeDim) clears the param
 ```
 
 A deep link with `?lens=dev` and no `must_handle` does **not** get the dev default; only `setLens` applies it.
@@ -105,7 +105,7 @@ const V = useIssueViewLinks();
 V.page                       // "triage" | "categories" | "analysis" | "report" | "detail"
 V.view                       // the list view this page belongs to (detail → the view it was opened from)
 V.viewHref("analysis")       // /issues/analysis?<filters>
-V.issueHref(id)              // /issues/<id>?<filters>[&from=<view>] + the current view's view state
+V.issueHref(id)              // /issues/<id>?<filters>[&via=<view>] + the current view's view state
 V.drillHref("division", "TV")                  // /issues?<filters>&division=TV   (target view defaults to triage)
 V.drillHref("category", "asr", "analysis", { replace: false })   // add the value instead of replacing
 V.backHref                   // on /issues/[id]: the originating view + its query
@@ -113,7 +113,8 @@ V.backHref                   // on /issues/[id]: the originating view + its quer
 
 What each link carries:
 - **Everything** (filters, range, sort, group_by, unknown params).
-- **Minus** `page`, `issue` and `from`.
+- **Minus** `page`, `issue` and `via` (the detail page's origin view). `via` is not `from`: `from`/`to` are the global
+  custom time range and are always carried. A legacy `from=<view name>` (old links) is still read as the origin and dropped.
 - **Minus the view-local params of other views.** These are registered in `VIEW_STATE_PARAMS`:
   - triage: `lens, group, subgroup, view`
   - categories: `dim, csort, cview` (reserved)
@@ -122,11 +123,14 @@ What each link carries:
 
 **If you add a view-local URL param, register it in `VIEW_STATE_PARAMS`.** Otherwise it leaks into the other views.
 
-Pure helpers for non-hook code: `viewPath(view, search)`, `issuePath(id, search, from)`, `issuePageOf(pathname)`,
-`ISSUE_VIEWS`, `ISSUE_VIEW_PATH`.
+Pure helpers for non-hook code: `viewPath(view, search)`, `issuePath(id, search, via)`, `issuePageOf(pathname)`,
+`ISSUE_VIEWS`, `ISSUE_VIEW_PATH`, `ORIGIN_PARAM` (= `"via"`).
 
-`useIssueLinks()` (unchanged) gives drill-downs out of the Issue Report: `results(issue)`, `resultsFor({...})`,
+`useIssueLinks()` gives drill-downs out of the Issue Report: `results(issue)`, `resultsFor({...})`,
 `evidence(insight)`, `workflow(id, from, to)`, `utterance(id)`, and `issue(base, id)` for `?issue=` quick-look links.
+`results*` and `evidence` carry the current `division`, `region` and `bixby_version` filters (unless the link sets them),
+so `/results` opens on the same slice. `workflow(id, from, to)` widens the range to cover the Workflow (`useCoverHref`);
+the detail page's Workflow links use the same helper.
 
 ## 5. Dimension metadata (`issues-shared/dims.ts`)
 
@@ -148,12 +152,27 @@ const dl = useDimLabel(); dl.dim("bixby_version"); dl.value("device", "galaxy_s2
   the `issues` namespace; until a key exists, the raw value shows.
 - language, device and capsule use the static catalogs.
 
+### Colours: `issues-shared/palette.tsx` + `atlas-issues.css`
+
+One colour vocabulary for every view. Do not define your own type or factor hues.
+
+| What | Tokens | JS |
+| --- | --- | --- |
+| 영향도 / Impact levels P0–P3 (reserved; always icon + "P0 Critical" label) | `--sev-p0 … --sev-p3` | `IMPACT_LEVELS`, `sevVar(s)` |
+| 사용자 영향 types | `--ut-<user_impact_type>` (7 validated slots `--ty-1…7`) | `USER_IMPACT_ORDER`, `typeVar("user_impact", v)` |
+| Bixby 미처리 types | `--dm-<dev_miss_type>` (same 7 slots + neutral steps; `out_of_scope` = ink + hatch) | `DEV_MISS_ORDER`, `typeVar("dev_miss", v)` |
+| Score factors volume → novelty | `--fa-<factor>` (a separate validated 6-slot set) | `FACTOR_ORDER`, `factorVar(k)` |
+
+`<TypeDot dim value />` renders the swatch + icon (`.iss-tyd`); put the label next to it. Triage cards and lanes,
+분해 보기 cards/table, Analysis bubble colour-by and score strips, Report type tags/cross-tabs/score bars and the
+detail taxonomy tiles all read these tokens.
+
 ## 6. Data hooks (`issues-shared/data.ts`; types in `contract.ts`, aliased from `@/lib/types`)
 
 | Hook | Endpoint | Type |
 | --- | --- | --- |
 | `useIssues(f, { pageSize, page })` | `GET /issues` | `IssueListResponse` |
-| `useIssueGroups(f, { group, subgroup, lens }, { pageSize, page })` | `GET /issues?group=&subgroup=&lens=` | `IssueGroupedListResponse` (`groups[]` with `key`, `label`, `count`, `fails`, `by_severity`, `items`, `subgroups`) |
+| `useIssueGroups(f, { group, subgroup, lens }, { groupSize, groupKey, subgroupKey, groupPage, pageSize, page })` | `GET /issues?group=&subgroup=&lens=&group_size=&group_key=&subgroup_key=&group_page=` | `IssueGroupedListResponse` (`groups[]` with `key`, `label`, `count`, `fails`, `by_severity`, `items`, `subgroups`). "Load more" for one group = `groupKey` (+ `subgroupKey`) with a larger `groupSize` |
 | `useIssueBreakdown(f, dim)` | `GET /issues/breakdown?dim=` | `IssueBreakdownResponse` = `IssueBreakdown` (items: stats + `by_severity`, `trend`, `top_issues`, `top_pattern`, `share`) |
 | `useIssueMatrix(f, { x, y, metric })` | `GET /issues/matrix?x=&y=&metric=` | `IssueDimMatrixResponse` = `IssueDimMatrix` (`x_values`, `y_values`, `cells`, `domain`, …) |
 | `useIssueDetail(id, f, { page })` | `GET /issues/[id]` | `IssueDetailMerge` = `IssueDetail` (breakdown incl. division/region/bixby_version, `same_category`) |
@@ -180,36 +199,12 @@ const dl = useDimLabel(); dl.dim("bixby_version"); dl.value("device", "galaxy_s2
 
 Ask the framework engineer for changes to shared files: a new filter param, a dim, a view-local param in `VIEW_STATE_PARAMS`, or frame copy.
 
-## 8. TODOs left in the moved folders
+## 8. Status of the moved folders
 
-Each folder's `index.tsx` header lists its TODOs.
-
-**triage/** (from A):
-- Lenses: build on `useTriageLens()` and `useIssueGroups()`, with swimlanes or sections per impact level and a card type badge from `tl.typeDim`.
-- The left filter rail (`rail.tsx`, deleted) and the deck's active-filter chips were removed.
-  - `.ia-body[data-rail="off"]` keeps the old grid at one column. Drop the rail column and the `.ia-rail*` / `.ia-chips` CSS.
-  - The `issuesTriage` `rail.*`, `baseline.*` and `export.*` keys are now unused.
-- Add an "전체 분석 열기" link in the quick-look `IssueSheet` (`detail.tsx`) to `V.issueHref(id)`.
-
-**report/** (from B):
-- The "brief conditions" bar (`filter-bar.tsx`) was removed, along with its `regenerating` indicator.
-- `Masthead` still renders its own Markdown/CSV buttons, which duplicate the frame's export group. Drop or restyle them.
-- Add sections for division and region impact, Bixby version regression, "사용자 영향" and "Bixby 미처리 (개발)".
-  Use `useIssueBreakdown(f, "division" | "region" | "bixby_version" | "user_impact" | "dev_miss")`.
-
-**analysis/** (from C):
-- The Signal Lab filter bar (`filter-bar.tsx`) and the SheetHead / LIVE / export header were removed.
-  The min-score and `group_by` (signature|pattern) segments and the baseline readout went with them.
-  `group_by` is still a URL param: `f.set({ group_by })`.
-- The `issuesAnalysis` `filter.*` keys are now unused.
-- Build the X/Y heatmap with `useIssueMatrix` over `MATRIX_DIMS` and a treemap hierarchy picker.
-  Register any new params in `VIEW_STATE_PARAMS`.
-
-**categories/** (new): the whole view is a placeholder list of categories from `useIssueBreakdown(f, "category")`.
-Build the dimension switch, the cards, sorting, the ranking table and drill-down via `V.drillHref(dim, value)`.
-
-**detail/** (new): a placeholder header only (severity, status, id, title, score, FAILs, FAIL rate, last seen).
-Build the full page described in the brief.
+The TODOs from the move are done: Triage lenses + swimlanes, the quick-look sheet's "전체 분석 열기" link, Report's
+division / region / Bixby version / 사용자 영향 / Bixby 미처리 sections (the Masthead's duplicate exports are gone),
+Analysis' free-axis heatmap + treemap hierarchy picker, the 분해 보기 view and the single-issue page. Each folder's
+`index.tsx` header describes the view as built.
 
 ## 9. Verification (framework)
 
@@ -219,4 +214,6 @@ Build the full page described in the brief.
 - `e2e/smoke/smoke.spec.ts` covers:
   - the route sweep: `/issues`, `/issues/categories`, `/issues/analysis`, `/issues/report`, plus the top issue's `/issues/<id>`
   - the 308 redirects with their query
-  - view switching keeping filters
+  - view switching keeping filters (and the custom `from`/`to` range into `/issues/<id>?…&via=<view>`)
+  - the Triage lens switch (dev lens → `lens=dev&must_handle=true`) and `subgroup=none`
+  - Viewer: Triage controls disabled and `PATCH /api/v1/issues/<id>` → 403

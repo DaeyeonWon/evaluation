@@ -2,9 +2,10 @@
 /**
  * Analysis — issue-cluster bubble quadrant. x = FAIL volume (log), y = trend z-score vs baseline,
  * size = reach, colour = impact level (영향도, reserved severity colours + P-label) or, via the
- * colour-by picker, category / user impact / Bixby miss / division. A scatter shows every pair at once,
- * so non-impact colourings use the 3 all-pairs-validated slots for the top values (by issue count)
- * and fold the rest into a neutral Other; legend + tooltip name every mark.
+ * colour-by picker, category / user impact / Bixby miss / division. User impact and Bixby miss wear the
+ * shared type palette (issues-shared/palette: the same hue per type on every view); category / division use
+ * the 3 all-pairs-validated slots for the top values (by issue count) and fold the rest into a neutral
+ * Other; legend + tooltip name every mark.
  * Quadrant overlay: act now / emerging / watch / noise. Click a bubble → open the issue; click a
  * quadrant chip → lab brush `quad`. Every other brush dims the bubbles outside it.
  */
@@ -14,7 +15,7 @@ import { EChart, type ChartTokens } from "@/components/shared";
 import { useT } from "@/i18n/client";
 import type { Issue, IssueSeverity } from "@/lib/types";
 import { opt, tooltip } from "../../chart";
-import { useDimLabel, useIssueFormat } from "../../issues-shared";
+import { isTypeDim, typeOrder, typeToken, useDimLabel, useIssueFormat } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 import { CAT_SLOTS, COLOR_BY, QUADRANTS, SEVERITIES, Z_CUT, brushActive, issueValue, matchesBrush, quadrantOf, reachValue, trendZ, type ColorBy, type LabBrush, type Quadrant } from "./lab";
 
@@ -59,6 +60,10 @@ export function Bubble({
       if (!by.has(v)) by.set(v, []);
       by.get(v)!.push(i);
     }
+    if (isTypeDim(colorBy))
+      return typeOrder(colorBy)
+        .filter((v) => by.has(v))
+        .map((v) => ({ key: v, name: dl.value(colorBy, v), token: typeToken(colorBy, v), items: by.get(v)! }));
     const ranked = [...by.entries()].sort((a, b) => b[1].length - a[1].length || b[1].reduce((x, i) => x + i.count, 0) - a[1].reduce((x, i) => x + i.count, 0));
     const head: Group[] = ranked.slice(0, CAT_SLOTS).map(([v, items], k) => ({ key: v, name: dl.value(colorBy, v), token: `--issc-c${k + 1}`, items }));
     const tail = ranked.slice(CAT_SLOTS).flatMap(([, items]) => items);

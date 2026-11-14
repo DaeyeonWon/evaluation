@@ -5,79 +5,25 @@
  * Both lenses share the impact grouping (group, default severity = 영향도). The lens only picks the type
  * taxonomy shown on cards (user_impact_type vs dev_miss_type), the KPI emphasis and the default subgroup.
  * URL (view-local, registered in VIEW_STATE_PARAMS.triage): lens · group · subgroup (+ view deck|kanban).
- * `subgroup` unset → the lens type; `subgroup=none` → no secondary grouping.
+ * `subgroup` unset → the lens type; `subgroup=none` → no secondary grouping (useTriageLens).
  */
 import clsx from "clsx";
-import {
-  AudioLines,
-  Ban,
-  Braces,
-  CircleSlash,
-  CircleX,
-  Code2,
-  GitCompareArrows,
-  Hourglass,
-  Languages,
-  MessageCircleQuestion,
-  MessageSquareWarning,
-  PenLine,
-  Route,
-  ShieldAlert,
-  ShieldOff,
-  Shuffle,
-  Sparkles,
-  Timer,
-  UserRound,
-} from "lucide-react";
+import { Code2, UserRound } from "lucide-react";
 import { LayoutGroup, motion } from "motion/react";
 import { useCallback, useId, type ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import { parseAsString, useQueryStates } from "@/lib/client";
-import type { DevMissType, Issue, IssueFacets, UserImpactType } from "@/lib/types";
-import { useTriageLens, type GroupDim, type IssueFiltersApi, type IssueFormat, type TriageLens } from "../../issues-shared";
+import type { Issue, IssueFacets, UserImpactType } from "@/lib/types";
+import { TYPE_ICON, typeOrder, typeVar, useTriageLens, type IssueFiltersApi, type IssueFormat, type TriageLens, type TypeDim } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 
 type Facets = IssueFacets | undefined;
 
 // ───────────────────────────────────────── type taxonomies ──
-export const USER_IMPACT_ORDER: UserImpactType[] = ["safety_privacy", "wrong_action", "task_blocked", "misunderstood", "inappropriate_content", "degraded", "minor"];
-/** must-handle misses first (by how directly they are a Bixby defect), out_of_scope last */
-export const DEV_MISS_ORDER: DevMissType[] = [
-  "guardrail_miss",
-  "regression",
-  "new_feature_gap",
-  "locale_gap",
-  "supported_intent_failed",
-  "routing",
-  "slot_extraction",
-  "asr_robustness",
-  "performance",
-  "out_of_scope",
-];
-export const TYPE_ICON: Record<UserImpactType | DevMissType, ReactNode> = {
-  safety_privacy: <ShieldAlert aria-hidden />,
-  wrong_action: <Shuffle aria-hidden />,
-  task_blocked: <Ban aria-hidden />,
-  misunderstood: <MessageCircleQuestion aria-hidden />,
-  inappropriate_content: <MessageSquareWarning aria-hidden />,
-  degraded: <Hourglass aria-hidden />,
-  minor: <PenLine aria-hidden />,
-  guardrail_miss: <ShieldOff aria-hidden />,
-  regression: <GitCompareArrows aria-hidden />,
-  new_feature_gap: <Sparkles aria-hidden />,
-  locale_gap: <Languages aria-hidden />,
-  supported_intent_failed: <CircleX aria-hidden />,
-  routing: <Route aria-hidden />,
-  slot_extraction: <Braces aria-hidden />,
-  asr_robustness: <AudioLines aria-hidden />,
-  performance: <Timer aria-hidden />,
-  out_of_scope: <CircleSlash aria-hidden />,
-};
-export type TypeDim = "user_impact" | "dev_miss";
-export const typeOrder = (d: TypeDim): string[] => (d === "user_impact" ? USER_IMPACT_ORDER : DEV_MISS_ORDER);
+// The palette, orders and icons are shared by every view (issues-shared/palette.tsx); re-exported for the Triage files.
+export { DEV_MISS_ORDER, TYPE_ICON, USER_IMPACT_ORDER, typeOrder, typeVar } from "../../issues-shared";
+export type { TypeDim };
 export const typeOf = (i: Pick<Issue, "user_impact_type" | "dev_miss_type">, d: TypeDim) => (d === "user_impact" ? i.user_impact_type : i.dev_miss_type);
-/** CSS colour of a type value (categorical slot; dev_miss folds the tail to neutrals — see atlas-issues-triage.css) */
-export const typeVar = (d: TypeDim, v: string) => `var(--${d === "user_impact" ? "ut" : "dm"}-${v})`;
 
 export function TypeBadge({ dim, value, fx, size }: { dim: TypeDim; value: string; fx: IssueFormat; size?: "sm" }) {
   return (
@@ -116,14 +62,12 @@ export function TypeBar({ dim, counts, fx, legend, label }: { dim: TypeDim; coun
 }
 
 // ───────────────────────────────────────── view state ──
-const RAW = { subgroup: parseAsString, lens: parseAsString, must_handle: parseAsString, page: parseAsString };
+const RAW = { lens: parseAsString, must_handle: parseAsString, page: parseAsString };
 
-/** useTriageLens + the effective subgroup (lens type by default, `none` = off) and lens switching that keeps must_handle sane. */
+/** useTriageLens (incl. `subgroup=none`) + lens switching that keeps must_handle sane. */
 export function useTriageState() {
   const tl = useTriageLens();
   const [raw, setRaw] = useQueryStates(RAW);
-  const subNone = raw.subgroup === "none";
-  const subgroup: GroupDim | null = subNone ? null : (tl.subgroup ?? (raw.subgroup ? null : tl.typeDim !== tl.group ? tl.typeDim : null));
   const setLens = useCallback(
     (l: TriageLens) => {
       if (l === "dev") tl.setLens("dev");
@@ -132,15 +76,7 @@ export function useTriageState() {
     },
     [tl, setRaw, raw.must_handle],
   );
-  const setSubgroup = useCallback(
-    (g: GroupDim | null) => {
-      if (g === null) setRaw({ subgroup: "none", page: null });
-      else if (g === tl.typeDim) setRaw({ subgroup: null, page: null });
-      else tl.setSubgroup(g);
-    },
-    [setRaw, tl],
-  );
-  return { ...tl, subgroup, setLens, setSubgroup };
+  return { ...tl, setLens };
 }
 export type TriageState = ReturnType<typeof useTriageState>;
 

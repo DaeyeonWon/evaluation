@@ -21,9 +21,9 @@
  * level); must_handle = "true" | "false" | null.
  *
  * Triage view state (NOT filters — links.ts carries them only within Triage):
- *   const tl = useTriageLens();   // tl.lens "user"|"dev" · tl.group (default "severity" = 영향도) · tl.subgroup | null
+ *   const tl = useTriageLens();   // tl.lens "user"|"dev" · tl.group (default "severity" = 영향도) · tl.subgroup (default = lens type; null = ?subgroup=none)
  *   tl.setLens("dev")              // also sets must_handle=true when unset (the dev lens default)
- *   tl.setGroup("division"); tl.setSubgroup(null)
+ *   tl.setGroup("division"); tl.setSubgroup(null)   // null writes subgroup=none
  */
 import { useCallback, useMemo } from "react";
 import { parseAsInt, parseAsList, parseAsString, useQueryStates, useTimeRange, type IssueQuery } from "@/lib/client";
@@ -169,14 +169,22 @@ const isGroup = (v: string | null): v is GroupDim => !!v && (GROUP_DIMS as reado
 /**
  * Triage lenses. Both lenses group by the same impact level (severity P0–P3, "영향도 / Impact") by default;
  * the lens decides which type is shown on cards and the default secondary grouping
- * (`typeDim`: user → user_impact, dev → dev_miss). `subgroup` null = no secondary grouping.
+ * (`typeDim`: user → user_impact, dev → dev_miss).
+ *
+ * `subgroup` URL contract:
+ *   unset            → the lens type (`typeDim`), or null when the group already is the lens type
+ *   `subgroup=none`  → null: no secondary grouping (explicit, survives lens switches)
+ *   `subgroup=<dim>` → that dim (null when equal to `group`)
+ * `setSubgroup(null)` writes `none`; `setSubgroup(typeDim)` clears the param (back to the default).
  */
+export const SUBGROUP_NONE = "none";
 export function useTriageLens() {
   const [raw, setRaw] = useQueryStates(LENS_PARSERS);
   const lens: TriageLens = raw.lens === "dev" ? "dev" : "user";
   const group: GroupDim = isGroup(raw.group) ? raw.group : "severity";
-  const subgroup: GroupDim | null = isGroup(raw.subgroup) && raw.subgroup !== group ? raw.subgroup : null;
   const typeDim: "user_impact" | "dev_miss" = lens === "dev" ? "dev_miss" : "user_impact";
+  const subgroupNone = raw.subgroup === SUBGROUP_NONE;
+  const subgroup: GroupDim | null = subgroupNone ? null : isGroup(raw.subgroup) ? (raw.subgroup !== group ? raw.subgroup : null) : typeDim !== group ? typeDim : null;
   const mustHandle = raw.must_handle;
   const setLens = useCallback(
     (l: TriageLens) =>
@@ -184,7 +192,10 @@ export function useTriageLens() {
     [setRaw, mustHandle],
   );
   const setGroup = useCallback((g: GroupDim) => setRaw({ group: g === "severity" ? null : g, page: 1 } as never), [setRaw]);
-  const setSubgroup = useCallback((g: GroupDim | null) => setRaw({ subgroup: g, page: 1 } as never), [setRaw]);
-  return { lens, group, subgroup, typeDim, setLens, setGroup, setSubgroup };
+  const setSubgroup = useCallback(
+    (g: GroupDim | null) => setRaw({ subgroup: g === null ? SUBGROUP_NONE : g === typeDim ? null : g, page: 1 } as never),
+    [setRaw, typeDim],
+  );
+  return { lens, group, subgroup, subgroupNone, typeDim, setLens, setGroup, setSubgroup };
 }
 export type TriageLensApi = ReturnType<typeof useTriageLens>;

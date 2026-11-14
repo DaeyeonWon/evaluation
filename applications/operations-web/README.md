@@ -32,10 +32,11 @@ AIPO 플랫폼의 **빅스비 실발화 평가** 파이프라인을 관제하는
 | `/files` | 모든 단계의 GCS 객체를 파일명으로 검색 |
 | `/dlq` | DLQ: 검토, 단건·일괄 Replay, 종료 처리, 담당 지정 |
 | `/results` | 평가 결과 (PASS/FAIL): 발화별 판정 근거, CSV 내보내기 |
-| `/issues` | **이슈 리포트** 후보안 선택 화면: 실시간 헤드라인(미해결 P0·P1, 안전 이슈, FAIL 비율, 신규 발화 패턴)과 디자인 후보안 A/B/C 카드 |
-| `/issues/a` | 이슈 리포트 A · **Triage Deck**: Criticality 순 이슈 카드(점수 분해 도넛, 추세 sparkline, 근거 발화), KPI 스트립, 인사이트 티커, 신규 발화 패턴 캐러셀, Kanban 보기, 상세 드로어에서 Triage |
-| `/issues/b` | 이슈 리포트 B · **Market Brief**: 편집형 주간 브리핑 문서(핵심 요약, 핵심 이슈 Dossier, 신규 발화 패턴, 시장·디바이스 영향, 회귀 감시, 통계 부록, 근거 각주) |
-| `/issues/c` | 이슈 리포트 C · **Signal Lab**: 연동 뷰 분석 워크스페이스(FAIL 비율 히트맵, 이슈 클러스터 버블, FAIL Treemap, 신규 발화 패턴, 이슈 원장, 분할 상세 패널) |
+| `/issues` | **이슈 리포트 · Triage** (기본 보기): 렌즈 2종(사용자 영향 / Bixby 미처리(개발))이 같은 영향도(P0 Critical … P3 Low) 스윔레인을 공유, 그룹·하위 그룹을 14개 차원으로 자유 분류, 렌즈 KPI, 인사이트 티커, 신규 발화 패턴 캐러셀, Kanban, 빠른 보기 시트에서 Triage. 모든 보기 상단에 보기 전환 탭과 공통 필터(Division·Region·Bixby version·카테고리·사용자 영향·Bixby 미처리·Must-handle 등) |
+| `/issues/categories` | 이슈 리포트 · **분해 보기**: 카테고리·사용자 영향·Bixby 미처리·Agent function·Division·Region·Bixby version 등 차원별 카드(영향도별 이슈, FAIL 비율 Δ, 추이, 상위 이슈, 최다 신규 패턴) 또는 순위 표, 클릭하면 Triage로 드릴다운 |
+| `/issues/analysis` | 이슈 리포트 · **Analysis**: 임의 X·Y 차원 교차 히트맵(FAIL 비율·FAIL 수·Δ·이슈 수), 이슈 사분면 버블, 계층 선택 Treemap, 신규 발화 패턴, 연동 교차 필터, 이슈 원장과 분할 상세 패널 |
+| `/issues/report` | 이슈 리포트 · **Report**: 편집형 브리핑 문서(핵심 요약, 핵심 이슈 Dossier, 사용자 영향, Bixby 미처리(개발), Division·Region 영향, Bixby version 회귀, Model·Pipeline 회귀, 신규 패턴, 통계 부록, 근거 각주) |
+| `/issues/[id]` | 이슈 리포트 · **단건 이슈 분석**: 점수 구성(waterfall), 선정 사유, 추세 vs Baseline, Division·Region·시장·기기·Bixby version·Model version·언어별 분해, 발화 diff 표, 패턴, 관련 Workflow, 유사 이슈, Triage 이력, Markdown·CSV 내보내기. `/issues/a·b·c`는 각각 `/issues`·`/issues/report`·`/issues/analysis`로 308 리다이렉트(쿼리 유지) |
 | `/analytics` | 장기 분석: 품질, 오류, Component, Version, 비용 |
 | `/config` | 운영 설정: Retry·Timeout, Version 트래픽, 서비스, 알림 정책, 권한, 감사 로그 |
 | `/hermes` | 외부 Hermes 대시보드 진입점 (권한이 있으면 307 이동, 없으면 403) |

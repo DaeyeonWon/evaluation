@@ -17,7 +17,7 @@
  * Merge endpoints (shapes in ./contract.ts; a 404 — endpoint not deployed yet — resolves to data: null):
  *   const bd = useIssueBreakdown(f, "division");                              // 분해 보기 cards
  *   const mx = useIssueMatrix(f, { x: "agent_function", y: "region", metric: "fail_rate" });
- *   const gl = useIssueGroups(f, { group: "severity", subgroup: "user_impact" }, { pageSize: 200 });
+ *   const gl = useIssueGroups(f, { group: "severity", subgroup: "user_impact" }, { groupSize: 3 }); // + groupKey/subgroupKey/groupPage
  *   const det = useIssueDetail(id, f);                                         // IssueDetailMerge (breakdowns per dim)
  *   issueBreakdowns(det.data)  → [{ dim, stats }] for DETAIL_BREAKDOWN_DIMS that the server returned
  */
@@ -108,13 +108,35 @@ export function useIssueMatrix(f: F, opts: { x: IssueDimId | string; y: IssueDim
 /**
  * Triage grouped listing (GET /issues?group=&subgroup=&lens=). Before the server groups, `groups` is
  * absent and the view groups `items` client-side.
+ *
+ * Group paging (opts): `groupSize` = items per group (or per subgroup); "load more" for one group asks for
+ * just that group / subgroup with `groupKey` (+ `subgroupKey`) and a larger `groupSize` (or `groupPage`).
+ *   useIssueGroups(f, { group: "severity", subgroup: "user_impact" }, { groupSize: 3 })
+ *   useIssueGroups(f, { group: "severity", subgroup: "user_impact" }, { groupSize: 15, groupKey: "P1", subgroupKey: "wrong_action" })
  */
-export function useIssueGroups(f: F, g: { group: GroupDim; subgroup?: GroupDim | null; lens?: "user" | "dev" }, opts: { pageSize?: number; page?: number } = {}) {
+export interface IssueGroupsOpts {
+  /** items per group (per subgroup when grouped twice); server default 10 */
+  groupSize?: number;
+  /** only this group (load more) */
+  groupKey?: string;
+  /** only this subgroup of `groupKey` */
+  subgroupKey?: string | null;
+  /** page of the group's items at `groupSize` */
+  groupPage?: number;
+  /** flat paging of the ungrouped `items` (kept small: the view reads `groups`) */
+  pageSize?: number;
+  page?: number;
+}
+export function useIssueGroups(f: F, g: { group: GroupDim; subgroup?: GroupDim | null; lens?: "user" | "dev" }, opts: IssueGroupsOpts = {}) {
   const q: IssueQuery = {
     ...f.query,
     group: g.group,
     subgroup: g.subgroup ?? undefined,
     lens: g.lens && g.lens !== "user" ? g.lens : undefined,
+    group_size: opts.groupSize,
+    group_key: opts.groupKey,
+    subgroup_key: opts.groupKey != null && opts.subgroupKey != null ? opts.subgroupKey : undefined,
+    group_page: opts.groupPage,
     page: opts.page ?? f.page,
     pageSize: opts.pageSize ?? 100,
   };

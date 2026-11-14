@@ -4,11 +4,12 @@
  * and the lab brushes (heatmap cell / quadrant / treemap node / pattern), ranked, with the score anatomy strip per row.
  */
 import clsx from "clsx";
-import { CheckCircle2, CircleDot, ClipboardCheck, MinusCircle, Ticket } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, CircleDot, ClipboardCheck, MinusCircle, Ticket } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { Issue, IssueStatus } from "@/lib/types";
-import { ISSUE_SORTS, useDimLabel, useIssueFormat, type IssueFiltersApi, type IssueSort } from "../../issues-shared";
+import { ISSUE_SORTS, useDimLabel, useIssueFormat, useIssueViewLinks, type IssueFiltersApi, type IssueSort } from "../../issues-shared";
 import { Empty } from "../../ui";
 import { FACTOR_KEYS, deltaDir, factor, sparkPath } from "./lab";
 
@@ -50,6 +51,7 @@ export function IssueTable({ items, f, page, setPage }: { items: Issue[]; f: Iss
   const fx = useIssueFormat();
   const dl = useDimLabel();
   const fm = useFmt();
+  const V = useIssueViewLinks();
   const pages = Math.max(1, Math.ceil(items.length / PAGE));
   const p = Math.min(page, pages);
   const rows = items.slice((p - 1) * PAGE, p * PAGE);
@@ -114,6 +116,9 @@ export function IssueTable({ items, f, page, setPage }: { items: Issue[]; f: Iss
                     </td>
                     <td className="cellwrap lab-t-issue c-issue">
                       <b>{fx.text(i.title)}</b>
+                      <Link className="lab-t-open" href={V.issueHref(i.id)} title={t("detail.openFull")} aria-label={`${t("detail.openFull")}: ${fx.text(i.title)}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                        <ArrowUpRight aria-hidden />
+                      </Link>
                       <span className="lab-t-sig mono">
                         <span className="lab-cls" data-cls={i.severity_class}>
                           {fx.cls(i.severity_class)}

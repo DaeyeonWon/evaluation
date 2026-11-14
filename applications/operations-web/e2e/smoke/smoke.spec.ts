@@ -3,6 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 /**
  * Smoke: every console route renders in ko and en with no console errors, roles are enforced
  * (Viewer gets 403 on /hermes and on write APIs, including PATCH /api/v1/issues/{id}), and the shared fonts load.
+ * Issue Report: the merged routes, the 308 redirects from the candidate routes, view switching with filters and a
+ * custom range (into /issues/<id>?…&via=<view>), the Triage lens switch / subgroup=none and the Viewer read-only state.
  * Run: `npm run test:e2e` (starts a dev server, see playwright.config.ts) or point PW_BASE_URL at a
  * running server.
  */
@@ -137,6 +139,59 @@ test("Issue Report view switcher keeps the filter query", async ({ page }, info)
   expect(u.searchParams.get("division")).toBe("TV");
   expect(u.searchParams.get("severity")).toBe("P0,P1");
   expect(u.searchParams.get("lens")).toBeNull(); // Triage-only view state is dropped
+});
+
+test("Issue Report: a custom range survives view switching and opening an issue (via=, not from=)", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "ko");
+  // a custom window inside the data (the virtual clock decides where "now" is)
+  const r7 = ((await (await page.context().request.get("/api/v1/issues/summary?range=7d")).json()) as { range: { from: number; to: number } }).range;
+  const from = new Date(r7.from + 86_400_000).toISOString();
+  const to = new Date(r7.to - 6 * 3_600_000).toISOString();
+  await page.goto(`/issues/report?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&division=TV,Mobile`);
+  const link = page.locator(".iss-b a[href^='/issues/iss-']").first();
+  await expect(link).toBeVisible();
+  const href = new URL((await link.getAttribute("href"))!, "http://x");
+  expect(href.searchParams.get("via")).toBe("report");
+  expect(href.searchParams.get("from")).toBe(from); // the range start, never the origin view
+  expect(href.searchParams.get("to")).toBe(to);
+  expect(href.searchParams.get("division")).toBe("TV,Mobile");
+  const detail = page.waitForRequest((r) => /\/api\/v1\/issues\/iss-[^/?]+\?/.test(r.url()));
+  await link.click();
+  await expect(page).toHaveURL(/\/issues\/iss-/);
+  const api = new URL((await detail).url());
+  expect(api.searchParams.get("from")).toBe(from);
+  expect(api.searchParams.get("range")).toBeNull();
+  const back = new URL((await page.locator(".isf-back").getAttribute("href"))!, "http://x");
+  expect(back.pathname).toBe("/issues/report");
+  expect(back.searchParams.get("from")).toBe(from);
+});
+
+test("Issue Report: Triage lens switch and subgroup=none", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "en");
+  await page.goto("/issues?range=7d");
+  await expect(page.locator(".ia-lane").first()).toHaveAttribute("data-k", "P0");
+  await page.locator('.ia-lens-opt[data-l="dev"]').click();
+  await expect(page).toHaveURL(/lens=dev/);
+  expect(new URL(page.url()).searchParams.get("must_handle")).toBe("true"); // the dev lens default
+  await expect(page.locator(".ia-card .ia-type[data-dim='dev_miss']").first()).toBeVisible();
+  await page.goto("/issues?range=7d&subgroup=none");
+  await expect(page.locator(".ia-card").first()).toBeVisible();
+  await expect(page.locator(".ia-sub")).toHaveCount(0);
+  await expect(page.locator(".ia-grp label:nth-of-type(2) select")).toHaveValue("");
+});
+
+test("Issue Report: Viewer sees disabled triage controls and PATCH is 403", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, VIEWER, "ko");
+  await page.goto("/issues?range=7d");
+  const btns = page.locator(".ia-card .ia-c-btns button:not(.ia-c-more)");
+  await expect(btns.first()).toBeVisible();
+  expect(await btns.evaluateAll((b) => b.every((x) => (x as HTMLButtonElement).disabled))).toBe(true);
+  const top = (await (await page.context().request.get("/api/v1/issues?range=7d&pageSize=1")).json()) as { items: { id: string }[] };
+  const res = await page.context().request.patch(`/api/v1/issues/${top.items[0].id}`, { data: { status: "TRIAGED" } });
+  expect(res.status()).toBe(403);
 });
 
 test("API: overview + CSV headers (signed in)", async ({ page }) => {

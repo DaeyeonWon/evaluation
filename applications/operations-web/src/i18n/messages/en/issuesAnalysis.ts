@@ -13,7 +13,7 @@ const issuesAnalysis = {
     newSpark: "New-pattern utterances ({bucket})",
     regressionsSub: "{n} regressions — click to filter",
     maxScoreSub: "max score {max} · avg {avg}",
-    ladder: "Severity mix · {n} issues",
+    ladder: "Impact mix · {n} issues",
     openOf: "{open} open",
   },
   heat: {

@@ -10,7 +10,7 @@ import clsx from "clsx";
 import Link from "next/link";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueBreakdownItem, IssueSeverity } from "@/lib/types";
-import type { IssueFormat } from "../../issues-shared";
+import { TypeDot, type IssueFormat } from "../../issues-shared";
 import { Delta, ImpactTag, useTip } from "./bits";
 
 export const LEVELS: IssueSeverity[] = ["P0", "P1", "P2", "P3"];
@@ -54,7 +54,10 @@ export function CrossTab({
               </th>
               {cols.map((c) => (
                 <th key={c.value} scope="col" data-muted={c.muted || undefined} title={fx.t.dynamic(`${g}Help.${c.value}`, undefined, "")}>
-                  <Link href={href(null, c.value)}>{fx.value(dim, c.value)}</Link>
+                  <Link href={href(null, c.value)}>
+                    <TypeDot dim={dim} value={c.value} className="issb-xt-tyd" />
+                    {fx.value(dim, c.value)}
+                  </Link>
                 </th>
               ))}
               <th scope="col" className="issb-xt-sum">

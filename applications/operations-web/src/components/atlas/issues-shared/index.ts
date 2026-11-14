@@ -13,3 +13,4 @@ export * from "./format";
 export * from "./links";
 export * from "./permissions";
 export * from "./triage";
+export * from "./palette";

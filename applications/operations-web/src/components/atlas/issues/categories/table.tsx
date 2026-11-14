@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useT } from "@/i18n/client";
 import type { IssueBreakdownItem } from "@/lib/types";
-import { useIssueFormat, type IssueViewLinks } from "../../issues-shared";
+import { TypeDot, isTypeDim, useIssueFormat, type IssueViewLinks } from "../../issues-shared";
 import type { ValueText } from "./labels";
 import { Delta, SevBar, Spark } from "./marks";
 
@@ -65,6 +65,7 @@ export function RankingTable({
               <tr key={i.value} onClick={(e) => !(e.target as HTMLElement).closest("a") && router.push(href)}>
                 <td className="num mono muted">{i.rank}</td>
                 <th scope="row">
+                  {isTypeDim(dim) ? <TypeDot dim={dim} value={i.value} className="cat-tyd" /> : null}
                   <Link href={href} title={t("card.drill", { value: name })}>
                     {name}
                   </Link>

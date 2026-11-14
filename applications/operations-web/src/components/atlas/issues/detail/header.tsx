@@ -4,10 +4,10 @@ import clsx from "clsx";
 import { ArrowUpRight, ChevronLeft, ChevronRight, ClipboardCopy, Download, ShieldAlert, ShieldCheck, Tag, UserRound, Wrench } from "lucide-react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueDetail } from "@/lib/types";
-import type { IssueFormat } from "../../issues-shared";
+import { TypeDot, typeVar, type IssueFormat, type TypeDim } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 import { SCORE_BANDS, sevKey } from "./lib";
 
@@ -66,23 +66,48 @@ export function ScoreGauge({ score, sev, label }: { score: number; sev: string; 
   );
 }
 
-function Tax({ icon, label, value, help, reason, tone, href, title }: { icon: ReactNode; label: string; value: string; help?: string; reason: string; tone?: string; href?: string; title?: string }) {
+function Tax({
+  icon,
+  label,
+  value,
+  help,
+  reason,
+  tone,
+  href,
+  title,
+  type,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  help?: string;
+  reason: string;
+  tone?: string;
+  href?: string;
+  title?: string;
+  /** user_impact / dev_miss: the shared type colour + icon (issues-shared/palette) */
+  type?: { dim: TypeDim; value: string };
+}) {
+  const style = type ? ({ ["--tyc" as string]: typeVar(type.dim, type.value) } as CSSProperties) : undefined;
   const body = (
     <>
       <span className="idt-tax-k">
         {icon}
         {label}
       </span>
-      <b className="idt-tax-v">{value}</b>
+      <b className="idt-tax-v">
+        {type ? <TypeDot dim={type.dim} value={type.value} /> : null}
+        {value}
+      </b>
       <span className="idt-tax-r">{reason}</span>
     </>
   );
   return href ? (
-    <Link className="idt-tax" href={href} data-tone={tone} title={title ?? help}>
+    <Link className="idt-tax" href={href} data-tone={tone} data-typed={type ? "" : undefined} style={style} title={title ?? help}>
       {body}
     </Link>
   ) : (
-    <div className="idt-tax" data-tone={tone} title={help}>
+    <div className="idt-tax" data-tone={tone} data-typed={type ? "" : undefined} style={style} title={help}>
       {body}
     </div>
   );
@@ -235,6 +260,7 @@ export function Hero({
           help={s.dynamic(`userImpactHelp.${d.user_impact_type}`, undefined, "")}
           reason={fx.text(d.type_reason.user_impact)}
           href={drill("user_impact", d.user_impact_type)}
+          type={{ dim: "user_impact", value: d.user_impact_type }}
           title={drillTitle(fx.value("user_impact", d.user_impact_type))}
         />
         <Tax
@@ -244,6 +270,7 @@ export function Hero({
           help={s.dynamic(`devMissHelp.${d.dev_miss_type}`, undefined, "")}
           reason={fx.text(d.type_reason.dev_miss)}
           href={drill("dev_miss", d.dev_miss_type)}
+          type={{ dim: "dev_miss", value: d.dev_miss_type }}
           title={drillTitle(fx.value("dev_miss", d.dev_miss_type))}
         />
         <Tax

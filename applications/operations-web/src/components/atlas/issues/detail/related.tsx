@@ -75,7 +75,7 @@ export function Workflows({ d }: { d: IssueDetail }) {
         <ul className="idt-wfs">
           {d.workflows.map((w) => (
             <li key={w.workflow_id}>
-              <Link href={L.workflow(w.workflow_id)} className="idt-wfl">
+              <Link href={L.workflow(w.workflow_id, w.created_at, w.completed_at)} className="idt-wfl">
                 <span className="idt-wfl-id mono">{w.workflow_id}</span>
                 <span className="idt-wfl-meta mono muted">
                   <LangBadge lang={w.language} /> {w.pipeline_version} · {w.model_version} · {fm.dateLabel(w.created_at)}

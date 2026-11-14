@@ -72,7 +72,7 @@ export function Trend({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
             option={(tk) =>
               opt(
                 baseOpt(tk, rm, {
-                  grid: { left: 36, right: 14, top: 18, bottom: 26 },
+                  grid: { left: 36, right: 60, top: 18, bottom: 26 },
                   legend: { show: false },
                   tooltip: tooltip(tk, {
                     axisPointer: { type: "shadow", shadowStyle: { color: tk.read("--accent-soft") } },
@@ -98,7 +98,7 @@ export function Trend({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
                               symbol: "none",
                               silent: true,
                               lineStyle: { color: tk.muted, type: "dashed", width: 1.5 },
-                              label: { formatter: t("trend.baseline"), color: tk.muted, fontFamily: tk.mono, fontSize: 10, position: "insideEndTop" },
+                              label: { formatter: t("trend.baseline"), color: tk.muted, fontFamily: tk.mono, fontSize: 10, position: "end", distance: 6 },
                               data: [{ yAxis: Number(perBucket.toFixed(2)) }],
                             }
                           : undefined,
@@ -129,7 +129,7 @@ export function Trend({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
             option={(tk) =>
               opt(
                 baseOpt(tk, rm, {
-                  grid: { left: 40, right: 14, top: 18, bottom: 26 },
+                  grid: { left: 40, right: 60, top: 18, bottom: 26 },
                   legend: { show: false },
                   tooltip: tooltip(tk, {
                     formatter: (ps: { dataIndex: number }[]) => {
@@ -158,7 +158,7 @@ export function Trend({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
                               symbol: "none",
                               silent: true,
                               lineStyle: { color: tk.muted, type: "dashed", width: 1.5 },
-                              label: { formatter: `Baseline ${fx.pct(d.baseline_rate)}`, color: tk.muted, fontFamily: tk.mono, fontSize: 10, position: "insideEndTop" },
+                              label: { formatter: `Baseline\n${fx.pct(d.baseline_rate)}`, color: tk.muted, fontFamily: tk.mono, fontSize: 10, lineHeight: 13, position: "end", distance: 6 },
                               data: [{ yAxis: d.baseline_rate }],
                             }
                           : undefined,

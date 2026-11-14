@@ -157,6 +157,8 @@
   & .cat-rank { font-size: 10.5px; color: var(--ink-3); }
   & .cat-card h3 { margin: 0; font-size: var(--t-lg); font-weight: 750; line-height: 1.25; min-width: 0; overflow-wrap: anywhere; }
   & .cat-card-link { color: var(--ink); text-decoration: none; }
+  & .cat-tyd { margin-right: 7px; vertical-align: -3px; }
+  & .cat-table tbody th .cat-tyd { margin-right: 6px; vertical-align: -4px; }
   & .cat-card-link::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: var(--r); }
   & .cat-card-link:focus-visible { outline: none; }
   & .cat-card-link:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }

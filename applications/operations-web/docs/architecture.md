@@ -108,20 +108,23 @@ src/server/mock/*      ── engine state + simulator (one per Node process)
 | `/files` | GCS file search across stages |
 | `/dlq` | Dead letters: review, Replay (single/batch), close, assign |
 | `/results` | Evaluation results (PASS/FAIL), utterance drawer, CSV export |
-| `/issues` | Issue Report chooser (`issues-index.tsx`): live headline from `/api/v1/issues/summary` + cards for design candidates A/B/C. The `I-01` nav tab stays active on every `/issues/*` route |
-| `/issues/a` | Candidate A **Triage Deck** (`components/atlas/issues-a/`, `atlas-issues-a.css`): criticality-ranked issue cards with score-breakdown donut, KPI strip, insight ticker, new-pattern carousel, deck/Kanban views, detail drawer with triage |
-| `/issues/b` | Candidate B **Market Brief** (`issues-b/`, `atlas-issues-b.css`): editorial briefing document (executive summary, critical-issue dossiers, emerging patterns, market & device impact, regression watch, statistical appendix, evidence notes) |
-| `/issues/c` | Candidate C **Signal Lab** (`issues-c/`, `atlas-issues-c.css`): linked-view analyst workspace (FAIL-rate heatmap, issue bubbles, treemap, new patterns, issue ledger, split detail pane) |
+| `/issues` | Issue Report · **Triage** (default view, `components/atlas/issues/triage/`): user-impact and must-handle-miss lenses over shared impact-level (P0–P3) swimlanes, free group/subgroup over 14 dims, KPI band, insight ticker, new-pattern carousel, Kanban, quick-look sheet with triage. The frame (`issues/frame/`, mounted by `issues/layout.tsx`) adds the header, view switcher and the one shared FilterBar. The `I-01` nav tab stays active on every `/issues/*` route |
+| `/issues/categories` | **분해 보기 / Breakdown** (`issues/categories/`): cards or a ranking table per value of category, user impact, dev miss, agent function, division, region, Bixby version (and more); drill into Triage |
+| `/issues/analysis` | **Analysis** (`issues/analysis/`): heatmap over any two dims and four metrics, bubble quadrant, treemap with a selectable hierarchy, emerging patterns, linked cross-filtering, issue ledger + split detail pane |
+| `/issues/report` | **Report** (`issues/report/`): editorial brief with user-impact, must-handle-miss, division / region impact and Bixby-version regression sections |
+| `/issues/[id]` | **Single issue** (`issues/detail/`): score anatomy, reasons, trend vs baseline, per-dim breakdowns, utterance diffs, patterns, workflows, similar issues, triage + history, Markdown export. `/issues/{a,b,c}` are 308 route handlers to `/issues`, `/issues/report`, `/issues/analysis` (query kept) |
 | `/analytics` | Long-range analytics (quality, errors, components, versions, cost) |
 | `/config` | Retry/timeout, version traffic, services, alert policies, roles, audit log |
 | `/hermes` | Entry to the external Hermes dashboard (307 when configured, 403 without `hermes:access`) |
 | `/login` (`src/app/login`) | Mock-mode demo login; explains the auth proxy in other modes |
 | `/403` (`src/app/403`) | Server-rendered forbidden UI (same component as `src/app/forbidden.tsx`); the proxy serves it with HTTP 403, also as the rewrite target for pages the session may not open |
 
-All three Issue Report candidates read the same engine (`src/server/services/issues-engine.ts` → `issues.ts`,
+All Issue Report views read the same engine (`src/server/services/issues-engine.ts` → `issues.ts`,
 triage state in `issues-store.ts`) through the shared client layer `src/components/atlas/issues-shared/`
-(URL filters, data hooks, triage/export, evidence links), so filters, `?issue=<id>` selection and triage
-permissions (`issues:write`, Operator and above) behave identically; only the presentation differs.
+(URL filters, dims, view links, data hooks, triage/export, evidence links, the colour palette in `palette.tsx`),
+so filters, the global range, `?issue=<id>` selection and triage permissions (`issues:write`, Operator and above)
+behave identically on every view. The frame, filter contract, links and hooks are documented in
+`docs/issue-report-frame.md`.
 
 ### API groups (`/api/v1`)
 

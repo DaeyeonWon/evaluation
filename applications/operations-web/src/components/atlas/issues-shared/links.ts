@@ -9,6 +9,7 @@
  *   <Link href={L.workflow(w.workflow_id, w.created_at, w.completed_at)}>…</Link>
  *   <Link href={L.utterance(row.utterance_id)}>…</Link>  // /results?q=<id>&utt=<id> (row + its drawer)
  *   L.issue("/issues", id)                            // current page with ?issue=<id> (quick-look sheet; keeps filters)
+ *   (results / resultsFor / evidence also carry the current division, region and bixby_version filters)
  *
  * Views + the single-issue page (all keep the full filter query + range):
  *   const V = useIssueViewLinks();
@@ -89,6 +90,9 @@ export function issuePath(id: string, search: string | URLSearchParams, from: Is
   return withQs(`/issues/${encodeURIComponent(id)}`, next);
 }
 
+/** row-level merge dims that /results understands; links out of the Issue Report carry them */
+const RESULTS_ROW_DIMS = ["division", "region", "bixby_version"] as const;
+
 const qs = (p: Record<string, string | null | undefined>) => {
   const sp = new URLSearchParams();
   for (const [k, v] of Object.entries(p)) if (v != null && v !== "") sp.set(k, v);
@@ -101,11 +105,22 @@ export function useIssueLinks() {
   const cover = useCoverHref();
   const sp = useSearchParams();
   const spStr = sp.toString();
-  const resultsFor = useCallback((p: Record<string, string>) => rh("/results" + qs({ result: "FAIL", ...p })), [rh]);
-  const results = useCallback((i: Pick<Issue, "results_query">) => rh("/results" + qs(i.results_query)), [rh]);
+  // the current division / region / bixby_version filters scope every /results drill-down (unless the link sets them itself)
+  const dims = useMemo(() => {
+    const cur = new URLSearchParams(spStr);
+    const out: Record<string, string> = {};
+    for (const k of RESULTS_ROW_DIMS) {
+      const v = cur.get(k);
+      if (v) out[k] = v;
+    }
+    return out;
+  }, [spStr]);
+  const resultsFor = useCallback((p: Record<string, string>) => rh("/results" + qs({ result: "FAIL", ...dims, ...p })), [rh, dims]);
+  const results = useCallback((i: Pick<Issue, "results_query">) => rh("/results" + qs({ ...dims, ...i.results_query })), [rh, dims]);
   const evidence = useCallback(
-    (x: Pick<IssueInsight, "evidence">) => (x.evidence.results ? rh("/results" + qs(x.evidence.results)) : rh("/results" + qs({ result: "FAIL", ...x.evidence.filter }))),
-    [rh],
+    (x: Pick<IssueInsight, "evidence">) =>
+      x.evidence.results ? rh("/results" + qs({ ...dims, ...x.evidence.results })) : rh("/results" + qs({ result: "FAIL", ...dims, ...x.evidence.filter })),
+    [rh, dims],
   );
   const workflow = useCallback((id: string, from?: number, to?: number | null) => (from ? cover(`/workflows/${encodeURIComponent(id)}`, from, to) : rh(`/workflows/${encodeURIComponent(id)}`)), [cover, rh]);
   const utterance = useCallback((id: string) => rh("/results" + qs({ q: id, utt: id })), [rh]);

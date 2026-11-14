@@ -9,7 +9,6 @@ import { ChevronDown, Layers } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState, type CSSProperties } from "react";
 import { useFmt, useT } from "@/i18n/client";
-import type { IssueQuery } from "@/lib/client";
 import type { Issue, IssueSeverity } from "@/lib/types";
 import { GROUP_DIMS, useDimLabel, useIssueGroups, type GroupDim, type IssueFiltersApi, type IssueFormat, type IssueGroup } from "../../issues-shared";
 import { ErrorNote, Skeleton, useReducedMotionSafe } from "../../ui";
@@ -23,8 +22,6 @@ const SIZE_SUB = 3;
 const STEP = 12;
 const MAX = 200;
 
-type F = Pick<IssueFiltersApi, "query" | "filterQuery" | "page">;
-const withQuery = (f: F, extra: IssueQuery): F => ({ query: { ...f.query, ...extra }, filterQuery: f.filterQuery, page: 1 });
 const isType = (d: GroupDim | null): d is TypeDim => d === "user_impact" || d === "dev_miss";
 
 /** Group / Then-by pickers (view-local, not filters). */
@@ -105,7 +102,7 @@ function Cards({ items, ctx }: { items: Issue[]; ctx: LaneCtx }) {
 }
 
 interface LaneCtx {
-  f: F;
+  f: Pick<IssueFiltersApi, "query" | "filterQuery" | "page">;
   ts: TriageState;
   fx: IssueFormat;
   act: CardActions;
@@ -115,7 +112,7 @@ interface LaneCtx {
 
 /** the items of one group / subgroup at a larger page size (mounted only after "load more") */
 function MoreCards({ ctx, size, groupKey, subKey, fallback }: { ctx: LaneCtx; size: number; groupKey: string; subKey: string | null; fallback: Issue[] }) {
-  const q = useIssueGroups(withQuery(ctx.f, { group_size: size, group_key: groupKey, ...(subKey != null ? { subgroup_key: subKey } : {}) }), { group: ctx.ts.group, subgroup: subKey != null ? ctx.ts.subgroup : null, lens: ctx.ts.lens }, { pageSize: 1, page: 1 });
+  const q = useIssueGroups(ctx.f, { group: ctx.ts.group, subgroup: subKey != null ? ctx.ts.subgroup : null, lens: ctx.ts.lens }, { groupSize: size, groupKey, subgroupKey: subKey, pageSize: 1, page: 1 });
   const g = q.data?.groups?.find((x) => x.key === groupKey);
   const items = subKey != null ? g?.subgroups?.find((x) => x.key === subKey)?.items : g?.items;
   return (
@@ -246,10 +243,10 @@ export function Lanes({ f, ts, fx, act, labels, onOpen, onIds }: LaneCtx & { f: 
   const fm = useFmt();
   const sub = ts.subgroup;
   const base = sub ? SIZE_SUB : SIZE;
-  const main = useIssueGroups(withQuery(f, { group_size: base }), { group: ts.group, subgroup: sub, lens: ts.lens }, { pageSize: 1, page: 1 });
+  const main = useIssueGroups(f, { group: ts.group, subgroup: sub, lens: ts.lens }, { groupSize: base, pageSize: 1, page: 1 });
   // type mix per group: reuse the main response when it is already split by the lens type, else a tiny side request
   const needMix = sub !== ts.typeDim && ts.group !== ts.typeDim;
-  const mix = useIssueGroups(needMix ? withQuery(f, { group_size: 1 }) : withQuery(f, { group_size: base }), { group: ts.group, subgroup: needMix ? ts.typeDim : sub, lens: ts.lens }, { pageSize: 1, page: 1 });
+  const mix = useIssueGroups(f, { group: ts.group, subgroup: needMix ? ts.typeDim : sub, lens: ts.lens }, { groupSize: needMix ? 1 : base, pageSize: 1, page: 1 });
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const d = main.data;
   const groups = d?.groups ?? null;

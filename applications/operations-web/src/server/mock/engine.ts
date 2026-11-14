@@ -806,6 +806,7 @@ export function createMockEngine(root, opts) {
     { id: 'buds_navigation_unsupported', langs: ['ko', 'en'], own: true,
       // Galaxy Buds (no screen / no maps client) asked for turn-by-turn directions — the capability table marks
       // navigation as unsupported on Audio, so the issue is out of scope for the dev lens (must_handle = false).
+      // Generic navigation→qa.factoid misroutes from supported devices are moved off this signature in augmentRows.
       pick: function (r, wf, d, failed) { return failed && r.device_type === 'Galaxy Buds' && (r.capsule_id === 'weather' || r.capsule_id === 'general_qa') && d <= 12 ? 0.3 : 0; },
       tpl: {
         ko: [['navigation.route', '{place} 가는 길 알려줘', '{place}까지 경로를 안내할게요. 예상 소요 시간은 {min2}분이에요.', 'navigation', '"{place}" 검색 결과를 휴대폰에서 확인해 주세요.', 'INTENT_MISMATCH', 'qa.factoid', 'Galaxy Buds 단독 경로 안내 요청을 웹 검색으로 처리함 (Buds는 길찾기 미지원 — 휴대폰 연결 안내 필요)']],
@@ -873,6 +874,13 @@ export function createMockEngine(root, opts) {
         if (!(p > 0)) continue;
         var srng = s.own ? makeRng(hashStr(row.utterance_id + '|iss|' + s.id)) : rng;
         if (srng.chance(p)) { if (applyScenario(row, s, srng, row.language, d)) { if (s.market) row.market = s.market; break; } }
+      }
+      // keep the seeded Buds signature (navigation.route → qa.factoid) to the Buds scenario: generic navigation
+      // misroutes from supported devices land on another general_qa intent, so the seed stays clearly
+      // out of scope (must_handle is a majority rule over the issue's rows) in every range
+      if (!row._scenario && failed && row.failure_reason === 'INTENT_MISMATCH' && row.intent_expected === 'navigation.route' && row.intent_predicted === 'qa.factoid' && row.device_type !== 'Galaxy Buds') {
+        row.intent_predicted = 'qa.chitchat';
+        row.judge_reason = row.judge_reason.replace('qa.factoid', 'qa.chitchat');
       }
       var os = deviceOs(row.device_type, rng, d);
       row.os_version = os[0]; row.one_ui_version = os[1];

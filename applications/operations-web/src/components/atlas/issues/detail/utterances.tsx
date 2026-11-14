@@ -132,7 +132,7 @@ function Row({ u, open, onToggle }: { u: ResultRow; open: boolean; onToggle: () 
             <Link className="btn sm" href={L.utterance(u.utterance_id)}>
               {t("utt.openResult")} <ArrowUpRight aria-hidden />
             </Link>
-            <Link className="btn sm" href={L.workflow(u.workflow_id)}>
+            <Link className="btn sm" href={L.workflow(u.workflow_id, u.eval_ts, u.eval_ts)}>
               <Workflow aria-hidden /> {u.workflow_id}
             </Link>
           </div>

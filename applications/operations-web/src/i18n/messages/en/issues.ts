@@ -85,7 +85,7 @@ const issues = {
   },
   field: {
     issue: "Issue",
-    severity: "Severity",
+    severity: "Impact",
     score: "Criticality",
     count: "FAILs",
     share: "Share of FAILs",
@@ -136,7 +136,7 @@ const issues = {
     failure_reason: "Failure reason",
     os_version: "OS version",
     one_ui_version: "One UI version",
-    severity: "Severity",
+    severity: "Impact",
     status: "Status",
     novelty: "Novelty",
     severity_class: "Risk class",

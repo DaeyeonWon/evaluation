@@ -5,17 +5,17 @@
  *
  * Editorial briefing: typography-led, generous whitespace, blueprint annotations (§ numbers, figure
  * numbers, footnote refs, registration marks). Colour jobs:
- *   factor categorical (validated, 6 slots)  --issb-f-*
+ *   factor categorical  --issb-f-* = the shared --fa-* set (atlas-issues.css), same hue per factor on every view
  *   diverging delta (worse warm / better cool, neutral midpoint)  --issb-up / --issb-down / --issb-flat
  *   status (reserved, always with icon + label)  --issb-st-*
  */
 [data-variant="atlas"] .iss-b {
-  --issb-f-volume: #2a78d6;
-  --issb-f-severity: #eb6834;
-  --issb-f-trend: #1baf7a;
-  --issb-f-regression: #eda100;
-  --issb-f-reach: #e87ba4;
-  --issb-f-novelty: #4a3aa7;
+  --issb-f-volume: var(--fa-volume);
+  --issb-f-severity: var(--fa-severity);
+  --issb-f-trend: var(--fa-trend);
+  --issb-f-regression: var(--fa-regression);
+  --issb-f-reach: var(--fa-reach);
+  --issb-f-novelty: var(--fa-novelty);
   --issb-up: #d4572b;
   --issb-down: #2f78c4;
   --issb-flat: #a7b1bd;
@@ -30,12 +30,6 @@
   --issb-gut: clamp(16px, 3vw, 36px);
 }
 :root[data-theme="dark"] [data-variant="atlas"] .iss-b {
-  --issb-f-volume: #3987e5;
-  --issb-f-severity: #d95926;
-  --issb-f-trend: #199e70;
-  --issb-f-regression: #c98500;
-  --issb-f-reach: #d55181;
-  --issb-f-novelty: #9085e9;
   --issb-up: #f07a4f;
   --issb-down: #5c9eea;
   --issb-flat: #4d5d6e;
@@ -678,6 +672,13 @@
   & .issb-type[data-kind="category"] { border-style: dashed; }
   & .issb-type[data-kind="dev_miss"] { font-family: var(--f-mono); font-size: 10.5px; }
   & .issb-type[data-v="out_of_scope"] { color: var(--ink-3); }
+  & .issb-type[data-kind="user_impact"], & .issb-type[data-kind="dev_miss"] {
+    gap: 4px; padding-left: 6px; color: var(--ink); border-color: color-mix(in srgb, var(--tyc) 40%, var(--rule));
+    background: color-mix(in srgb, var(--tyc) 9%, var(--sheet)); box-shadow: inset 2px 0 0 var(--tyc);
+  }
+  & .issb-type svg { width: 11px; height: 11px; flex: none; color: var(--tyc); }
+  & .issb-xt thead th a { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; }
+  & .issb-xt-tyd { width: 16px; height: 16px; }
 
   & .issb-dos-kick { display: block; font: 600 10px var(--f-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 3px; }
   & .issb-dos[data-sev="P0"] .issb-dos-kick { color: var(--sev-p0); }

@@ -231,7 +231,12 @@
   & .lab-sort .in { height: 27px; font-size: var(--t-xs); padding: 0 6px; width: auto; }
   & .lab-t td { vertical-align: top; padding-top: 8px; padding-bottom: 8px; }
   & .lab-t-issue { min-width: 300px; max-width: 520px; display: grid; gap: 2px; }
+  & .lab-t-issue { grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; }
+  & .lab-t-issue > :not(b):not(.lab-t-open) { grid-column: 1 / -1; }
   & .lab-t-issue b { font-weight: 650; font-size: var(--t-sm); line-height: 1.35; }
+  & .lab-t-open { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 2px; color: var(--ink-3); border: 1px solid transparent; }
+  & .lab-t-open svg { width: 14px; height: 14px; }
+  & .lab-t-open:hover, & .lab-t-open:focus-visible { color: var(--accent); border-color: var(--rule); background: var(--sheet); }
   & .lab-t-sig { font-size: 10.5px; color: var(--ink-3); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 4px; }
   & .lab-t-why { font-size: 11px; color: var(--ink-2); line-height: 1.4; }
   & .lab-cls { display: inline-flex; align-items: center; gap: 4px; height: 16px; padding: 0 5px; border-radius: 2px; font: 700 9.5px var(--f-ui); color: var(--cc); border: 1px solid color-mix(in srgb, var(--cc) 45%, transparent); background: color-mix(in srgb, var(--cc) 9%, transparent); white-space: nowrap; }
@@ -241,9 +246,13 @@
   & .lab-t-score { display: grid; gap: 4px; min-width: 76px; }
   & .lab-t-score b { font-size: 14px; font-weight: 600; }
   & .lab-anat { display: flex; gap: 1px; height: 6px; width: 76px; background: var(--paper-2); border-radius: 1px; overflow: hidden; }
-  & .lab-anat i { display: block; height: 100%; background: var(--issc-seq); }
-  & .lab-anat i:nth-child(2n) { opacity: 0.62; }
-  & .lab-anat i[data-k="severity"] { background: var(--sev-p0); opacity: 0.85; }
+  /* score factors wear the shared --fa-* hues (atlas-issues.css), as on Triage / Report / Detail; the tooltip names them */
+  & .lab-anat i { display: block; height: 100%; background: var(--fa-volume); }
+  & .lab-anat i[data-k="severity"] { background: var(--fa-severity); }
+  & .lab-anat i[data-k="trend"] { background: var(--fa-trend); }
+  & .lab-anat i[data-k="regression"] { background: var(--fa-regression); }
+  & .lab-anat i[data-k="reach"] { background: var(--fa-reach); }
+  & .lab-anat i[data-k="novelty"] { background: var(--fa-novelty); }
   & .lab-tspark { width: 64px; height: 18px; display: block; }
   & .lab-tspark polyline { fill: none; stroke: var(--tc); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   & .lab-t-mk { font-size: 10.5px; color: var(--ink-2); }

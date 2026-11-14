@@ -466,7 +466,7 @@ Catalog: `DIVISIONS`, `DIVISION_INFO`, `DEVICE_DIVISION`, `REGIONS`, `REGION_INF
 | `GET /issues/insights` | `InsightList` = `{ items: IssueInsight[], total, range, baseline }` |
 | `PATCH /issues/{id}` | `IssuePatchResult`; body `IssuePatch { status?, owner?, note?, ticket_id?, reason? }`; needs `issues:write`; Idempotency-Key supported; audited `ISSUE_UPDATE`; SSE `issue` |
 | `GET /issues/export.csv` | every matching issue (no paging), UTF-8 BOM, localized title + reasons, factor contributions |
-| `GET /issues/report.md` | Markdown summary in the request locale (KPIs, insights, top issues with reasons and score breakdown, new patterns, triage counts). Absolute evidence links to `/results` keep the request range; optional `issue_base=/issues/a` adds issue deep links (`?issue=<id>`) |
+| `GET /issues/report.md` | Markdown summary in the request locale (KPIs, insights, top issues with reasons and score breakdown, new patterns, triage counts). Absolute evidence links to `/results` keep the request range; optional `issue_base=/issues` adds issue deep links (`?issue=<id>`) |
 
 Query params (all optional): `range`/`from`/`to`; row filters `agent_function, capsule, intent, language,
 market, device, model_version, pipeline, pipeline_version, failure_reason, os_version, one_ui_version, division, region,
@@ -567,6 +567,8 @@ existing music phrasings (`{genre} 틀어줘`, `play {genre}`, …) to `video.se
 often for TV media FAILs this yields the Bixby regression (4.0.3 vs 4.0.1 on TV, media_play ≈ +35 pp, `iss-11n6j97`
 `music.play_genre → video.search`, `bixby_regression`, dev lens `regression`); **`buds_navigation_unsupported`** — Galaxy
 Buds asked for directions (capability table: navigation is not on Audio) → the out-of-scope example (`must_handle=false`).
+Its signature (`navigation.route → qa.factoid`, INTENT_MISMATCH) is reserved for the seed: generic navigation misroutes from
+supported devices go to `qa.chitchat`, so the issue stays Buds-only and out of scope in every range.
 
 Performance (dev, warm): `/issues*` 3–35 ms (breakdown / matrix ≤ 70 ms over 30 d); first call per range ≈ 60–140 ms.
 

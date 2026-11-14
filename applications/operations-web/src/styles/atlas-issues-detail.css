@@ -3,16 +3,10 @@
  * Scope every rule under [data-variant="atlas"] .iss-det; prefix keyframes with `at-issdet-`.
  * Shared tokens (--sev-p0…p3, --cls-*, --iss-new) come from atlas-issues.css.
  *
- * Factor palette (6 categorical slots, volume → novelty) = the Triage view's validated --fa-* set, so the
- * same factor wears the same hue on both pages; every factor is also named in text next to its mark.
+ * Factor (--fa-*) and type (--ut-* / --dm-*) palettes are the shared tokens in atlas-issues.css, so a factor or
+ * type wears the same hue on every page; every mark is also named in text next to it.
  */
 [data-variant="atlas"] .iss-det {
-  --fa-volume: #4f57d6;
-  --fa-severity: #c2367a;
-  --fa-trend: #1aa7a0;
-  --fa-regression: #a86400;
-  --fa-reach: #9b59d0;
-  --fa-novelty: #3f8f1f;
   --idt-up: #c9472b;
   --idt-down: #2a78d6;
   --idt-add: color-mix(in srgb, var(--sev-p0) 16%, transparent);
@@ -20,12 +14,6 @@
   --idt-bar: var(--accent);
 }
 :root[data-theme="dark"] [data-variant="atlas"] .iss-det {
-  --fa-volume: #6b78ec;
-  --fa-severity: #dc4a8a;
-  --fa-trend: #33bdb0;
-  --fa-regression: #b87510;
-  --fa-reach: #9a6cea;
-  --fa-novelty: #52a336;
   --idt-up: #f07a5a;
   --idt-down: #5c9cf0;
   --idt-add: color-mix(in srgb, var(--sev-p0) 24%, transparent);
@@ -146,6 +134,8 @@
   & .idt-tax-r { font-size: var(--t-xs); color: var(--ink-2); line-height: 1.45; overflow-wrap: anywhere; }
   & .idt-tax[data-tone="must"] .idt-tax-v { color: var(--sev-p0); }
   & .idt-tax[data-tone="oos"] .idt-tax-v { color: var(--ink-2); }
+  & .idt-tax[data-typed] { box-shadow: inset 0 2px 0 var(--tyc); }
+  & .idt-tax[data-typed] .idt-tax-v { display: flex; align-items: center; gap: 6px; }
 
   /* ───────────── grid ───────────── */
   & .idt-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 18px; align-items: start; }

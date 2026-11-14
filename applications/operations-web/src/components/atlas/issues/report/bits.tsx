@@ -9,7 +9,7 @@ import Link from "next/link";
 import { createContext, useCallback, useContext, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { useT } from "@/i18n/client";
 import type { IssueSeverity, IssueStatus, SeverityClass } from "@/lib/types";
-import type { IssueFormat } from "../../issues-shared";
+import { TYPE_ICON, typeVar, type IssueFormat } from "../../issues-shared";
 
 /* ───────────── footnotes ───────────── */
 export interface Note {
@@ -76,11 +76,13 @@ export function ImpactTag({ s, compact }: { s: IssueSeverity; compact?: boolean 
   );
 }
 
-/** Issue-level type tags (category / user impact / dev miss): neutral chip + kind prefix, help text as title. */
+/** Issue-level type tags: category = neutral dashed chip; user impact / dev miss wear the shared type colour + icon (issues-shared/palette). */
 export function TypeTag({ kind, v, fx }: { kind: "category" | "user_impact" | "dev_miss"; v: string; fx: IssueFormat }) {
   const g = kind === "category" ? "category" : kind === "user_impact" ? "userImpact" : "devMiss";
+  const typed = kind !== "category";
   return (
-    <span className="issb-type" data-kind={kind} data-v={v} title={fx.t.dynamic(`${g}Help.${v}`, undefined, "")}>
+    <span className="issb-type" data-kind={kind} data-v={v} title={fx.t.dynamic(`${g}Help.${v}`, undefined, "")} style={typed ? ({ ["--tyc" as string]: typeVar(kind, v) } as CSSProperties) : undefined}>
+      {typed ? (TYPE_ICON[v as keyof typeof TYPE_ICON] ?? null) : null}
       {fx.value(kind, v)}
     </span>
   );

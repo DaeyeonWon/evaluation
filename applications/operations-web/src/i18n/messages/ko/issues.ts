@@ -92,7 +92,7 @@ const issues = {
   },
   field: {
     issue: "이슈",
-    severity: "Severity",
+    severity: "영향도",
     score: "Criticality",
     count: "FAIL 건수",
     share: "FAIL 점유율",
@@ -143,7 +143,7 @@ const issues = {
     failure_reason: "실패 사유",
     os_version: "OS version",
     one_ui_version: "One UI version",
-    severity: "Severity",
+    severity: "영향도",
     status: "상태",
     novelty: "신규 여부",
     severity_class: "위험 유형",

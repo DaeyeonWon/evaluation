@@ -13,7 +13,7 @@
  */
 import clsx from "clsx";
 import { ArrowLeftRight } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueQuery } from "@/lib/client";
 import type { IssueDimMatrixCell, IssueDimStat, IssueText } from "@/lib/types";
@@ -115,6 +115,21 @@ export function Heatmap({
     const all = (fac.data?.facets as Record<string, { value: string }[] | undefined> | undefined)?.[ISSUE_DIMS[dim].param] ?? [];
     return all.map((o) => o.value).filter((x) => !shown.includes(x));
   };
+
+  // cold deep link to an "Other" cell (?hm=__other__|…): the URL only names the fold, so rebuild its
+  // concrete values from the facets once the matrix (which values are on the axis) and the facets are in
+  const facets = fac.data?.facets as Record<string, { value: string }[] | undefined> | undefined;
+  useEffect(() => {
+    if (!sel || !m || !facets) return;
+    const coldX = sel.xv === OTHER && !sel.xs.length;
+    const coldY = sel.yv === OTHER && !sel.ys.length;
+    if (!coldX && !coldY) return;
+    const tail = (dim: MatrixDim, shown: string[]) => (facets[ISSUE_DIMS[dim].param] ?? []).map((o) => o.value).filter((v) => !shown.includes(v));
+    const xs = coldX ? tail(x, m.x_values) : sel.xs;
+    const ys = coldY ? tail(y, m.y_values) : sel.ys;
+    if ((coldX && !xs.length) || (coldY && !ys.length)) return;
+    onCell({ xv: sel.xv, yv: sel.yv, xs, ys });
+  }, [sel, m, facets, x, y, onCell]);
 
   const fillOf = (v: number | null) => (grid ? (grid.div ? divFill(v, grid.max) : seqFill(v, grid.max)) : "transparent");
   const inkOf = (v: number | null) => (grid ? (grid.div ? divInk(v, grid.max) : seqInk(v, grid.max)) : "var(--ink)");

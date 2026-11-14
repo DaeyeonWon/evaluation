@@ -15,7 +15,7 @@ const issuesAnalysis = {
     newSpark: "신규 패턴 발화 ({bucket})",
     regressionsSub: "회귀 {n}건 — 눌러서 필터",
     maxScoreSub: "최고 점수 {max} · 평균 {avg}",
-    ladder: "Severity 분포 · 이슈 {n}건",
+    ladder: "영향도 분포 · 이슈 {n}건",
     openOf: "미해결 {open}",
   },
   heat: {
@@ -161,7 +161,7 @@ const issuesAnalysis = {
     next: "다음 이슈",
     close: "상세 닫기",
     anatomy: "점수 해부 (Waterfall)",
-    anatomyCap: "막대 = 기여 점수, 옅은 칸 = 가중치 한도, 세로선 = Severity 경계. 막대에 마우스를 올리면 원 수치가 보입니다.",
+    anatomyCap: "막대 = 기여 점수, 옅은 칸 = 가중치 한도, 세로선 = 영향도 경계. 막대에 마우스를 올리면 원 수치가 보입니다.",
     score: "Criticality",
     trend: "Intent 범위 FAIL 비율 추이",
     baselineLine: "Baseline {rate}%",
