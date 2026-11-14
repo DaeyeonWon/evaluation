@@ -11,7 +11,7 @@ import { useState, type CSSProperties } from "react";
 import { LangBadge } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueColumnStat, IssueDetail } from "@/lib/types";
-import { useDimLabel, type IssueFormat } from "../../issues-shared";
+import { ModuleBadges, useDimLabel, type IssueFormat } from "../../issues-shared";
 import { Plate } from "../../ui";
 
 const COLLAPSED = 6;
@@ -112,7 +112,7 @@ export function Breakdowns({
 }) {
   const t = useT("issuesDetail");
   return (
-    <Plate title={<><Boxes aria-hidden /> {t("bd.title")}</>} refText={t("bd.ref")}>
+    <Plate title={<><Boxes aria-hidden /> {t("bd.title")} <ModuleBadges feature="detail.breakdowns" /></>} refText={t("bd.ref")}>
       <p className="idt-lead">{t("bd.lead")}</p>
       <div className="idt-bds">
         {items.map((b) => (

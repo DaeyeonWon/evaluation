@@ -2,16 +2,13 @@
  * Issue detail — pure helpers: token diff (expected vs predicted), the range part of a query,
  * the /results param of a breakdown dim, and the client-side issue Markdown.
  */
+import { SEVERITY_BANDS } from "@/lib/severity";
 import type { IssueDetail, IssueFactorKey } from "@/lib/types";
 import type { IssueFormat } from "../../issues-shared";
 
 export const FACTOR_ORDER: IssueFactorKey[] = ["volume", "severity", "trend", "regression", "reach", "novelty"];
-/** severity thresholds on the 0–100 criticality scale (P2 ≥ 30, P1 ≥ 45, P0 ≥ 60) */
-export const SCORE_BANDS = [
-  { at: 30, sev: "P2" },
-  { at: 45, sev: "P1" },
-  { at: 60, sev: "P0" },
-] as const;
+/** severity thresholds on the 0–100 criticality scale (shared: src/lib/severity.ts) */
+export const SCORE_BANDS = SEVERITY_BANDS;
 
 // ───────────────────────────────────────── diff ──
 export type DiffPart = { text: string; op: "same" | "add" | "del" };

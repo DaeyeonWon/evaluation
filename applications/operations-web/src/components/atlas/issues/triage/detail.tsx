@@ -1,5 +1,6 @@
 "use client";
 /** Triage Deck — full-height side sheet: score anatomy, trend, breakdown, utterances, triage + history. */
+import { SEVERITY_BANDS } from "@/lib/severity";
 import clsx from "clsx";
 import { ArrowUpRight, ChevronLeft, ChevronRight, CircleSlash, ExternalLink, GitCompareArrows, History, ListChecks, Maximize2, Workflow, X } from "lucide-react";
 import Link from "next/link";
@@ -9,7 +10,7 @@ import { EChart, LangBadge } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import { OPERATORS } from "@/lib/catalog";
 import type { IssueDetail, IssueStatus } from "@/lib/types";
-import { useIssue, useIssueLinks, useIssuePermission, useIssueTriage, useIssueViewLinks, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
+import { ModuleBadges, useIssue, useIssueLinks, useIssuePermission, useIssueTriage, useIssueViewLinks, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
 import { axisX, axisY, baseOpt, opt } from "../../chart";
 import { ErrorNote, Skeleton, opName, useReducedMotionSafe } from "../../ui";
 import { ClsTag, StatusTag, useFactorNote, useGaugeLabel } from "./card";
@@ -70,8 +71,8 @@ function Anatomy({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
         {rows.map((f) => (
           <i key={f.key} style={{ width: `${f.contribution}%`, ["--fc" as string]: factorVar(f.key) } as CSSProperties} title={`${fx.factor(f.key)} ${f.contribution}`} />
         ))}
-        {[30, 45, 60].map((x) => (
-          <b key={x} style={{ left: `${x}%` }} data-l={x === 60 ? "P0" : x === 45 ? "P1" : "P2"} />
+        {SEVERITY_BANDS.map((b) => (
+          <b key={b.at} style={{ left: `${b.at}%` }} data-l={b.sev} />
         ))}
       </div>
       <ul className="ia-anat">
@@ -358,6 +359,7 @@ export function IssueSheet({ id, f, fx, ids, focusTicket, onClose, ts }: { id: s
                     <ClsTag c={d.severity_class} fx={fx} />
                     {d.novelty === "new" ? <span className="ia-new">{fx.value("novelty", "new")}</span> : null}
                     <StatusTag s={d.state.status} fx={fx} />
+                    <ModuleBadges feature="triage.quicklook" />
                   </div>
                   <h2>{fx.text(d.title)}</h2>
                   <div className="ia-sig mono">

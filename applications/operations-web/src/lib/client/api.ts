@@ -588,3 +588,36 @@ export const api = {
 };
 
 export type Api = typeof api;
+
+// ───────────────────────────────────────── Quality dashboard (/api/v1/quality/*, docs/data-contract.md §9) ──
+/** Row-dim filters accepted by every /quality endpoint (comma-joined lists) + the range. */
+export interface QualityQuery extends RangeQuery {
+  agent_function?: string | string[];
+  capsule?: string | string[];
+  intent?: string | string[];
+  language?: string | string[];
+  market?: string | string[];
+  region?: string | string[];
+  device?: string | string[];
+  division?: string | string[];
+  bixby_version?: string | string[];
+  one_ui_version?: string | string[];
+  model_version?: string | string[];
+  pipeline?: string | string[];
+  pipeline_version?: string | string[];
+  failure_reason?: string | string[];
+  result?: "PASS" | "FAIL";
+}
+type QDim = import("@/lib/types").QualityDim;
+/** Typed fetchers for the Quality dashboard (no analysis module — result-row aggregation only). */
+export const qualityApi = {
+  summary: (q?: QualityQuery, signal?: AbortSignal) => get<import("@/lib/types").QualitySummary>("/quality/summary", q, signal),
+  breakdown: (q: QualityQuery & { dim: QDim; sort?: "fail_count" | "pass_rate" | "delta" | "volume" | "natural"; limit?: number }, signal?: AbortSignal) =>
+    get<import("@/lib/types").QualityBreakdown>("/quality/breakdown", q, signal),
+  matrix: (q: QualityQuery & { x: QDim; y: QDim; metric?: import("@/lib/types").QualityMatrixMetric; max_x?: number; max_y?: number }, signal?: AbortSignal) =>
+    get<import("@/lib/types").QualityMatrix>("/quality/matrix", q, signal),
+  versions: (q: QualityQuery & { dim?: import("@/lib/types").QualityVersionDim; by?: import("@/lib/types").QualityVersionBy }, signal?: AbortSignal) =>
+    get<import("@/lib/types").QualityVersions>("/quality/versions", q, signal),
+  distributions: (q: QualityQuery & { by?: QDim; max_by?: number; examples?: number }, signal?: AbortSignal) =>
+    get<import("@/lib/types").QualityDistributions>("/quality/distributions", q, signal),
+};

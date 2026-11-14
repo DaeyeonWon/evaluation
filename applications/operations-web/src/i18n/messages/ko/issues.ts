@@ -12,7 +12,9 @@ const issues = {
   title: "이슈 리포트",
   subtitle: "평가 FAIL 클러스터에서 시장 이슈가 될 항목을 선별하고 신규 발화 패턴을 탐지합니다",
   frame: {
-    dwg: "I-01 · ISSUE REPORT",
+    dwg: "I-01 · DEEP ANALYSIS",
+    phase: "Phase 2 · 교차·시계열 분석",
+    phaseTip: "Phase 2: 여러 발화·여러 날을 가로지르는 분석으로 분석 모듈(M1–M9)이 필요합니다. 모듈 없는 집계 통계는 Phase 1 품질 대시보드에 있습니다.",
     switcher: "보기 전환",
     exportGroup: "내보내기",
     baselineTag: "Baseline · {mode}",

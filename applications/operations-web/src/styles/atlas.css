@@ -443,6 +443,9 @@
   & .note svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
   & .note.warn { border-color: var(--st-retry); background: color-mix(in srgb, var(--st-retry) 10%, transparent); }
   & .note.bad { border-color: var(--st-failed); background: color-mix(in srgb, var(--st-failed) 9%, transparent); }
+  & .phase-tag { --pc: var(--accent); display: inline-flex; align-items: center; margin-left: 8px; padding: 1px 7px; border: 1px solid var(--pc); border-radius: 999px; background: color-mix(in srgb, var(--pc) 11%, transparent); color: var(--pc); font: 600 10px/1.5 var(--f-mono); letter-spacing: 0.04em; text-transform: none; vertical-align: 1px; white-space: nowrap; }
+  & .phase-tag[data-phase="1"] { --pc: var(--st-success); } & .phase-tag[data-phase="2"] { --pc: var(--st-dlq); }
+  & .judge-caveat { margin: 0; overflow-wrap: anywhere; } & .judge-caveat b { font-weight: 600; color: var(--ink); }
   & .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 14px; font-size: var(--t-sm); margin: 0; }
   & .kv dt { color: var(--ink-3); font-weight: 600; }
   & .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }

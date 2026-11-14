@@ -26,6 +26,7 @@ import {
   Search,
   SlidersHorizontal,
   Siren,
+  ClipboardCheck,
   SquareKanban,
   Sun,
   Table,
@@ -46,7 +47,7 @@ import type { DeadLetter, FileSearchHit, WorkflowSummary } from "@/lib/types";
 import { RangePicker, useRangeHref } from "./time-range";
 import { ToastProvider, useToast, useReducedMotionSafe } from "./ui";
 
-type NavKey = "orchestration" | "board" | "overview" | "capacity" | "explorer" | "pipelines" | "workflows" | "files" | "dlq" | "results" | "issues" | "analytics" | "config" | "hermes";
+type NavKey = "orchestration" | "board" | "overview" | "capacity" | "explorer" | "pipelines" | "workflows" | "files" | "dlq" | "results" | "quality" | "issues" | "analytics" | "config" | "hermes";
 interface Tab {
   key: NavKey;
   href: string;
@@ -66,6 +67,7 @@ export const TABS: Tab[] = [
   { key: "files", href: "/files", no: "F-01", Icon: FolderSearch },
   { key: "dlq", href: "/dlq", no: "S-05", Icon: ArchiveX },
   { key: "results", href: "/results", no: "U-01", Icon: Table },
+  { key: "quality", href: "/quality", no: "Q-01", Icon: ClipboardCheck },
   { key: "issues", href: "/issues", no: "I-01", Icon: Siren },
   { key: "analytics", href: "/analytics", no: "S-07", Icon: BarChart3 },
   { key: "config", href: "/config", no: "S-06", Icon: SlidersHorizontal },

@@ -30,6 +30,8 @@ tags:
   - name: DLQ
   - name: Results
   - name: Issues
+  - name: Quality
+    description: Quality dashboard — result-row GROUP BY / window aggregation only (no analysis module), §9
   - name: Analytics
   - name: Stages & Files
   - name: Config
@@ -2122,6 +2124,15 @@ paths:
             items:
               type: string
           description: Bixby client version
+        - name: one_ui_version
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: One UI version (Quality dashboard drill-down)
         - $ref: '#/components/parameters/WorkflowIdQ'
         - name: batch_id
           in: query
@@ -2305,6 +2316,15 @@ paths:
             items:
               type: string
           description: Bixby client version
+        - name: one_ui_version
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: One UI version (Quality dashboard drill-down)
         - $ref: '#/components/parameters/WorkflowIdQ'
         - name: batch_id
           in: query
@@ -3464,6 +3484,312 @@ paths:
           $ref: '#/components/schemas/SimState'
         job:
           $ref: '#/components/schemas/PipelineJobTransition'
+  /quality/summary:
+    get:
+      tags:
+        - Quality
+      summary: "Quality KPIs (\u0394 vs the previous equal window), pass-rate trend, by division / region, failure_reason distribution, top failing intents (\u00a79.2) \u2014 result-row aggregation only, no analysis module"
+      operationId: get__quality_summary
+      parameters:
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Quality_agent_function'
+        - $ref: '#/components/parameters/Quality_capsule'
+        - $ref: '#/components/parameters/Quality_intent'
+        - $ref: '#/components/parameters/Quality_language'
+        - $ref: '#/components/parameters/Quality_market'
+        - $ref: '#/components/parameters/Quality_region'
+        - $ref: '#/components/parameters/Quality_device'
+        - $ref: '#/components/parameters/Quality_division'
+        - $ref: '#/components/parameters/Quality_bixby_version'
+        - $ref: '#/components/parameters/Quality_one_ui_version'
+        - $ref: '#/components/parameters/Quality_model_version'
+        - $ref: '#/components/parameters/Quality_pipeline'
+        - $ref: '#/components/parameters/Quality_pipeline_version'
+        - $ref: '#/components/parameters/Quality_failure_reason'
+        - $ref: '#/components/parameters/Quality_result'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualitySummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /quality/breakdown:
+    get:
+      tags:
+        - Quality
+      summary: "Per value of one row dim: pass rate, FAILs, \u0394 vs the previous equal window, share of FAILs, trend (\u00a79.2)"
+      operationId: get__quality_breakdown
+      parameters:
+        - name: dim
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: ["agent_function", "capsule", "intent", "language", "market", "region", "device", "division", "bixby_version", "one_ui_version", "model_version", "pipeline", "pipeline_version", "failure_reason"]
+          description: "row dim to break down by"
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: ["fail_count", "pass_rate", "delta", "volume", "natural"]
+            default: "fail_count"
+          description: "item order"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 500
+          description: "max items (`truncated` when cut)"
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Quality_agent_function'
+        - $ref: '#/components/parameters/Quality_capsule'
+        - $ref: '#/components/parameters/Quality_intent'
+        - $ref: '#/components/parameters/Quality_language'
+        - $ref: '#/components/parameters/Quality_market'
+        - $ref: '#/components/parameters/Quality_region'
+        - $ref: '#/components/parameters/Quality_device'
+        - $ref: '#/components/parameters/Quality_division'
+        - $ref: '#/components/parameters/Quality_bixby_version'
+        - $ref: '#/components/parameters/Quality_one_ui_version'
+        - $ref: '#/components/parameters/Quality_model_version'
+        - $ref: '#/components/parameters/Quality_pipeline'
+        - $ref: '#/components/parameters/Quality_pipeline_version'
+        - $ref: '#/components/parameters/Quality_failure_reason'
+        - $ref: '#/components/parameters/Quality_result'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityBreakdown'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /quality/matrix:
+    get:
+      tags:
+        - Quality
+      summary: "Row dim \u00d7 row dim heatmap of pass_rate | fail_count | delta (\u00a79.2)"
+      operationId: get__quality_matrix
+      parameters:
+        - name: x
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: ["agent_function", "capsule", "intent", "language", "market", "region", "device", "division", "bixby_version", "one_ui_version", "model_version", "pipeline", "pipeline_version", "failure_reason"]
+          description: "column dim"
+        - name: y
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: ["agent_function", "capsule", "intent", "language", "market", "region", "device", "division", "bixby_version", "one_ui_version", "model_version", "pipeline", "pipeline_version", "failure_reason"]
+          description: "row dim (\u2260 x)"
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: ["pass_rate", "fail_count", "delta"]
+            default: "pass_rate"
+          description: "cell value"
+        - name: max_x
+          in: query
+          schema:
+            type: integer
+            default: 12
+            minimum: 2
+            maximum: 40
+          description: "free-valued axis: fold beyond this into __other__"
+        - name: max_y
+          in: query
+          schema:
+            type: integer
+            default: 12
+            minimum: 2
+            maximum: 40
+          description: "free-valued axis: fold beyond this into __other__"
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Quality_agent_function'
+        - $ref: '#/components/parameters/Quality_capsule'
+        - $ref: '#/components/parameters/Quality_intent'
+        - $ref: '#/components/parameters/Quality_language'
+        - $ref: '#/components/parameters/Quality_market'
+        - $ref: '#/components/parameters/Quality_region'
+        - $ref: '#/components/parameters/Quality_device'
+        - $ref: '#/components/parameters/Quality_division'
+        - $ref: '#/components/parameters/Quality_bixby_version'
+        - $ref: '#/components/parameters/Quality_one_ui_version'
+        - $ref: '#/components/parameters/Quality_model_version'
+        - $ref: '#/components/parameters/Quality_pipeline'
+        - $ref: '#/components/parameters/Quality_pipeline_version'
+        - $ref: '#/components/parameters/Quality_failure_reason'
+        - $ref: '#/components/parameters/Quality_result'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityMatrix'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /quality/versions:
+    get:
+      tags:
+        - Quality
+      summary: "Version comparison: plain delta table per model / Bixby / pipeline version, by division / region / agent_function, failure_reason mix, trend \u2014 no significance testing (that is M2) (\u00a79.2)"
+      operationId: get__quality_versions
+      parameters:
+        - name: dim
+          in: query
+          schema:
+            type: string
+            enum: ["model_version", "bixby_version", "pipeline_version"]
+            default: "model_version"
+          description: "version column"
+        - name: by
+          in: query
+          schema:
+            type: string
+            enum: ["division", "region", "agent_function"]
+            default: "division"
+          description: "grouping column"
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Quality_agent_function'
+        - $ref: '#/components/parameters/Quality_capsule'
+        - $ref: '#/components/parameters/Quality_intent'
+        - $ref: '#/components/parameters/Quality_language'
+        - $ref: '#/components/parameters/Quality_market'
+        - $ref: '#/components/parameters/Quality_region'
+        - $ref: '#/components/parameters/Quality_device'
+        - $ref: '#/components/parameters/Quality_division'
+        - $ref: '#/components/parameters/Quality_bixby_version'
+        - $ref: '#/components/parameters/Quality_one_ui_version'
+        - $ref: '#/components/parameters/Quality_model_version'
+        - $ref: '#/components/parameters/Quality_pipeline'
+        - $ref: '#/components/parameters/Quality_pipeline_version'
+        - $ref: '#/components/parameters/Quality_failure_reason'
+        - $ref: '#/components/parameters/Quality_result'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityVersions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /quality/distributions:
+    get:
+      tags:
+        - Quality
+      summary: "judge_score / latency histograms (PASS vs FAIL), failure_reason \u00d7 dim, FAILs per failure_reason over time, latest FAIL example rows with verbatim judge_reason (\u00a79.2)"
+      operationId: get__quality_distributions
+      parameters:
+        - name: by
+          in: query
+          schema:
+            type: string
+            enum: ["agent_function", "capsule", "intent", "language", "market", "region", "device", "division", "bixby_version", "one_ui_version", "model_version", "pipeline", "pipeline_version"]
+            default: "division"
+          description: "dim crossed with failure_reason"
+        - name: max_by
+          in: query
+          schema:
+            type: integer
+            default: 12
+            minimum: 2
+            maximum: 40
+          description: "fold beyond this into __other__"
+        - name: examples
+          in: query
+          schema:
+            type: integer
+            default: 3
+            minimum: 0
+            maximum: 10
+          description: "example FAIL rows per failure_reason"
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Quality_agent_function'
+        - $ref: '#/components/parameters/Quality_capsule'
+        - $ref: '#/components/parameters/Quality_intent'
+        - $ref: '#/components/parameters/Quality_language'
+        - $ref: '#/components/parameters/Quality_market'
+        - $ref: '#/components/parameters/Quality_region'
+        - $ref: '#/components/parameters/Quality_device'
+        - $ref: '#/components/parameters/Quality_division'
+        - $ref: '#/components/parameters/Quality_bixby_version'
+        - $ref: '#/components/parameters/Quality_one_ui_version'
+        - $ref: '#/components/parameters/Quality_model_version'
+        - $ref: '#/components/parameters/Quality_pipeline'
+        - $ref: '#/components/parameters/Quality_pipeline_version'
+        - $ref: '#/components/parameters/Quality_failure_reason'
+        - $ref: '#/components/parameters/Quality_result'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualityDistributions'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
 components:
   securitySchemes:
     consoleSession:
@@ -3477,6 +3803,159 @@ components:
       name: x-goog-iap-jwt-assertion
       description: IAP JWT (verified against IAP_AUDIENCE); upstream identity via x-console-user-* headers
   parameters:
+    Quality_agent_function:
+      name: agent_function
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["device_control", "smartthings_routine", "alarm_timer", "call_message", "media_play", "weather", "navigation", "settings", "calendar", "general_qa", "camera", "galaxy_ai_feature"]
+      description: "Row filter (§9.1): agent_function; comma-separated, OR within, AND across params"
+    Quality_capsule:
+      name: capsule
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): capsule_id (or capsule name); comma-separated, OR within, AND across params"
+    Quality_intent:
+      name: intent
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): intent_expected; comma-separated, OR within, AND across params"
+    Quality_language:
+      name: language
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["ko", "en", "ja", "es"]
+      description: "Row filter (§9.1): language; comma-separated, OR within, AND across params"
+    Quality_market:
+      name: market
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["KR", "US", "GB", "JP", "ES", "MX"]
+      description: "Row filter (§9.1): market; comma-separated, OR within, AND across params"
+    Quality_region:
+      name: region
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["KR", "NA", "EU", "JP", "LATAM"]
+      description: "Row filter (§9.1): region; comma-separated, OR within, AND across params"
+    Quality_device:
+      name: device
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): device_type; comma-separated, OR within, AND across params"
+    Quality_division:
+      name: division
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["Mobile", "Wearable", "Audio", "TV", "Appliance"]
+      description: "Row filter (§9.1): division; comma-separated, OR within, AND across params"
+    Quality_bixby_version:
+      name: bixby_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): bixby_version; comma-separated, OR within, AND across params"
+    Quality_one_ui_version:
+      name: one_ui_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): one_ui_version; comma-separated, OR within, AND across params"
+    Quality_model_version:
+      name: model_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): model_version; comma-separated, OR within, AND across params"
+    Quality_pipeline:
+      name: pipeline
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): pipeline_id (alias `pipeline_id`); comma-separated, OR within, AND across params"
+    Quality_pipeline_version:
+      name: pipeline_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (§9.1): pipeline_version (alias `version`); comma-separated, OR within, AND across params"
+    Quality_failure_reason:
+      name: failure_reason
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+          enum: ["INTENT_MISMATCH", "SLOT_ERROR", "RESPONSE_QUALITY", "TIMEOUT", "ASR_ERROR", "POLICY_VIOLATION"]
+      description: "Row filter (§9.1): failure_reason; comma-separated, OR within, AND across params"
+    Quality_result:
+      name: result
+      in: query
+      schema:
+        type: string
+        enum: ["PASS", "FAIL"]
+      description: "Row filter: result"
     Issue_agent_function:
       name: agent_function
       in: query
@@ -3974,6 +4453,249 @@ components:
           schema:
             $ref: '#/components/schemas/ApiErrorBody'
   schemas:
+    QualityDim:
+      type: string
+      enum: ["agent_function", "capsule", "intent", "language", "market", "region", "device", "division", "bixby_version", "one_ui_version", "model_version", "pipeline", "pipeline_version", "failure_reason"]
+    QualityWindow:
+      type: object
+      description: The previous equal-length window Δ is computed against — [from − span, from)
+      properties:
+        from: {type: number}
+        to: {type: number}
+        fromIso: {type: string}
+        toIso: {type: string}
+      required: [from, to, fromIso, toIso]
+    QualityStat:
+      type: object
+      properties:
+        total: {type: integer}
+        pass: {type: integer}
+        fail: {type: integer}
+        pass_rate: {type: number, nullable: true, description: "% PASS (0–100)"}
+        prev_total: {type: integer}
+        prev_fail: {type: integer}
+        prev_pass_rate: {type: number, nullable: true}
+        delta_pp: {type: number, nullable: true, description: "pass_rate − prev_pass_rate (pp); null when either window has no rows"}
+        fail_delta: {type: integer}
+      required: [total, pass, fail, pass_rate, prev_total, prev_fail, prev_pass_rate, delta_pp, fail_delta]
+    QualityValueStat:
+      allOf:
+        - $ref: '#/components/schemas/QualityStat'
+        - type: object
+          properties:
+            value: {type: string}
+            share: {type: number, description: "% of all FAILs in scope"}
+          required: [value, share]
+    QualityTrend:
+      type: object
+      properties:
+        bucket: {type: string, enum: [hour, day]}
+        t: {type: array, items: {type: number}, description: "bucket starts (epoch ms, KST-aligned)"}
+      required: [bucket, t]
+    QualitySummary:
+      type: object
+      properties:
+        range: {$ref: '#/components/schemas/ResolvedRange'}
+        previous: {$ref: '#/components/schemas/QualityWindow'}
+        kpis:
+          allOf:
+            - $ref: '#/components/schemas/QualityStat'
+            - type: object
+              properties:
+                avg_judge_score: {type: number, nullable: true}
+                prev_avg_judge_score: {type: number, nullable: true}
+                latency_p50_ms: {type: number, nullable: true}
+                latency_p95_ms: {type: number, nullable: true}
+                prev_latency_p50_ms: {type: number, nullable: true}
+                prev_latency_p95_ms: {type: number, nullable: true}
+        trend:
+          allOf:
+            - $ref: '#/components/schemas/QualityTrend'
+            - type: object
+              properties:
+                total: {type: array, items: {type: integer}}
+                fail: {type: array, items: {type: integer}}
+                pass_rate: {type: array, items: {type: number, nullable: true}}
+        by_division: {type: array, items: {$ref: '#/components/schemas/QualityValueStat'}}
+        by_region: {type: array, items: {$ref: '#/components/schemas/QualityValueStat'}}
+        failure_reasons: {type: array, items: {$ref: '#/components/schemas/QualityValueStat'}}
+        top_intents: {type: array, items: {$ref: '#/components/schemas/QualityValueStat'}}
+      required: [range, previous, kpis, trend, by_division, by_region, failure_reasons, top_intents]
+    QualityBreakdownItem:
+      allOf:
+        - $ref: '#/components/schemas/QualityValueStat'
+        - type: object
+          properties:
+            trend: {type: array, items: {type: integer}}
+            trend_rate: {type: array, items: {type: number, nullable: true}}
+          required: [trend, trend_rate]
+    QualityBreakdown:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/QualityBreakdownItem'}}
+        total: {type: integer}
+        range: {$ref: '#/components/schemas/ResolvedRange'}
+        previous: {$ref: '#/components/schemas/QualityWindow'}
+        dim: {$ref: '#/components/schemas/QualityDim'}
+        sort: {type: string, enum: [fail_count, pass_rate, delta, volume, natural]}
+        totals: {$ref: '#/components/schemas/QualityStat'}
+        trend: {$ref: '#/components/schemas/QualityTrend'}
+        truncated: {type: boolean}
+      required: [items, total, range, previous, dim, sort, totals, trend, truncated]
+    QualityMatrixCell:
+      allOf:
+        - $ref: '#/components/schemas/QualityStat'
+        - type: object
+          properties:
+            x: {type: string}
+            y: {type: string}
+            value: {type: number, nullable: true}
+          required: [x, y, value]
+    QualityMatrix:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/QualityMatrixCell'}, description: "cells, y-major"}
+        total: {type: integer}
+        range: {$ref: '#/components/schemas/ResolvedRange'}
+        previous: {$ref: '#/components/schemas/QualityWindow'}
+        x: {$ref: '#/components/schemas/QualityDim'}
+        y: {$ref: '#/components/schemas/QualityDim'}
+        metric: {type: string, enum: [pass_rate, fail_count, delta]}
+        x_values: {type: array, items: {type: string}}
+        y_values: {type: array, items: {type: string}}
+        x_totals: {type: array, items: {$ref: '#/components/schemas/QualityValueStat'}}
+        y_totals: {type: array, items: {$ref: '#/components/schemas/QualityValueStat'}}
+        domain: {type: array, items: {type: number}, nullable: true, minItems: 2, maxItems: 2}
+        folded:
+          type: object
+          properties:
+            x: {type: integer}
+            y: {type: integer}
+      required: [items, total, range, previous, x, y, metric, x_values, y_values, x_totals, y_totals, domain, folded]
+    QualityVersionRow:
+      allOf:
+        - $ref: '#/components/schemas/QualityValueStat'
+        - type: object
+          properties:
+            baseline_version: {type: string, nullable: true}
+            vs_prev_version_pp: {type: number, nullable: true, description: "vs the previous version, same window (no significance test — M2)"}
+            failure_mix: {type: object, additionalProperties: {type: integer}, description: "FAIL count per failure_reason"}
+          required: [baseline_version, vs_prev_version_pp, failure_mix]
+    QualityVersions:
+      type: object
+      properties:
+        items: {type: array, items: {$ref: '#/components/schemas/QualityVersionRow'}}
+        total: {type: integer}
+        range: {$ref: '#/components/schemas/ResolvedRange'}
+        previous: {$ref: '#/components/schemas/QualityWindow'}
+        dim: {type: string, enum: [model_version, bixby_version, pipeline_version]}
+        by: {type: string, enum: [division, region, agent_function]}
+        versions: {type: array, items: {type: string}}
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              value: {type: string}
+              total: {$ref: '#/components/schemas/QualityStat'}
+              cells:
+                type: array
+                items:
+                  allOf:
+                    - $ref: '#/components/schemas/QualityStat'
+                    - type: object
+                      properties:
+                        version: {type: string}
+                        vs_prev_version_pp: {type: number, nullable: true}
+        trend:
+          allOf:
+            - $ref: '#/components/schemas/QualityTrend'
+            - type: object
+              properties:
+                series:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      version: {type: string}
+                      total: {type: array, items: {type: integer}}
+                      pass_rate: {type: array, items: {type: number, nullable: true}}
+      required: [items, total, range, previous, dim, by, versions, groups, trend]
+    QualityHistogram:
+      type: object
+      properties:
+        edges: {type: array, items: {type: number}}
+        pass: {type: array, items: {type: integer}}
+        fail: {type: array, items: {type: integer}}
+      required: [edges, pass, fail]
+    QualityDistributions:
+      type: object
+      properties:
+        range: {$ref: '#/components/schemas/ResolvedRange'}
+        previous: {$ref: '#/components/schemas/QualityWindow'}
+        total: {type: integer}
+        judge_score:
+          allOf:
+            - $ref: '#/components/schemas/QualityHistogram'
+            - type: object
+              properties:
+                avg: {type: number, nullable: true}
+                prev_avg: {type: number, nullable: true}
+        latency:
+          allOf:
+            - $ref: '#/components/schemas/QualityHistogram'
+            - type: object
+              properties:
+                p50: {type: number, nullable: true}
+                p95: {type: number, nullable: true}
+                prev_p50: {type: number, nullable: true}
+                prev_p95: {type: number, nullable: true}
+        reason_by:
+          type: object
+          properties:
+            dim: {$ref: '#/components/schemas/QualityDim'}
+            values: {type: array, items: {type: string}}
+            reasons: {type: array, items: {$ref: '#/components/schemas/FailureReason'}}
+            counts: {type: array, items: {type: array, items: {type: integer}}, description: "counts[reason][value]"}
+            totals: {type: array, items: {type: integer}}
+            folded: {type: integer}
+        reason_trend:
+          allOf:
+            - $ref: '#/components/schemas/QualityTrend'
+            - type: object
+              properties:
+                series:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      reason: {$ref: '#/components/schemas/FailureReason'}
+                      fail: {type: array, items: {type: integer}}
+                      total: {type: integer}
+                      prev_total: {type: integer}
+        examples:
+          type: array
+          items:
+            type: object
+            properties:
+              reason: {$ref: '#/components/schemas/FailureReason'}
+              count: {type: integer}
+              rows:
+                type: array
+                description: latest FAIL rows; judge_reason verbatim (never aggregated)
+                items:
+                  type: object
+                  properties:
+                    utterance_id: {type: string}
+                    utterance_text: {type: string}
+                    intent_expected: {type: string}
+                    intent_predicted: {type: string}
+                    judge_score: {type: number}
+                    judge_reason: {type: string}
+                    device_type: {type: string}
+                    language: {$ref: '#/components/schemas/LangCode'}
+                    eval_ts: {type: number}
+      required: [range, previous, total, judge_score, latency, reason_by, reason_trend, examples]
     LangCode:
       type: string
       enum:
@@ -9157,6 +9879,7 @@ components:
           $ref: '#/components/schemas/IssueSeverity'
         score:
           type: number
+          description: 0–100, same scale and P thresholds as Issue.score (P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30)
         evidence:
           type: object
           properties:

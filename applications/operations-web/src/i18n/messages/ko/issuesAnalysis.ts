@@ -5,7 +5,7 @@
  */
 const issuesAnalysis = {
   view: { tab: "Analysis", desc: "Heatmap·Bubble·Treemap을 원하는 축으로 교차 분석합니다. 마크를 누르면 모든 뷰가 함께 좁혀집니다" },
-  foot: "점수 = 규모 20 + 심각도 25 + 추세 15 + 회귀 15 + 확산 10 + 신규성 15 · P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30",
+  foot: "점수 = 규모 20 + 심각도 25 + 추세 15 + 회귀 15 + 확산 10 + 신규성 15 · P0 ≥ {p0} · P1 ≥ {p1} · P2 ≥ {p2}",
   tiles: {
     vsBaseline: "Baseline {rate}",
     ofUtterances: "평가 발화 {n}건 중",

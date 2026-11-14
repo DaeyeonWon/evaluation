@@ -13,6 +13,7 @@
  *   page, pageSize (list endpoints); group, subgroup, group_size, group_key, subgroup_key, group_page (GET /issues)
  * Dimension endpoints: GET /issues/breakdown?dim=… · GET /issues/matrix?x=…&y=…&metric=… (./issues-dims.ts)
  */
+import { severityOfScore } from "@/lib/severity";
 import type { NextRequest } from "next/server";
 import { DIVISIONS, LANG_CODES, REGIONS } from "@/lib/catalog";
 import { formatIssueText } from "@/lib/issue-text";
@@ -653,8 +654,14 @@ export function buildInsights(a: Analysis, p: IssueQueryParsed): IssueInsight[] 
   const issues = filteredIssues(a, { ...p, sort: "score_desc" });
   const base = rowFilterParams(p.filters);
   const out: IssueInsight[] = [];
-  const sevOfScore = (s: number): IssueSeverity => (s >= 80 ? "P0" : s >= 60 ? "P1" : s >= 40 ? "P2" : "P3");
-  const add = (x: Omit<IssueInsight, "id" | "severity"> & { severity?: IssueSeverity }) => out.push({ ...x, id: `ins-${x.kind}-${out.length + 1}`, severity: x.severity ?? sevOfScore(x.score) });
+  // Insight scores share the issue severity scale (src/lib/severity.ts: P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30).
+  // The template scores below were authored against band edges 40 / 60 / 80; ×0.75 maps those edges exactly
+  // onto 30 / 45 / 60, so every template keeps its P level. `critical` insights carry the issue's own score.
+  const onIssueScale = (x: { kind: string; score: number }) => (x.kind === "critical" ? x.score : r1(x.score * 0.75));
+  const add = (x: Omit<IssueInsight, "id" | "severity"> & { severity?: IssueSeverity }) => {
+    const score = onIssueScale(x);
+    out.push({ ...x, score, id: `ins-${x.kind}-${out.length + 1}`, severity: x.severity ?? severityOfScore(score) });
+  };
 
   // overall
   const fails = a.fails.length;

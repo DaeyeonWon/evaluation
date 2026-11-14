@@ -8,8 +8,9 @@ import { GitCompareArrows, TrendingUp } from "lucide-react";
 import { EChart } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueDetail } from "@/lib/types";
-import { useDimLabel, type IssueFormat } from "../../issues-shared";
+import { ModuleBadges, useDimLabel, type IssueFormat } from "../../issues-shared";
 import { axisX, axisY, baseOpt, opt, tooltip } from "../../chart";
+import { JudgeCaveat } from "../../judge-caveat";
 import { Plate, useReducedMotionSafe } from "../../ui";
 import { sevKey } from "./lib";
 
@@ -58,8 +59,10 @@ export function Trend({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
   const sev = `--sev-${sevKey(d.severity)}`;
   const br = d.bixby_regression;
   const rg = d.regression;
+  // judge-model confound: the issue's rows span these pipeline versions (domain releases[].judgeModel)
+  const issuePipelines = (d.breakdown.pipeline_version ?? []).filter((c) => c.total > 0).map((c) => c.value);
   return (
-    <Plate title={<><TrendingUp aria-hidden /> {t("trend.title")}</>} refText={t("trend.ref", { bucket, mode: s(`baseline.mode.${d.baseline.mode}`) })}>
+    <Plate title={<><TrendingUp aria-hidden /> {t("trend.title")} <ModuleBadges feature="detail.trend" /></>} refText={t("trend.ref", { bucket, mode: s(`baseline.mode.${d.baseline.mode}`) })}>
       <div className="idt-trend">
         <figure className="idt-chart">
           <figcaption>
@@ -171,6 +174,11 @@ export function Trend({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
         </figure>
         {br || rg ? (
           <div className="idt-regs">
+            {rg?.axis === "pipeline_version" ? (
+              <JudgeCaveat versions={[rg.previous, rg.current]} mode="direct" className="idt-judge" />
+            ) : (
+              <JudgeCaveat versions={issuePipelines} mode="mixed" className="idt-judge" />
+            )}
             {br ? (
               <section className="idt-reg" data-kind="bixby">
                 <h3>

@@ -122,6 +122,12 @@ const common = {
     skipToContent: "본문으로 건너뛰기",
     externalLink: "새 창에서 열림",
   },
+  judge: {
+    title: "Judge 모델 차이",
+    direct: "비교 중인 pipeline version의 LLM judge 모델이 다릅니다 ({list}). Pass rate·judge score 차이의 일부는 모델이 아니라 judge 변경 때문일 수 있습니다.",
+    mixed: "비교 대상 행에 judge 모델이 다른 pipeline version이 섞여 있습니다 ({list}). 버전 간 차이에서 judge 효과를 빼려면 pipeline_version 하나로 필터하세요.",
+    source: "출처: domain.ts releases[].judgeModel",
+  },
 };
 
 export default common;

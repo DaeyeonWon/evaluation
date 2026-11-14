@@ -1,10 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
+import { FEATURE_IDS, MODULE_IDS } from "../../src/config/analysis-modules";
 
 /**
  * Smoke: every console route renders in ko and en with no console errors, roles are enforced
  * (Viewer gets 403 on /hermes and on write APIs, including PATCH /api/v1/issues/{id}), and the shared fonts load.
  * Issue Report: the merged routes, the 308 redirects from the candidate routes, view switching with filters and a
  * custom range (into /issues/<id>?…&via=<view>), the Triage lens switch / subgroup=none and the Viewer read-only state.
+ * Quality (Phase 1) / Deep Analysis (Phase 2): nav tabs active per route, Quality → /results drill-down keeps every filter
+ * (incl. one_ui_version) with the same row count, the judge-model caveat on version comparisons, the /issues/modules matrix.
  * Run: `npm run test:e2e` (starts a dev server, see playwright.config.ts) or point PW_BASE_URL at a
  * running server.
  */
@@ -26,10 +29,16 @@ const ROUTES = [
   "/files?q=batch-0001",
   "/dlq",
   "/results",
+  "/quality",
+  "/quality/breakdown",
+  "/quality/matrix",
+  "/quality/versions",
+  "/quality/distributions",
   "/issues",
   "/issues/categories",
   "/issues/analysis",
   "/issues/report",
+  "/issues/modules",
   "/issues/:first", // replaced by the top issue id (GET /api/v1/issues) in the sweep
   "/analytics",
   "/config",
@@ -212,4 +221,71 @@ test("unauthenticated API calls are 401 with a localized body", async ({ request
   expect((await ko.json()).error.message).toBe("로그인이 필요합니다.");
   const en = await request.get("/api/v1/overview", { headers: { cookie: "console_locale=en" } });
   expect((await en.json()).error.message).toBe("Sign in to continue.");
+});
+
+test("nav: Q-01 Quality and I-01 Deep Analysis tabs are active on their routes", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "ko");
+  for (const [route, tab, other] of [
+    ["/quality", "/quality", "/issues"],
+    ["/quality/matrix", "/quality", "/issues"],
+    ["/issues", "/issues", "/quality"],
+    ["/issues/modules", "/issues", "/quality"],
+  ] as const) {
+    await page.goto(route);
+    const navLink = (h: string) => page.locator(`nav.tabs a:is([href="${h}"], [href^="${h}?"])`).first();
+    await expect(navLink(tab), route).toHaveAttribute("aria-current", "page");
+    await expect(navLink(other), route).not.toHaveAttribute("aria-current", "page");
+  }
+  await page.goto("/quality");
+  await expect(page.locator('.phase-tag[data-phase="1"]')).toBeVisible();
+  await page.goto("/issues/report");
+  await expect(page.locator('.phase-tag[data-phase="2"]')).toBeVisible();
+  await expect(page.locator("h1").first()).toContainText("심층 분석 · 이슈 리포트");
+});
+
+test("Quality → /results drill-down keeps one_ui_version and the row count", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "ko");
+  const request = page.context().request;
+  await page.goto("/quality/breakdown?range=7d&dim=one_ui_version&division=Mobile");
+  const link = page.locator(".qd-bd td.act a").first();
+  await expect(link).toBeVisible();
+  const href = new URL((await link.getAttribute("href"))!, "http://x");
+  const v = href.searchParams.get("one_ui_version");
+  expect(v).toBeTruthy();
+  expect(href.searchParams.get("division")).toBe("Mobile");
+  const bd = (await (await request.get(`/api/v1/quality/breakdown?range=7d&dim=one_ui_version&division=Mobile&limit=50`)).json()) as { items: { value: string; total: number }[] };
+  const want = bd.items.find((x) => x.value === v)!.total;
+  const res = (await (await request.get(`/api/v1/results?${href.searchParams.toString()}&pageSize=1`)).json()) as { total: number };
+  expect(res.total).toBe(want);
+  await link.click();
+  await expect(page).toHaveURL(/\/results\?.*one_ui_version=/);
+  await expect(page.locator(".chip", { hasText: v! }).first()).toBeVisible();
+});
+
+test("judge-model caveat on version comparisons (v1.1 flash vs v1.2-rc pro)", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "en");
+  await page.goto("/quality/versions?range=7d&vdim=pipeline_version");
+  const c = page.locator('[data-judge-caveat="direct"]');
+  await expect(c).toBeVisible();
+  await expect(c).toContainText("gemini-2.5-flash");
+  await expect(c).toContainText("gemini-2.5-pro");
+  await page.goto("/quality/versions?range=7d&vdim=pipeline_version&pipeline_version=v1.1");
+  await expect(page.locator(".qd-vt")).toBeVisible();
+  await expect(page.locator("[data-judge-caveat]")).toHaveCount(0); // one judge → no caveat
+  await page.goto("/issues/report?range=7d");
+  await expect(page.locator("#issb-regression [data-judge-caveat]")).toBeVisible();
+});
+
+test("/issues/modules renders the registry and the full feature × module matrix", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "ko");
+  await page.goto("/issues/modules");
+  for (const m of MODULE_IDS) await expect(page.locator(`article.mod-card#${m}`)).toBeVisible();
+  const rows = page.locator(".mod-mx tbody tr:not(.grp) th.mod-mx-f code");
+  await expect(rows).toHaveCount(FEATURE_IDS.length);
+  expect(new Set(await rows.allInnerTexts())).toEqual(new Set(FEATURE_IDS));
+  await expect(page.locator(".mod-docs a[href$='docs/analysis-modules.md']").first()).toBeVisible();
 });

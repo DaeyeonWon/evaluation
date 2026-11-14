@@ -14,7 +14,7 @@ import { useCallback, useId, type ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import { parseAsString, useQueryStates } from "@/lib/client";
 import type { Issue, IssueFacets, UserImpactType } from "@/lib/types";
-import { TYPE_ICON, typeOrder, typeVar, useTriageLens, type IssueFiltersApi, type IssueFormat, type TriageLens, type TypeDim } from "../../issues-shared";
+import { ModuleBadges, TYPE_ICON, typeOrder, typeVar, useTriageLens, type IssueFiltersApi, type IssueFormat, type TriageLens, type TypeDim } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 
 type Facets = IssueFacets | undefined;
@@ -120,7 +120,7 @@ export function LensSwitch({ ts, f, facets, fx }: { ts: TriageState; f: IssueFil
       </LayoutGroup>
       <div className="ia-lens-aside">
         <p className="ia-lens-note">
-          <span className="mono">{t("lens.shared")}</span> {t(`lens.${ts.lens}.note`)}
+          <span className="mono">{t("lens.shared")}</span> {t(`lens.${ts.lens}.note`)} <ModuleBadges feature={ts.lens === "dev" ? "triage.lens.dev" : "triage.lens.user"} />
         </p>
         {ts.lens === "dev" ? (
           <label className="ia-oos">

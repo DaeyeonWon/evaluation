@@ -2495,3 +2495,179 @@ export interface IssueStreamMessage {
   by?: string | null;
   at: EpochMs;
 }
+
+// ═══════════════════════════════════════════════ Quality dashboard (/quality, /api/v1/quality/*) ══
+// docs/data-contract.md §9. Pure GROUP BY / window aggregation over result rows + reference tables
+// (src/config/domain.ts): no analysis module. Rates are percent (0–100); deltas are percentage points.
+
+/** row dims accepted by breakdown / matrix / versions `by` (and as filters) */
+export type QualityDim =
+  | "agent_function"
+  | "capsule"
+  | "intent"
+  | "language"
+  | "market"
+  | "region"
+  | "device"
+  | "division"
+  | "bixby_version"
+  | "one_ui_version"
+  | "model_version"
+  | "pipeline"
+  | "pipeline_version"
+  | "failure_reason";
+export type QualityMatrixMetric = "pass_rate" | "fail_count" | "delta";
+export type QualityVersionDim = "model_version" | "bixby_version" | "pipeline_version";
+export type QualityVersionBy = "division" | "region" | "agent_function";
+
+/** the previous equal-length window Δ is computed against: [from − span, from) */
+export interface QualityWindow {
+  from: EpochMs;
+  to: EpochMs;
+  fromIso: string;
+  toIso: string;
+}
+
+/** counts + rates of one slice in the current window and the previous equal window */
+export interface QualityStat {
+  total: number;
+  pass: number;
+  fail: number;
+  /** % PASS (null without rows) */
+  pass_rate: number | null;
+  prev_total: number;
+  prev_fail: number;
+  prev_pass_rate: number | null;
+  /** pass_rate − prev_pass_rate, pp (null when either window has no rows) */
+  delta_pp: number | null;
+  /** fail − prev_fail */
+  fail_delta: number;
+}
+
+export interface QualityValueStat extends QualityStat {
+  value: string;
+  /** % of all FAILs in scope */
+  share: number;
+}
+
+export interface QualityTrend {
+  bucket: "hour" | "day";
+  /** bucket starts (epoch ms, KST-aligned) */
+  t: EpochMs[];
+}
+
+export interface QualitySummary {
+  range: ResolvedRange;
+  previous: QualityWindow;
+  kpis: QualityStat & {
+    avg_judge_score: number | null;
+    prev_avg_judge_score: number | null;
+    latency_p50_ms: number | null;
+    latency_p95_ms: number | null;
+    prev_latency_p50_ms: number | null;
+    prev_latency_p95_ms: number | null;
+  };
+  trend: QualityTrend & { total: number[]; fail: number[]; pass_rate: (number | null)[] };
+  by_division: QualityValueStat[];
+  by_region: QualityValueStat[];
+  failure_reasons: QualityValueStat[];
+  /** most FAILs first (≤ 10) */
+  top_intents: QualityValueStat[];
+}
+
+export interface QualityBreakdownItem extends QualityValueStat {
+  /** FAILs per bucket */
+  trend: number[];
+  /** pass rate per bucket */
+  trend_rate: (number | null)[];
+}
+
+export interface QualityBreakdown extends RangedList<QualityBreakdownItem> {
+  previous: QualityWindow;
+  dim: QualityDim;
+  sort: "fail_count" | "pass_rate" | "delta" | "volume" | "natural";
+  totals: QualityStat;
+  trend: QualityTrend;
+  truncated: boolean;
+}
+
+export interface QualityMatrixCell extends QualityStat {
+  x: string;
+  y: string;
+  /** the requested metric (null without rows / previous window) */
+  value: number | null;
+}
+
+export interface QualityMatrix extends RangedList<QualityMatrixCell> {
+  previous: QualityWindow;
+  x: QualityDim;
+  y: QualityDim;
+  metric: QualityMatrixMetric;
+  x_values: string[];
+  y_values: string[];
+  x_totals: QualityValueStat[];
+  y_totals: QualityValueStat[];
+  /** [min, max] of non-null cell values */
+  domain: [number, number] | null;
+  /** values beyond max_x / max_y folded into "__other__" */
+  folded: { x: number; y: number };
+}
+
+export interface QualityVersionRow extends QualityValueStat {
+  /** the version just before this one in version order (null for the first) */
+  baseline_version: string | null;
+  /** pass_rate − the baseline version's pass_rate in the same window, pp (no significance test — that is M2) */
+  vs_prev_version_pp: number | null;
+  /** FAIL count per failure_reason */
+  failure_mix: Partial<Record<FailureReason, number>>;
+}
+
+export interface QualityVersionGroup {
+  value: string;
+  total: QualityStat;
+  /** one entry per `versions` value (same order) */
+  cells: (QualityStat & { version: string; vs_prev_version_pp: number | null })[];
+}
+
+export interface QualityVersions extends RangedList<QualityVersionRow> {
+  previous: QualityWindow;
+  dim: QualityVersionDim;
+  by: QualityVersionBy;
+  versions: string[];
+  groups: QualityVersionGroup[];
+  trend: QualityTrend & { series: { version: string; pass_rate: (number | null)[]; total: number[] }[] };
+}
+
+export interface QualityHistogram {
+  /** bucket lower edges */
+  edges: number[];
+  pass: number[];
+  fail: number[];
+}
+
+/** a FAIL row shown as an example (row-level judge_reason; nothing is aggregated from the text) */
+export interface QualityFailExample {
+  utterance_id: string;
+  utterance_text: string;
+  intent_expected: string;
+  intent_predicted: string;
+  judge_score: number;
+  judge_reason: string;
+  device_type: string;
+  language: LangCode;
+  eval_ts: EpochMs;
+}
+
+export interface QualityDistributions {
+  range: ResolvedRange;
+  previous: QualityWindow;
+  total: number;
+  judge_score: QualityHistogram & { avg: number | null; prev_avg: number | null };
+  latency: QualityHistogram & { p50: number | null; p95: number | null; prev_p50: number | null; prev_p95: number | null };
+  /** failure_reason × `by` FAIL counts */
+  reason_by: { dim: QualityDim; values: string[]; reasons: FailureReason[]; counts: number[][]; totals: number[]; folded: number };
+  /** FAILs per failure_reason per bucket */
+  reason_trend: QualityTrend & { series: { reason: FailureReason; fail: number[]; prev_total: number; total: number }[] };
+  /** latest FAIL rows per failure_reason (≤ examples, default 3) */
+  examples: { reason: FailureReason; count: number; rows: QualityFailExample[] }[];
+}

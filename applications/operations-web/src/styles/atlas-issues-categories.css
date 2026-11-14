@@ -325,3 +325,6 @@
 @keyframes at-isscat-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @keyframes at-isscat-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 @keyframes at-isscat-pop { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+/* analysis-module badge row under the dim switch (badge styles: atlas-issues-modules.css) */
+[data-variant="atlas"] .iss-cat .cat-mods { margin-top: -8px; }

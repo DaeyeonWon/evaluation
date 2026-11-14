@@ -60,9 +60,11 @@ export function bixbyOrder(extra: Iterable<string> = []): string[] {
 }
 
 // ───────────────────────────────────────── capability ──
+/** Longest `intent` prefix match wins (table order does not matter); no match = supported everywhere. */
 export function capabilityOf(intent: string): CapabilityRule | null {
-  for (const c of CAPABILITIES) if (intent.startsWith(c.intent)) return c;
-  return null;
+  let best: CapabilityRule | null = null;
+  for (const c of CAPABILITIES) if (intent.startsWith(c.intent) && (!best || c.intent.length > best.intent.length)) best = c;
+  return best;
 }
 type Support = "ok" | "device" | "version";
 export function supportOf(r: Pick<ResultRow, "intent_expected" | "division" | "device_type" | "bixby_version">): Support {

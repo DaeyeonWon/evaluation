@@ -120,6 +120,12 @@ const common = {
     skipToContent: "Skip to content",
     externalLink: "opens in a new window",
   },
+  judge: {
+    title: "Judge model differs",
+    direct: "The compared pipeline versions use different LLM judge models ({list}). Part of any pass-rate or judge-score difference may come from the judge change, not the model.",
+    mixed: "The compared rows mix pipeline versions with different judge models ({list}). Filter to one pipeline_version to take the judge effect out of the version-to-version difference.",
+    source: "Source: domain.ts releases[].judgeModel",
+  },
 } satisfies Messages<typeof ko>;
 
 export default common;

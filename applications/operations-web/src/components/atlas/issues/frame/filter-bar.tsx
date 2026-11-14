@@ -10,6 +10,7 @@
  * Every control writes the shared URL state (useIssueFilters), so every view re-queries. Views must not
  * render their own filter UI.
  */
+import { SEVERITY_BANDS } from "@/lib/severity";
 import clsx from "clsx";
 import { Check, ChevronDown, Search, SlidersHorizontal, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -33,7 +34,7 @@ import {
 } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 
-const MIN_SCORES = [null, 30, 45, 60] as const;
+const MIN_SCORES = [null, ...SEVERITY_BANDS.map((b) => b.at)] as const;
 const SEV_ORDER = ["P0", "P1", "P2", "P3"];
 
 type Row = { value: string; count: number; fail_rate: number | null; delta: number | null; issues: number | null };

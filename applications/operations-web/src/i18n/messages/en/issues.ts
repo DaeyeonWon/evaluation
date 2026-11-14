@@ -5,7 +5,9 @@ const issues = {
   title: "Issue Report",
   subtitle: "Selects FAIL clusters that could become market issues and detects new utterance patterns",
   frame: {
-    dwg: "I-01 · ISSUE REPORT",
+    dwg: "I-01 · DEEP ANALYSIS",
+    phase: "Phase 2 · Cross-row & time-series analysis",
+    phaseTip: "Phase 2: analysis across utterances and across days; needs the analysis modules (M1–M9). Module-free aggregate statistics live in Phase 1, the Quality dashboard.",
     switcher: "Switch view",
     exportGroup: "Export",
     baselineTag: "Baseline · {mode}",

@@ -9,7 +9,7 @@ import { useFmt, useT } from "@/i18n/client";
 import { BIXBY_VERSIONS } from "@/lib/catalog";
 import type { InsightList, IssueSummary } from "@/lib/types";
 import { useTween } from "@/components/shared";
-import { ISSUE_LIST_FILTERS, useDimLabel, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
+import { ISSUE_LIST_FILTERS, ModuleBadges, useDimLabel, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
 import { Skeleton } from "../../ui";
 import { Delta, FootRef, isoWeek, Spark, useTip } from "./bits";
 
@@ -62,6 +62,7 @@ export function Masthead({ sum, ins, f, fx, bixby, regenerating }: { sum: IssueS
           <RefreshCw aria-hidden />
           {regenerating ? t("filters.regenerating") : t("filters.upToDate")}
         </span>
+        <ModuleBadges feature="report.masthead" className="issb-mast-mods" />
       </div>
 
       <dl className="issb-mast-meta">

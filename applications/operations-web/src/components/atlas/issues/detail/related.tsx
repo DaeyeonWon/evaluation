@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
 import { LangBadge } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueDetail } from "@/lib/types";
-import type { IssueFormat } from "../../issues-shared";
+import { ModuleBadges, type IssueFormat } from "../../issues-shared";
 import { useDetailLinks } from "./links";
 import { Plate } from "../../ui";
 
@@ -20,7 +20,7 @@ export function Patterns({ d, base }: { d: IssueDetail; base: Record<string, str
   const { utterance_pattern: _drop, ...noPattern } = base;
   void _drop;
   return (
-    <Plate title={<><Sparkles aria-hidden /> {t("patterns.title")}</>} refText={t("patterns.ref", { n: d.patterns.length })}>
+    <Plate title={<><Sparkles aria-hidden /> {t("patterns.title")} <ModuleBadges feature="detail.patterns" /></>} refText={t("patterns.ref", { n: d.patterns.length })}>
       <div className="idt-pat-mix" role="img" aria-label={t("patterns.mixAria", { pct: Math.round((novel / total) * 100) })}>
         <span className="idt-pat-mix-bar">
           <i data-k="new" style={{ width: `${(novel / total) * 100}%` }} />
@@ -70,7 +70,7 @@ export function Workflows({ d }: { d: IssueDetail }) {
   const L = useDetailLinks();
   const max = Math.max(1, ...d.workflows.map((w) => w.fails));
   return (
-    <Plate title={<><Workflow aria-hidden /> {t("wf.title")}</>} refText={t("wf.ref", { n: d.workflows.length })}>
+    <Plate title={<><Workflow aria-hidden /> {t("wf.title")} <ModuleBadges feature="detail.workflows" /></>} refText={t("wf.ref", { n: d.workflows.length })}>
       {d.workflows.length ? (
         <ul className="idt-wfs">
           {d.workflows.map((w) => (
@@ -130,7 +130,7 @@ export function Similar({ d, fx, href }: { d: IssueDetail; fx: IssueFormat; href
   const simIds = new Set(sim.map((x) => x.id));
   const cat: Card[] = (d.same_category ?? []).filter((x) => !simIds.has(x.id)).slice(0, 8).map((x) => ({ ...x, tag: `${fx.fn(x.signature.agent_function)} · ${x.signature.intent_expected}` }));
   return (
-    <Plate title={<><Network aria-hidden /> {t("sim.title")}</>}>
+    <Plate title={<><Network aria-hidden /> {t("sim.title")} <ModuleBadges feature="detail.similar" /></>}>
       <div className="idt-sim-groups">
         <section>
           <h3>{t("sim.similar")}</h3>

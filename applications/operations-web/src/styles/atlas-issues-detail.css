@@ -201,6 +201,7 @@
   & .idt-chart figcaption .muted { font-size: var(--t-xs); }
   & .idt-ec { height: 190px; width: 100%; }
   & .idt-regs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+  & .idt-regs > .idt-judge { grid-column: 1 / -1; }
   & .idt-reg { border: 1px solid var(--rule-2); border-left: 2px solid var(--sev-p1); border-radius: 2px; padding: 10px 12px; background: var(--sheet-2); }
   & .idt-reg h3 { margin: 0 0 4px; font-size: var(--t-sm); font-weight: 750; display: flex; gap: 6px; align-items: center; }
   & .idt-reg h3 svg { width: 14px; height: 14px; color: var(--sev-p1); }

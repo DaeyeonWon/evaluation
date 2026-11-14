@@ -7,7 +7,7 @@ import { motion } from "motion/react";
 import type { CSSProperties, ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueDetail } from "@/lib/types";
-import { TypeDot, typeVar, type IssueFormat, type TypeDim } from "../../issues-shared";
+import { ModuleBadges, TypeDot, typeVar, type IssueFormat, type TypeDim } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 import { SCORE_BANDS, sevKey } from "./lib";
 
@@ -153,6 +153,7 @@ export function Hero({
           <span className="mono muted idt-id">
             {d.id} · #{d.rank}
           </span>
+          <ModuleBadges feature="detail.header" />
         </div>
         <nav className="idt-pn" aria-label={t("hero.pnAria")}>
           {nav.prev ? (

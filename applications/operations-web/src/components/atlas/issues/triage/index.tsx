@@ -21,6 +21,7 @@ import { parseAsString, useQueryStates, useSession } from "@/lib/client";
 import type { Issue } from "@/lib/types";
 import {
   ISSUE_SORTS,
+  ModuleBadges,
   useIssueFacets,
   useIssueFilters,
   useIssueFormat,
@@ -141,6 +142,7 @@ export function IssuesTriage() {
             {t(kanban ? "deck.titleKanban" : ts.lens === "dev" ? "deck.titleDev" : "deck.titleUser")}
             {list.data ? <span className="mono muted">{t("deck.total", { total: fm.number(total) })}</span> : null}
             {list.data && list.data.unfiltered_total !== total ? <span className="mono muted ia-unf">{t("deck.unfiltered", { n: fm.number(list.data.unfiltered_total) })}</span> : null}
+            <ModuleBadges features={kanban ? ["triage.kanban"] : ts.group === "severity" ? ["triage.grouping.impact", "triage.cards"] : ["triage.cards"]} />
           </h2>
           <div className="ia-deck-tools">
             {kanban ? null : <GroupPicker ts={ts} />}

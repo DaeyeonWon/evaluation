@@ -12,19 +12,16 @@ import { EChart, LangBadge, type ChartTokens } from "@/components/shared";
 import { deviceLabel } from "@/i18n";
 import { useFmt, useLocale, useT } from "@/i18n/client";
 import { OPERATORS } from "@/lib/catalog";
+import { SEVERITY_BANDS } from "@/lib/severity";
 import type { IssueDetail, IssueFactor, IssueStatus, ResultRow } from "@/lib/types";
 import { axisX, axisY, opt, tooltip } from "../../chart";
-import { useDimLabel, useIssue, useIssueFormat, useIssueLinks, useIssueViewLinks, useIssuePermission, useIssueTriage, type IssueFiltersApi } from "../../issues-shared";
+import { ModuleBadges, useDimLabel, useIssue, useIssueFormat, useIssueLinks, useIssueViewLinks, useIssuePermission, useIssueTriage, type IssueFiltersApi } from "../../issues-shared";
 import { ErrorNote, Skeleton, useReducedMotionSafe } from "../../ui";
 import { FACTOR_KEYS, deltaDir, intentDiff, wordDiff } from "./lab";
 import { StatusPill } from "./table";
 
 /* ───────── score anatomy waterfall ───────── */
-const TIERS = [
-  { at: 30, sev: "P2" },
-  { at: 45, sev: "P1" },
-  { at: 60, sev: "P0" },
-] as const;
+const TIERS = SEVERITY_BANDS;
 
 function detailText(fct: IssueFactor): string {
   return Object.entries(fct.detail)
@@ -430,6 +427,7 @@ export function DetailPane({ f, onClose, siblings }: { f: IssueFiltersApi; onClo
               <StatusPill status={d.state.status} />
               {d.novelty === "new" ? <span className="lab-newtag">{t("tag.novel")}</span> : null}
               {d.state.ticket_id ? <span className="chip">{d.state.ticket_id}</span> : null}
+              <ModuleBadges feature="analysis.detailPane" />
             </div>
             <h2 className="lab-d-title">{fx.text(d.title)}</h2>
             <p className="lab-d-sig mono">

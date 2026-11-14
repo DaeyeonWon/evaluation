@@ -98,6 +98,10 @@ export const BIXBY_VERSION_INFO: BixbyVersionInfo[] = domain.bixbyVersions ?? []
 /** oldest first */
 export const BIXBY_VERSIONS: string[] = BIXBY_VERSION_INFO.map((v) => v.version);
 export const CAPABILITIES: CapabilityRule[] = domain.capabilities ?? [];
+/** Root pipeline release train (pipeline_version → judge model, model under test, …). */
+export const PIPELINE_RELEASES = domain.releases;
+/** pipeline_version → LLM judge model (a judge change confounds version-to-version score / pass-rate comparisons) */
+export const JUDGE_MODEL_BY_PIPELINE_VERSION: Record<string, string> = Object.fromEntries(domain.releases.map((r) => [r.version, r.judgeModel]));
 `);
 parts.push(`/** Standardized status tones (CSS tokens --st-<tone>). */
 export const TONES: Tone[] = ["success", "running", "queued", "retry", "failed", "dlq", "cancelled"];

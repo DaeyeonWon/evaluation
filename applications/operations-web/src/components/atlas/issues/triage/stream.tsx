@@ -7,7 +7,7 @@ import { useRef, useState, type CSSProperties } from "react";
 import { LangBadge } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import type { InsightList, NewPattern, PatternList } from "@/lib/types";
-import type { IssueFilterValues, IssueFiltersApi, IssueFormat, useIssueLinks } from "../../issues-shared";
+import { ModuleBadges, type IssueFilterValues, type IssueFiltersApi, type IssueFormat, type useIssueLinks } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
 import { MarketChip } from "./hero";
 import { Spark } from "./viz";
@@ -72,6 +72,7 @@ export function Ticker({ ins, f, fx, L }: { ins: InsightList | undefined; f: Iss
         <span className="ia-tk-pulse" aria-hidden />
         <b>{t("ticker.title")}</b>
         <span className="mono muted">{t("ticker.count", { n: items.length })}</span>
+        <ModuleBadges feature="insights" />
         {marquee ? (
           <button type="button" className="btn icon sm ia-tk-btn" onClick={() => setPaused((p) => !p)} aria-pressed={paused} aria-label={paused ? t("ticker.play") : t("ticker.pause")}>
             {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
@@ -208,7 +209,7 @@ export function PatternRow({ pats, fx, L, now, onIssue }: { pats: PatternList | 
       <header>
         <div>
           <h2>
-            <Sparkles aria-hidden /> {t("patterns.title")}
+            <Sparkles aria-hidden /> {t("patterns.title")} <ModuleBadges feature="newPatterns" />
           </h2>
           <p className="muted">{t("patterns.sub", { n: items.length })}</p>
         </div>

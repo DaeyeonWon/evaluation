@@ -530,7 +530,7 @@ and digits, plus multi-word product names (`PRODUCT_TERMS`); a **novel term** ha
 ### 8.7 Insights
 
 `IssueInsight { id, kind, key (issues.insights.*), vars, severity, score, evidence { filter, results, metrics, issue_id?, pattern_id? } }`,
-ranked by `score`. Kinds: `overall`, `safety`, `critical` (top 3 non-safety P0/P1; `insights.criticalSameIntent` when predicted = expected), `regression` (strongest),
+ranked by `score`. `score` is on the same 0–100 scale as `Issue.score` and `severity` uses the same thresholds (P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30, `src/lib/severity.ts`); `critical` insights carry the issue's own score and severity. Kinds: `overall`, `safety`, `critical` (top 3 non-safety P0/P1; `insights.criticalSameIntent` when predicted = expected), `regression` (strongest),
 `spike` (largest z among recurring), `new_pattern` (summary + top failing patterns; `insights.newPatternSameIntent` when every
 FAIL kept the expected intent, naming the dominant failure reason and an actual response), `market` (largest market
 delta), `hotspot` (agent_function × language cell), `concentration` (FAILs ≥ 80 % on one One UI / division / device /
@@ -595,7 +595,7 @@ baseline rows) so dims have baselines. Every issue carries the result and a loca
 | 10 | `response_quality` | otherwise |
 
 `must_handle` (+ `must_handle_reason`, `mustHandle.*`): `POLICY_VIOLATION` → always (guardrail); else true when ≥ 50 % of
-the FAIL rows run on a device / Bixby version that `domain.ts` `capabilities` supports (first intent-prefix match: listed
+the FAIL rows run on a device / Bixby version that `domain.ts` `capabilities` supports (longest intent-prefix match, order-independent: listed
 division or extra device, and `bixby_version ≥ minBixby`; no match = supported everywhere). Otherwise false with
 `unsupportedDevice` / `unsupportedVersion`.
 
@@ -659,3 +659,77 @@ by row tags). Totals never change. (`/issues/summary` keeps its legacy semantics
   `mustHandleValue.true|false`, `division.*`, `region.*`, `language.*`, `impactLevel.*`, `dimValue.other`; device, versions,
   intent, capsule, pipeline: the raw value. `ENUM_VARS` (`src/lib/issue-text.ts`) also translates `division`, `region`,
   `category`, `user_impact`, `dev_miss` vars.
+
+## 9. Quality API (`/quality`, `/api/v1/quality/*`)
+
+The Quality dashboard (nav **Q-01 · 품질 대시보드 / Quality**) is the "aggregate statistics" layer between per-row analysis
+(already in the pipeline output: PASS/FAIL + `judge_reason` + `failure_reason`) and the cross-row / time-series analysis of
+Deep Analysis (`/issues`, analysis modules M1–M9). **No analysis module:** every number is a `GROUP BY` / window aggregation
+over result rows (`results.rowsInRange`, the same access `GET /results` uses) plus the reference tables of
+`src/config/domain.ts` (R1 device → division, R2 market → region, R3 intent → agent_function). Service:
+`src/server/services/quality.ts` (+ `quality/dims.ts`, `quality/agg.ts`); it imports nothing from `issues*.ts`. Each route
+file carries an equivalent BigQuery SQL sketch.
+
+Not in this layer (module territory): issue identity / clustering (M1), baselines, z-scores, significance or regression
+tests (M2), scores / P0–P3 (M3), taxonomy and severity classes (M4), capability (M5), novelty (M6), narratives (M7),
+lifecycle (M8), traffic weighting (M9). `judge_reason` appears only verbatim on example rows; its text is never aggregated.
+
+### 9.1 Common rules
+
+- All endpoints: `GET`, permission `view`, ranged (`range` / `from` & `to`, §1), echo `range` and `previous`.
+- **Δ = vs the previous equal-length window** only: `previous = [from − (to − from), from)`. `delta_pp` = `pass_rate −
+  prev_pass_rate` (percentage points); `fail_delta` = `fail − prev_fail`. Both windows get the same row filters. `null` when
+  either window has no rows (e.g. `30d` on the mock, whose history starts ~30 days back).
+- Rates are percent (0–100, 2 decimals). Trend buckets: hourly when the range ≤ 48 h, else KST days.
+- **Row filters** (comma-separated and/or repeated; AND across params, OR within): `agent_function`, `capsule` (id or
+  name), `intent` (= `intent_expected`), `language`, `market`, `region`, `device` (= `device_type`), `division`,
+  `bixby_version`, `one_ui_version`, `model_version`, `pipeline` (= `pipeline_id`; alias `pipeline_id`), `pipeline_version`
+  (alias `version`), `failure_reason`, `result` (`PASS|FAIL`). Enumerated params are validated → 400 `validation.enumInvalid`
+  (localized, `details.allowed`).
+- `QualityDim` (breakdown / matrix axes): the filter params above except `result`, i.e. agent_function, capsule, intent,
+  language, market, region, device, division, bixby_version, one_ui_version, model_version, pipeline, pipeline_version,
+  failure_reason. Values: capsule → `capsule_id`, device → `device_type`, pipeline → `pipeline_id`.
+- **failure_reason as a dim:** PASS rows have no code, so every row in scope is in each code's denominator and counts as a
+  FAIL only for its own code (`pass_rate` = 100 − that code's rate). Matrix cells AND both axes' FAIL conditions.
+- Value order: natural for enumerated dims (division, region, market, language, agent_function, failure_reason; Bixby /
+  pipeline versions by semver, model versions by release), else by FAILs then rows.
+- `QualityStat { total, pass, fail, pass_rate, prev_total, prev_fail, prev_pass_rate, delta_pp, fail_delta }`;
+  `QualityValueStat` = + `value`, `share` (% of all FAILs in scope). Types: `src/lib/types.ts` ("Quality dashboard").
+- Client: `qualityApi.{summary,breakdown,matrix,versions,distributions}` + `QualityQuery` in `src/lib/client/api.ts`.
+- Lists use the envelope `{ items, total, range }` (breakdown, matrix, versions).
+- Warm latency on the mock with `range=30d` (~27k rows + previous window): 10–80 ms.
+
+### 9.2 Endpoints
+
+- **`GET /quality/summary`** → `QualitySummary { range, previous, kpis (QualityStat + avg_judge_score, latency_p50_ms,
+  latency_p95_ms and their prev_*), trend { bucket, t[], total[], fail[], pass_rate[] }, by_division[], by_region[],
+  failure_reasons[] (all six codes), top_intents[] (≤ 10, most FAILs) }`.
+- **`GET /quality/breakdown?dim=<QualityDim>[&sort=fail_count|pass_rate|delta|volume|natural][&limit=100]`** (limit 1–500)
+  → `QualityBreakdown { items: QualityValueStat + trend[] (FAILs per bucket) + trend_rate[], total, range, previous, dim,
+  sort, totals, trend { bucket, t[] }, truncated }`. Values present in either window (+ selected ones). Missing `dim` → 400
+  `validation.required`.
+- **`GET /quality/matrix?x=<QualityDim>&y=<QualityDim>[&metric=pass_rate|fail_count|delta][&max_x=12&max_y=12]`** (2–40)
+  → `QualityMatrix { items: cells (y-major; QualityStat + x, y, value), total, range, previous, x, y, metric, x_values,
+  y_values, x_totals, y_totals, domain, folded { x, y } }`. Free-valued axes keep the top (max − 1) values by FAILs and fold
+  the rest into `"__other__"`. `x = y` → 400.
+- **`GET /quality/versions?dim=model_version|bixby_version|pipeline_version&by=division|region|agent_function`** →
+  `QualityVersions { items: QualityValueStat + baseline_version, vs_prev_version_pp, failure_mix, total, range, previous,
+  dim, by, versions[], groups[] { value, total, cells[] (QualityStat + version, vs_prev_version_pp) }, trend { bucket, t[],
+  series[] { version, total[], pass_rate[] } } }`. `vs_prev_version_pp` = pass rate − the previous version's (release order,
+  same window, same group). A plain delta table — **no significance testing (M2)**.
+- **`GET /quality/distributions[?by=<QualityDim ≠ failure_reason>][&max_by=12][&examples=3]`** (examples 0–10) →
+  `QualityDistributions { range, previous, total, judge_score { edges (0.1 bins), pass[], fail[], avg, prev_avg }, latency
+  { edges (ms), pass[], fail[], p50, p95, prev_p50, prev_p95 }, reason_by { dim, values, reasons, counts[reason][value],
+  totals, folded }, reason_trend { bucket, t[], series[] { reason, fail[], total, prev_total } }, examples[] { reason, count,
+  rows[] (latest FAIL rows: utterance_id, utterance_text, intent_expected, intent_predicted, judge_score, judge_reason,
+  device_type, language, eval_ts) } }`.
+
+### 9.3 Pages and drill-down
+
+`/quality` (개요), `/quality/breakdown`, `/quality/matrix`, `/quality/versions`, `/quality/distributions` share one frame
+(`app/(console)/quality/layout.tsx` → `components/atlas/quality/frame.tsx`: header with the "모듈 불필요 · 결과 CSV
+(PASS/FAIL·judge_reason·failure_reason) 집계" marker, the Δ window and a link to Deep Analysis, view tabs, row-dim FilterBar).
+Filters live in the URL under the same names as the API params. Every drill-down opens `/results` with the active filters,
+the clicked slice and the range, mapped to the Results page params (`pipeline` → `pipeline_id`, `pipeline_version` →
+`version`); `one_ui_version` is not a Results-page filter yet and is dropped (the link says so). Example rows add
+`utt=<utterance_id>`. Labels: `quality` namespace (`dim.*`, `value.<dim>.*`).

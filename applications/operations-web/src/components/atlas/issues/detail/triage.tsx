@@ -10,7 +10,7 @@ import { useFmt, useT } from "@/i18n/client";
 import { ApiClientError } from "@/lib/client";
 import { OPERATORS } from "@/lib/catalog";
 import type { IssueDetail, IssuePatch, IssueStatus } from "@/lib/types";
-import { useIssueActions, useIssuePermission, type IssueFormat } from "../../issues-shared";
+import { ModuleBadges, useIssueActions, useIssuePermission, type IssueFormat } from "../../issues-shared";
 import { Plate, opName, useToast } from "../../ui";
 
 const FLOW: IssueStatus[] = ["NEW", "TRIAGED", "TICKETED", "RESOLVED"];
@@ -81,7 +81,7 @@ export function TriagePanel({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
   };
   const curIdx = FLOW.indexOf(st.status);
   return (
-    <Plate title={<><ClipboardList aria-hidden /> {t("triage.title")}</>} refText={st.updated_at ? t("triage.updated", { at: fm.dateTimeLabel(st.updated_at), by: opName(st.updated_by) }) : t("triage.never")} className="idt-tri">
+    <Plate title={<><ClipboardList aria-hidden /> {t("triage.title")} <ModuleBadges feature="detail.triage" /></>} refText={st.updated_at ? t("triage.updated", { at: fm.dateTimeLabel(st.updated_at), by: opName(st.updated_by) }) : t("triage.never")} className="idt-tri">
       {!perm.canWrite ? (
         <div className="note warn idt-ro">
           <KeyRound aria-hidden /> {perm.reason}

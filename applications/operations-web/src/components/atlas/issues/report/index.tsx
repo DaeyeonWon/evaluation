@@ -16,6 +16,7 @@ import { AnimatePresence } from "motion/react";
 import { useMemo, useState } from "react";
 import { useT } from "@/i18n/client";
 import {
+  ModuleBadges,
   useIssueBreakdown,
   useIssueFilters,
   useIssueFormat,
@@ -134,7 +135,7 @@ export function IssuesReport() {
             <DevMiss id={sid("dev")} no={n("dev")} bd={bdDev.data} bdMust={bdMust.data} list={list.data} fx={fx} B={B} />
             <DimImpact id={sid("division")} no={n("division")} dim="division" bd={bdDiv.data} ins={ins.data} f={f} fx={fx} B={B} />
             <DimImpact id={sid("region")} no={n("region")} dim="region" bd={bdReg.data} ins={ins.data} f={f} fx={fx} B={B} />
-            <BixbyRegression id={sid("bixby")} no={n("bixby")} mx={mxBx.data} bd={bdBx.data} ins={ins.data} list={list.data} f={f} fx={fx} B={B} />
+            <BixbyRegression id={sid("bixby")} no={n("bixby")} mx={mxBx.data} bd={bdBx.data} ins={ins.data} list={list.data} f={f} fx={fx} B={B} pipelines={sum.data?.columns.pipeline_version.filter((c) => c.total > 0).map((c) => c.value)} />
             <RegressionWatch id={sid("regression")} no={n("regression")} list={list.data} sum={sum.data} f={f} fx={fx} />
             <EmergingPatterns id={sid("patterns")} no={n("patterns")} pats={pats.data} sum={sum.data} f={f} fx={fx} />
             <MarketImpact id={sid("markets")} no={n("markets")} sum={sum.data} f={f} fx={fx} />
@@ -144,6 +145,9 @@ export function IssuesReport() {
                 <span className="issb-sec-no">{t("section.no", { n: n("notes") })}</span>
                 <h2 id="issb-notes-h">{t("section.notes.title")}</h2>
                 <p>{t("section.notes.lead")}</p>
+                <div className="issb-sec-mods">
+                  <ModuleBadges feature="report.notes" />
+                </div>
               </header>
               <ol className="issb-notes-list">
                 {notes.list.map((n) => (

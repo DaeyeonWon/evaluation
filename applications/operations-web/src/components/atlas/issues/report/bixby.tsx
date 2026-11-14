@@ -14,6 +14,7 @@ import { useFmt, useT } from "@/i18n/client";
 import { BIXBY_VERSIONS } from "@/lib/catalog";
 import type { InsightList, IssueBreakdown, IssueDimMatrix, IssueListResponse } from "@/lib/types";
 import type { IssueFiltersApi, IssueFormat } from "../../issues-shared";
+import { JudgeCaveat } from "../../judge-caveat";
 import { Skeleton } from "../../ui";
 import { Delta, deltaDir, Figure, FootRef, HBars, ImpactTag, useTip } from "./bits";
 import type { BriefLinks } from "./links";
@@ -40,7 +41,10 @@ export function BixbyRegression({
   f,
   fx,
   B,
+  pipelines,
 }: {
+  /** pipeline versions present in the compared rows (judge-model confound caveat) */
+  pipelines?: string[];
   id: string;
   no: number;
   mx: IssueDimMatrix | null | undefined;
@@ -73,6 +77,7 @@ export function BixbyRegression({
   return (
     <section id={id} className="issb-sec" aria-labelledby={`${id}-h`}>
       <SecHead id={id} no={no} title={t("section.bixby.title")} lead={t("section.bixby.lead")} />
+      {pipelines ? <JudgeCaveat versions={pipelines} mode="mixed" className="issb-judge" /> : null}
       {mx === undefined || bd === undefined ? (
         <Skeleton rows={6} />
       ) : (

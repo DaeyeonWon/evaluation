@@ -3,7 +3,7 @@ import type ko from "../ko/issuesAnalysis";
 
 const issuesAnalysis = {
   view: { tab: "Analysis", desc: "Cross-analyse FAIL signals on any axes with heatmap, bubble and treemap views; every mark filters all views" },
-  foot: "Score = volume 20 + severity 25 + trend 15 + regression 15 + reach 10 + novelty 15 · P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30",
+  foot: "Score = volume 20 + severity 25 + trend 15 + regression 15 + reach 10 + novelty 15 · P0 ≥ {p0} · P1 ≥ {p1} · P2 ≥ {p2}",
   tiles: {
     vsBaseline: "baseline {rate}",
     ofUtterances: "of {n} evaluated utterances",

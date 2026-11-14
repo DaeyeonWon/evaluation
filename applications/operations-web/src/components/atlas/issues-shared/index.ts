@@ -14,3 +14,4 @@ export * from "./links";
 export * from "./permissions";
 export * from "./triage";
 export * from "./palette";
+export * from "./module-badges";

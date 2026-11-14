@@ -19,13 +19,16 @@
  * Linked cross-filtering: every brush (cell, quadrant, pattern, treemap node) narrows the other views
  * client-side; FilterBar filters re-query everything.
  */
+import { SEVERITY_THRESHOLDS } from "@/lib/severity";
 import { ArrowUpRight, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useFmt, useT } from "@/i18n/client";
+import type { FeatureId } from "@/config/analysis-modules";
 import { parseAsString, useQueryState } from "@/lib/client";
 import {
   ISSUE_DIMS,
+  ModuleBadges,
   useDimLabel,
   useIssueFilters,
   useIssueFormat,
@@ -73,6 +76,7 @@ type CellValues = { key: string; xs: string[]; ys: string[] };
 
 export function IssuesAnalysis() {
   const t = useT("issuesAnalysis");
+  const mt = useT("modules");
   const s = useT("issues");
   const fx = useIssueFormat();
   const fm = useFmt();
@@ -104,6 +108,8 @@ export function IssuesAnalysis() {
   if (x === y) [x, y] = [DEFAULT_X === y ? DEFAULT_Y : DEFAULT_X, y];
   const metric = isMetric(metricRaw) ? metricRaw : "fail_rate";
   const axes: HeatAxes = { x, y, metric };
+  // module badge of the heatmap: issue-level axis → M1+M4; issue_count metric → M1; two row dims → none (품질 대시보드)
+  const heatFeature: FeatureId = ISSUE_DIMS[x].level === "issue" || ISSUE_DIMS[y].level === "issue" ? "analysis.heatmap.issueDims" : metric === "issue_count" ? "analysis.heatmap.issueCount" : "analysis.heatmap.rowDims";
   const setAxes = useCallback(
     (a: Partial<HeatAxes>) => {
       const nx = a.x ?? x;
@@ -243,9 +249,13 @@ export function IssuesAnalysis() {
       <div className="lab" data-open={f.selected ? "" : undefined}>
         <div className="lab-main">
           {sum.error ? <ErrorNote error={sum.error} /> : null}
+          <div className="mb-row">
+            <span className="mb-row-k">{mt("feature.analysis.tiles")}</span>
+            <ModuleBadges feature="analysis.tiles" />
+          </div>
           {k ? <MetricTiles sum={k} f={f} /> : <Skeleton rows={3} />}
 
-          <Plate title={t("heat.title")} refText={t("heat.ref")} className="lab-plate">
+          <Plate title={<>{t("heat.title")} <ModuleBadges feature={heatFeature} /></>} refText={t("heat.ref")} className="lab-plate">
             <Heatmap f={f} axes={axes} setAxes={setAxes} sel={cell} onCell={onCell} />
           </Plate>
 
@@ -261,28 +271,28 @@ export function IssuesAnalysis() {
           ) : null}
 
           <div className="lab-row r-tree">
-            <Plate title={t("bubble.title")} refText={t("bubble.ref", { n: all.length })} className="lab-plate">
+            <Plate title={<>{t("bubble.title")} <ModuleBadges feature="analysis.bubble" /></>} refText={t("bubble.ref", { n: all.length })} className="lab-plate">
               {list.data ? <Bubble issues={all} vCut={vCut} brush={brush} setQuad={(q) => setQuadRaw(q)} selected={f.selected} onSelect={(id) => f.select(id)} /> : <Skeleton rows={8} />}
             </Plate>
-            <Plate title={t("tree.title")} refText={levels.map((l) => (l === "intent" ? s("column.intent") : dl.dim(l))).join(" → ")} className="lab-plate">
+            <Plate title={<>{t("tree.title")} <ModuleBadges feature="analysis.treemap" /></>} refText={levels.map((l) => (l === "intent" ? s("column.intent") : dl.dim(l))).join(" → ")} className="lab-plate">
               {list.data ? <Treemap issues={all} brush={brush} vCut={vCut} levels={levels} setLevels={setLevels} node={node} setNode={setNode} /> : <Skeleton rows={8} />}
             </Plate>
           </div>
 
           <div className="lab-row r-hm">
-            <Plate title={t("pat.title")} refText={pats.data ? t("pat.ref", { n: pats.data.items.length }) : undefined} className="lab-plate">
+            <Plate title={<>{t("pat.title")} <ModuleBadges feature="analysis.patterns" /></>} refText={pats.data ? t("pat.ref", { n: pats.data.items.length }) : undefined} className="lab-plate">
               <Patterns data={pats.data} f={f} activeId={patId} onBrush={(p) => setPatId(p?.id ?? null)} scope={patScope} />
             </Plate>
-            <Plate title={t("ins.title")} refText={t("ins.ref", { n: ins.data?.items.length ?? 0 })} className="lab-plate">
+            <Plate title={<>{t("ins.title")} <ModuleBadges feature="analysis.insights" /></>} refText={t("ins.ref", { n: ins.data?.items.length ?? 0 })} className="lab-plate">
               <Insights data={ins.data} f={f} onIssue={(id) => f.select(id)} />
             </Plate>
           </div>
 
-          <Plate title={t("table.title")} right={<div className="lab-brushes">{brushChips}</div>} className="lab-plate" id="lab-ledger">
+          <Plate title={<>{t("table.title")} <ModuleBadges feature="analysis.ledger" /></>} right={<div className="lab-brushes">{brushChips}</div>} className="lab-plate" id="lab-ledger">
             {list.error ? <ErrorNote error={list.error} /> : null}
             {list.data ? <IssueTable items={ledger} f={f} page={f.page} setPage={f.setPage} /> : <Skeleton rows={8} />}
           </Plate>
-          <p className="lab-foot mono">{t("foot")}</p>
+          <p className="lab-foot mono">{t("foot", { p0: SEVERITY_THRESHOLDS.P0, p1: SEVERITY_THRESHOLDS.P1, p2: SEVERITY_THRESHOLDS.P2 })}</p>
         </div>
         {f.selected ? (
           <>

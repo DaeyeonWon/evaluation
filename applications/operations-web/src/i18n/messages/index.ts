@@ -34,6 +34,8 @@ import ko_issuesReport from "./ko/issuesReport";
 import ko_issuesAnalysis from "./ko/issuesAnalysis";
 import ko_issuesCategories from "./ko/issuesCategories";
 import ko_issuesDetail from "./ko/issuesDetail";
+import ko_quality from "./ko/quality";
+import ko_modules from "./ko/modules";
 import en_common from "./en/common";
 import en_nav from "./en/nav";
 import en_shell from "./en/shell";
@@ -61,8 +63,10 @@ import en_issuesReport from "./en/issuesReport";
 import en_issuesAnalysis from "./en/issuesAnalysis";
 import en_issuesCategories from "./en/issuesCategories";
 import en_issuesDetail from "./en/issuesDetail";
+import en_quality from "./en/quality";
+import en_modules from "./en/modules";
 
-export const NAMESPACES = ["common", "nav", "shell", "orchestration", "inspector", "board", "overview", "capacity", "explorer", "workflow", "pipelines", "dlq", "results", "analytics", "config", "files", "auth", "hermes", "errors", "status", "catalog", "issues", "issuesTriage", "issuesReport", "issuesAnalysis", "issuesCategories", "issuesDetail"] as const;
+export const NAMESPACES = ["common", "nav", "shell", "orchestration", "inspector", "board", "overview", "capacity", "explorer", "workflow", "pipelines", "dlq", "results", "analytics", "config", "files", "auth", "hermes", "errors", "status", "catalog", "issues", "issuesTriage", "issuesReport", "issuesAnalysis", "issuesCategories", "issuesDetail", "modules", "quality"] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 /** ko is the schema for every locale. */
@@ -94,6 +98,8 @@ export const ko = {
   issuesAnalysis: ko_issuesAnalysis,
   issuesCategories: ko_issuesCategories,
   issuesDetail: ko_issuesDetail,
+  modules: ko_modules,
+  quality: ko_quality,
 };
 export type Schema = typeof ko;
 /** The full message set a locale must provide. */
@@ -127,6 +133,8 @@ export const en = {
   issuesAnalysis: en_issuesAnalysis,
   issuesCategories: en_issuesCategories,
   issuesDetail: en_issuesDetail,
+  modules: en_modules,
+  quality: en_quality,
 } satisfies LocaleMessages;
 
 export const MESSAGES: Record<Locale, LocaleMessages> = { ko, en };

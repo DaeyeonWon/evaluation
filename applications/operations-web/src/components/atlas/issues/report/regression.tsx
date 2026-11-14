@@ -3,6 +3,7 @@
 import { useFmt, useT } from "@/i18n/client";
 import type { IssueListResponse, IssueSummary } from "@/lib/types";
 import type { IssueFiltersApi, IssueFormat } from "../../issues-shared";
+import { JudgeCaveat } from "../../judge-caveat";
 import { Skeleton } from "../../ui";
 import { Figure, FootRef, HBars, Sev, useTip } from "./bits";
 import { SecHead } from "./sec";
@@ -21,6 +22,7 @@ export function RegressionWatch({ id, no, list, sum, f, fx }: { id: string; no: 
   return (
     <section id={id} className="issb-sec" aria-labelledby={`${id}-h`}>
       <SecHead id={id} no={no} title={t("section.regression.title")} lead={t("section.regression.lead")} />
+      {sum ? <JudgeCaveat versions={sum.columns.pipeline_version.filter((c) => c.total > 0).map((c) => c.value)} mode="direct" className="issb-judge" /> : null}
       {!list || !sum ? (
         <Skeleton rows={5} />
       ) : (

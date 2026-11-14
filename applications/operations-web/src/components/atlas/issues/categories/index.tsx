@@ -11,7 +11,8 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useMemo } from "react";
 import { useFmt, useT } from "@/i18n/client";
-import { useIssueBreakdown, useIssueFilters, useIssueViewLinks } from "../../issues-shared";
+import type { FeatureId } from "@/config/analysis-modules";
+import { ModuleBadges, useIssueBreakdown, useIssueFilters, useIssueViewLinks } from "../../issues-shared";
 import { Empty, ErrorNote, Skeleton, useReducedMotionSafe } from "../../ui";
 import { CategoryCard } from "./card";
 import { useValueText } from "./labels";
@@ -21,6 +22,16 @@ import { ORDERED_DIMS, TAG_DIMS, sortItems, useCategoriesState } from "./state";
 import { SummaryStrip } from "./summary";
 import { DimSwitch, ViewControls } from "./switcher";
 import "@/styles/atlas-issues-categories.css";
+
+/** module badge of the current breakdown dim (issue-level dims need the module that produces them) */
+function catFeature(dim: string): FeatureId {
+  if (dim === "category" || dim === "user_impact" || dim === "dev_miss") return "categories.dim.category";
+  if (dim === "severity") return "categories.dim.severity";
+  if (dim === "status") return "categories.dim.status";
+  if (dim === "novelty") return "categories.dim.novelty";
+  if (dim === "must_handle") return "categories.dim.mustHandle";
+  return "categories.dim.row";
+}
 
 export function IssuesCategories() {
   const t = useT("issuesCategories");
@@ -46,6 +57,10 @@ export function IssuesCategories() {
       <div className="cat-bar">
         <DimSwitch dim={st.dim} setDim={st.setDim} vt={vt} />
         <ViewControls csort={st.csort} setSort={st.setSort} cview={st.cview} setView={st.setView} />
+      </div>
+      <div className="mb-row cat-mods">
+        <span className="mb-row-k">{vt.dim(st.dim)}</span>
+        <ModuleBadges feature={catFeature(st.dim)} />
       </div>
 
       <div id="cat-panel" role="tabpanel" aria-label={vt.dim(st.dim)} aria-busy={bd.isLoading || undefined}>

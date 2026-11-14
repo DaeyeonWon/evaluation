@@ -13,7 +13,7 @@ import { useFmt, useLocale, useT } from "@/i18n/client";
 import { deviceLabel } from "@/i18n/static";
 import { api, useApi, type ResultQuery } from "@/lib/client";
 import type { ResultRow } from "@/lib/types";
-import { useDimLabel } from "../../issues-shared";
+import { ModuleBadges, useDimLabel } from "../../issues-shared";
 import { useDetailLinks } from "./links";
 import { ErrorNote, Plate, Skeleton } from "../../ui";
 import { diffTokens, type DiffPart } from "./lib";
@@ -167,6 +167,7 @@ export function Utterances({ base, range, resultsUrl, csvUrl }: { base: Record<s
         <>
           <MessagesSquare aria-hidden /> {t("utt.title")}
           {data ? <span className="mono muted idt-count">{fm.number(data.total)}</span> : null}
+          <ModuleBadges feature="detail.utterances" />
         </>
       }
       right={

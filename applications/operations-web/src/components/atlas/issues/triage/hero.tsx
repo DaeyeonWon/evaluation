@@ -7,7 +7,7 @@ import { useTween } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import { BIXBY_VERSIONS } from "@/lib/catalog";
 import type { Issue, IssueFacets, IssueFactorKey, IssueSeverity, IssueStatus, IssueSummary, Market } from "@/lib/types";
-import { ISSUE_STATUS_ORDER, type IssueFiltersApi, type IssueFormat, type TriageLens } from "../../issues-shared";
+import { ISSUE_STATUS_ORDER, ModuleBadges, type IssueFiltersApi, type IssueFormat, type TriageLens } from "../../issues-shared";
 import { TypeBar } from "./lens";
 import { FACTOR_ORDER, Spark, argmax, factorVar } from "./viz";
 
@@ -370,6 +370,7 @@ export function Ribbon({ sum, f, fx }: { sum: IssueSummary | undefined; f: Issue
         <header>
           <b>{t("dist.severity")}</b>
           <span className="mono muted">{t("dist.severitySub", { n: fm.number(sum.kpis.issues) })}</span>
+          <ModuleBadges feature="triage.ribbon" />
         </header>
         <div className="ia-sevbar" role="list">
           {dist.map((d) => (

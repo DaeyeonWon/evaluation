@@ -185,7 +185,7 @@ export const domain: DomainConfig = {
     ],
   },
   /**
-   * Capability table → Issue.must_handle. First entry whose `intent` is a prefix of intent_expected wins;
+   * Capability table → Issue.must_handle. The entry with the LONGEST `intent` prefix of intent_expected wins (order-independent);
    * no match = supported everywhere. A row is in scope when its division is listed (or its device is in
    * `devices`) and its bixby_version ≥ `minBixby`. Policy / safety guardrails are always in scope.
    */

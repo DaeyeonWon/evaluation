@@ -51,9 +51,11 @@ const PARSERS = {
   division: parseAsString,
   region: parseAsString,
   bixby_version: parseAsString,
+  // Quality dashboard drill-down (/quality → /results)
+  one_ui_version: parseAsString,
 };
 /** URL params set by Issue Report links (each rendered as a removable chip). */
-const ISSUE_SCOPE = ["agent_function", "market", "intent_predicted", "utterance_pattern", "division", "region", "bixby_version"] as const;
+const ISSUE_SCOPE = ["agent_function", "market", "intent_predicted", "utterance_pattern", "division", "region", "bixby_version", "one_ui_version"] as const;
 const PAGE = 50;
 const RESULTS_BUCKET = "bixby-eval-results";
 
@@ -78,6 +80,7 @@ function toQuery(f: F): ResultQuery {
     division: f.division ?? undefined,
     region: f.region ?? undefined,
     bixby_version: f.bixby_version ?? undefined,
+    one_ui_version: f.one_ui_version ?? undefined,
     batch_id: f.batch_id ?? undefined,
     workflow_id: f.workflow_id ?? undefined,
     q: f.q ?? undefined,
@@ -527,7 +530,7 @@ export function ResultsScreen() {
             {ISSUE_SCOPE.map((k) =>
               f[k] ? (
                 <span className="chip" key={k}>
-                  {k === "division" || k === "region" ? `${ti(`column.${k}`)} ${ti.dynamic(`${k}.${f[k]}`, undefined, f[k] ?? "")}` : k === "bixby_version" ? `Bixby ${f[k]}` : `${k} ${f[k]}`}
+                  {k === "division" || k === "region" ? `${ti(`column.${k}`)} ${ti.dynamic(`${k}.${f[k]}`, undefined, f[k] ?? "")}` : k === "bixby_version" ? `Bixby ${f[k]}` : k === "one_ui_version" ? `${ti("column.one_ui_version")} ${f[k]}` : `${k} ${f[k]}`}
                   <button className="btn sm ghost icon" style={{ height: 18, width: 18 }} aria-label={`${tc("actions.resetFilters")}: ${k}`} onClick={() => setFilter({ [k]: null })}>
                     <X />
                   </button>
@@ -547,7 +550,7 @@ export function ResultsScreen() {
               onClick={() => {
                 setQDraft(null);
                 setBatchDraft(null);
-                setF({ language: [], capsule: null, intent: null, device: null, version: null, model_version: null, pipeline_id: null, result: null, reason: null, batch_id: null, workflow_id: null, q: null, agent_function: null, market: null, intent_predicted: null, utterance_pattern: null, failure_reason: null, division: null, region: null, bixby_version: null, page: 1 });
+                setF({ language: [], capsule: null, intent: null, device: null, version: null, model_version: null, pipeline_id: null, result: null, reason: null, batch_id: null, workflow_id: null, q: null, agent_function: null, market: null, intent_predicted: null, utterance_pattern: null, failure_reason: null, division: null, region: null, bixby_version: null, one_ui_version: null, page: 1 });
               }}
             >
               <X />

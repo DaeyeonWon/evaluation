@@ -12,9 +12,10 @@
  *                  one-sided z ≥ 1.64): min(1, max(rel/1.5, Δ/0.25pp)) × clamp(z/3, 0.6, 1)
  *   reach      10  0.4·markets/6 + 0.3·devices/5 + 0.3·languages/4
  *   novelty    15  new cluster (absent in baseline) 0.35 + 0.65·novel-pattern share; else 0.7·share
- * Severity: P0 ≥ 60 (or safety with ≥ 3 FAILs and ≥ 45) · P1 ≥ 45 · P2 ≥ 30 · P3 below.
+ * Severity (src/lib/severity.ts): P0 ≥ 60 (or safety with ≥ 3 FAILs and ≥ 45) · P1 ≥ 45 · P2 ≥ 30 · P3 below.
  */
 import { DIVISIONS, LANG_CODES, PIPELINE_VERSIONS, REGIONS } from "@/lib/catalog";
+import { SEVERITY_THRESHOLDS, severityOfScore } from "@/lib/severity";
 import type {
   AgentFunction,
   FailureReason,
@@ -582,9 +583,9 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
     };
     const factors: IssueFactor[] = FACTOR_KEYS.map((k) => ({ key: k, weight: FACTOR_WEIGHTS[k], value: r3(values[k]), contribution: r1(values[k] * FACTOR_WEIGHTS[k]), detail: details[k] }));
     const score = r1(factors.reduce((s, f) => s + values[f.key] * f.weight, 0));
-    let severity: IssueSeverity = score >= 60 ? "P0" : score >= 45 ? "P1" : score >= 30 ? "P2" : "P3";
-    // floors: safety with ≥ 3 FAILs is at least P1 (P0 from 45), policy with ≥ 5 FAILs at least P1
-    if (cls === "safety" && n >= 3) severity = score >= 45 ? "P0" : "P1";
+    let severity: IssueSeverity = severityOfScore(score);
+    // floors: safety with ≥ 3 FAILs is at least P1 (P0 from the P1 edge), policy with ≥ 5 FAILs at least P1
+    if (cls === "safety" && n >= 3) severity = score >= SEVERITY_THRESHOLDS.P1 ? "P0" : "P1";
     else if (cls === "policy" && n >= 5 && (severity === "P2" || severity === "P3")) severity = "P1";
 
     // reasons (most important first)

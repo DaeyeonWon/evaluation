@@ -5,6 +5,8 @@
  *
  *   header      title · one-line view description · baseline badge · export (CSV, Markdown download / copy)
  *   switcher    Triage · 분해 보기 · Analysis · Report (links carry the full filter query; animated indicator)
+ *               + a trailing 분석 모듈 tab (/issues/modules — the module registry; no FilterBar / exports there)
+ *   badges      the view's analysis modules (union over its features, src/config/analysis-modules.ts)
  *   FilterBar   the unified, dimension-driven filter UI (./filter-bar.tsx)
  *   {children}  the view
  *
@@ -12,13 +14,14 @@
  * was opened from, plus the active-filter chips (they still scope the issue's utterances and trend).
  */
 import clsx from "clsx";
-import { ArrowLeft, ClipboardCopy, Download, FileDown, FileText, LayoutGrid, ListChecks, ScatterChart } from "lucide-react";
+import { ArrowLeft, Boxes, ClipboardCopy, Download, FileDown, FileText, LayoutGrid, ListChecks, ScatterChart } from "lucide-react";
 import { LayoutGroup, motion } from "motion/react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
-import { ISSUE_VIEWS, issuePageOf, useIssueExport, useIssueFilters, useIssueSummary, useIssueViewLinks, type IssueFiltersApi, type IssuePageKind, type IssueView } from "../../issues-shared";
+import { featuresOf, type FeaturePage } from "@/config/analysis-modules";
+import { ISSUE_VIEWS, MODULES_PATH, ModuleBadges, issuePageOf, useIssueExport, useIssueFilters, useIssueSummary, useIssueViewLinks, type IssueFiltersApi, type IssuePageKind, type IssueView } from "../../issues-shared";
 import { Sheet, useReducedMotionSafe } from "../../ui";
 import { ActiveChips, FilterBar } from "./filter-bar";
 import "@/styles/atlas-issues.css";
@@ -58,6 +61,7 @@ function Exports({ f }: { f: IssueFiltersApi }) {
   const ex = useIssueExport(f, { issueBase: "/issues" });
   return (
     <div className="isf-export" role="group" aria-label={t("frame.exportGroup")}>
+      <ModuleBadges features={["export.csv", "export.markdown"]} className="isf-mods-exp" />
       <a className="btn sm" href={ex.csvUrl} download aria-label={t("actions.exportCsv")}>
         <Download aria-hidden />
         <span>{t("actions.exportCsv")}</span>
@@ -74,13 +78,15 @@ function Exports({ f }: { f: IssueFiltersApi }) {
   );
 }
 
-function ViewSwitcher({ current }: { current: IssueView }) {
+function ViewSwitcher({ current }: { current: IssueView | "modules" }) {
   const t = useT("issues");
+  const m = useT("modules");
+  const qs = useSearchParams().toString();
   const vt = useViewText();
   const V = useIssueViewLinks();
   const rm = useReducedMotionSafe();
   // optimistic: move the indicator on click, before the route resolves
-  const [pending, setPending] = useState<IssueView | null>(null);
+  const [pending, setPending] = useState<IssueView | "modules" | null>(null);
   const [seen, setSeen] = useState(current);
   if (seen !== current) {
     setSeen(current);
@@ -101,6 +107,11 @@ function ViewSwitcher({ current }: { current: IssueView }) {
             </Link>
           );
         })}
+        <Link href={qs ? `${MODULES_PATH}?${qs}` : MODULES_PATH} className={clsx("isf-view isf-view-mod", active === "modules" && "on")} aria-current={current === "modules" ? "page" : undefined} onClick={() => setPending("modules")} scroll={false}>
+          <Boxes aria-hidden />
+          <span>{m("page.tab")}</span>
+          {active === "modules" ? <motion.span className="isf-view-ind" layoutId="isf-view-ind" transition={rm ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 40 }} aria-hidden /> : null}
+        </Link>
       </LayoutGroup>
     </nav>
   );
@@ -122,36 +133,52 @@ export function IssuesFrame({ children }: { children: ReactNode }) {
   const t = useT("issues");
   const nav = useT("nav");
   const vt = useViewText();
+  const mt = useT("modules");
   const f = useIssueFilters();
-  const page = issuePageOf(usePathname()) ?? "triage";
-  const detail = page === "detail";
-  const text = vt(page);
+  const pathname = usePathname();
+  const mod = pathname.replace(/\/+$/, "") === MODULES_PATH;
+  const page = issuePageOf(pathname) ?? "triage";
+  const detail = page === "detail" && !mod;
+  const text = mod ? { tab: mt("page.tab"), desc: mt("page.desc") } : vt(page);
   return (
     <Sheet className="iss-frame">
       <header className="isf-head" data-page={page}>
         <div className="isf-title">
           <span className="dwg">
             {t("frame.dwg")} · {text.tab.toUpperCase()}
+            <span className="phase-tag" data-phase="2" title={t("frame.phaseTip")}>
+              {t("frame.phase")}
+            </span>
           </span>
           <h1>
             {nav("issues.title")}
             {!detail ? <span className="isf-h-view">{text.tab}</span> : null}
           </h1>
           <p>{text.desc}</p>
+          {!mod ? (
+            <div className="isf-mods">
+              <span className="isf-mods-k">{mt("badge.view")}</span>
+              <ModuleBadges features={featuresOf(page as FeaturePage)} view />
+            </div>
+          ) : null}
         </div>
-        <div className="isf-acts">
-          <Baseline f={f} />
-          {!detail ? <Exports f={f} /> : null}
-        </div>
+        {!mod ? (
+          <div className="isf-acts">
+            <Baseline f={f} />
+            {!detail ? <Exports f={f} /> : null}
+          </div>
+        ) : null}
       </header>
-      {detail ? (
+      {mod ? (
+        <ViewSwitcher current="modules" />
+      ) : detail ? (
         <div className="isf-crumb">
           <BackLink />
           <ActiveChips f={f} />
         </div>
       ) : (
         <>
-          <ViewSwitcher current={page} />
+          <ViewSwitcher current={page as IssueView} />
           <FilterBar f={f} />
         </>
       )}

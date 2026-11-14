@@ -17,6 +17,10 @@
   & .isf-title h1 { margin: 0; font-size: var(--t-2xl); font-weight: 800; letter-spacing: -0.025em; line-height: 1.12; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; overflow-wrap: anywhere; }
   & .isf-h-view { font: 500 var(--t-md) var(--f-mono); letter-spacing: 0; color: var(--accent); padding: 1px 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--rule)); border-radius: 2px; background: var(--accent-soft); }
   & .isf-title p { margin: 7px 0 0; color: var(--ink-2); max-width: 78ch; }
+  & .isf-mods { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; }
+  & .isf-mods-k { font: 600 9.5px var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  & .isf-export .mb { align-self: center; margin-right: 2px; }
+  & .isf-view-mod { margin-left: auto; }
   & .isf-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
   & .isf-export { display: flex; gap: 6px; flex-wrap: wrap; }
   & .isf-export .btn svg { width: 13px; height: 13px; }

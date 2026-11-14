@@ -5,7 +5,7 @@ import { AlertTriangle, ListOrdered } from "lucide-react";
 import { useState, type CSSProperties } from "react";
 import { useT } from "@/i18n/client";
 import type { IssueDetail, IssueFactor, IssueFactorKey } from "@/lib/types";
-import type { IssueFormat } from "../../issues-shared";
+import { ModuleBadges, type IssueFormat } from "../../issues-shared";
 import { Plate } from "../../ui";
 import { FACTOR_ORDER, SCORE_BANDS } from "./lib";
 
@@ -47,7 +47,7 @@ export function Anatomy({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
   });
   const total = d.score;
   return (
-    <Plate title={<>{t("anatomy.title")}</>} refText={t("anatomy.ref", { score: fx.score(total) })} className="idt-anat-plate">
+    <Plate title={<>{t("anatomy.title")} <ModuleBadges feature="detail.anatomy" /></>} refText={t("anatomy.ref", { score: fx.score(total) })} className="idt-anat-plate">
       <div className="idt-anat-wrap">
         <div className="idt-wf" role="table" aria-label={t("anatomy.aria")}>
           <div className="idt-wf-axis" aria-hidden>
@@ -117,7 +117,7 @@ export function Anatomy({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
         </div>
         <section className="idt-why" aria-labelledby="idt-why-h">
           <h3 id="idt-why-h">
-            <ListOrdered aria-hidden /> {t("why.title")}
+            <ListOrdered aria-hidden /> {t("why.title")} <ModuleBadges feature="detail.reasons" />
           </h3>
           <ol>
             {d.reasons.map((r, n) => (
