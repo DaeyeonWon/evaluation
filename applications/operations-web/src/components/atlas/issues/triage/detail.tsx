@@ -1,7 +1,7 @@
 "use client";
 /** Triage Deck — full-height side sheet: score anatomy, trend, breakdown, utterances, triage + history. */
 import clsx from "clsx";
-import { ArrowUpRight, ChevronLeft, ChevronRight, ExternalLink, GitCompareArrows, History, Workflow, X } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, ChevronRight, CircleSlash, ExternalLink, GitCompareArrows, History, ListChecks, Maximize2, Workflow, X } from "lucide-react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
@@ -9,14 +9,53 @@ import { EChart, LangBadge } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
 import { OPERATORS } from "@/lib/catalog";
 import type { IssueDetail, IssueStatus } from "@/lib/types";
-import { useIssue, useIssueLinks, useIssuePermission, useIssueTriage, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
+import { useIssue, useIssueLinks, useIssuePermission, useIssueTriage, useIssueViewLinks, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
 import { axisX, axisY, baseOpt, opt } from "../../chart";
 import { ErrorNote, Skeleton, opName, useReducedMotionSafe } from "../../ui";
 import { ClsTag, StatusTag, useFactorNote, useGaugeLabel } from "./card";
 import { MarketChip } from "./hero";
+import { TypeBadge, type TriageState } from "./lens";
 import { FACTOR_ORDER, Gauge, factorVar } from "./viz";
 
-const BREAK_KEYS = ["market", "language", "device", "one_ui_version", "os_version", "model_version", "pipeline_version"] as const;
+const BREAK_KEYS = ["division", "region", "bixby_version", "market", "language", "device", "model_version", "pipeline_version", "one_ui_version", "os_version"] as const;
+
+/** both lens types side by side (the active lens first), with their reasons + must-handle */
+function Types({ d, fx, ts }: { d: IssueDetail; fx: IssueFormat; ts: Pick<TriageState, "lens"> }) {
+  const t = useT("issuesTriage");
+  const user = (
+    <li key="u" data-on={ts.lens === "user" || undefined}>
+      <span className="ia-ty-k">{t("lens.user.title")}</span>
+      <TypeBadge dim="user_impact" value={d.user_impact_type} fx={fx} />
+      <p>{fx.text(d.type_reason?.user_impact)}</p>
+    </li>
+  );
+  const dev = (
+    <li key="d" data-on={ts.lens === "dev" || undefined}>
+      <span className="ia-ty-k">{t("lens.dev.title")}</span>
+      <TypeBadge dim="dev_miss" value={d.dev_miss_type} fx={fx} />
+      <p>{fx.text(d.type_reason?.dev_miss)}</p>
+      <p className="ia-mh" data-mh={String(d.must_handle)}>
+        <span className="ia-mh-tag">
+          {d.must_handle ? <ListChecks aria-hidden /> : <CircleSlash aria-hidden />}
+          {fx.t.dynamic(`mustHandleValue.${d.must_handle}`, undefined, String(d.must_handle))}
+        </span>
+        {fx.text(d.must_handle_reason)}
+      </p>
+    </li>
+  );
+  return (
+    <section className="ia-sec">
+      <h4>
+        {t("sheet.types")}{" "}
+        <span className="mono muted">
+          {fx.column("category")} · {fx.value("category", d.category)}
+        </span>
+      </h4>
+      <ul className="ia-types">{ts.lens === "dev" ? [dev, user] : [user, dev]}</ul>
+      {d.category_reason ? <p className="muted ia-cat-r">{fx.text(d.category_reason)}</p> : null}
+    </section>
+  );
+}
 
 function Anatomy({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
   const t = useT("issuesTriage");
@@ -68,14 +107,15 @@ function Anatomy({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
 function Breakdown({ d, fx }: { d: IssueDetail; fx: IssueFormat }) {
   const t = useT("issuesTriage");
   const fm = useFmt();
-  const [k, setK] = useState<(typeof BREAK_KEYS)[number]>("market");
+  const [k, setK] = useState<(typeof BREAK_KEYS)[number]>("division");
+  const keys = BREAK_KEYS.filter((b) => Array.isArray(d.breakdown[b]));
   const rows = d.breakdown[k] ?? [];
   const max = Math.max(1, ...rows.map((r) => r.fails));
   return (
     <section className="ia-sec">
       <h4>{t("sheet.breakdown")}</h4>
       <div className="att-tabs" role="group" aria-label={t("sheet.breakdown")}>
-        {BREAK_KEYS.map((b) => (
+        {keys.map((b) => (
           <button key={b} type="button" aria-pressed={k === b} onClick={() => setK(b)}>
             {fx.column(b)}
           </button>
@@ -179,7 +219,7 @@ function Triage({ d, fx, focusTicket }: { d: IssueDetail; fx: IssueFormat; focus
         </label>
       </div>
       <div className="ia-tr-moves">
-        <span className="ia-rail-h">{t("sheet.transition")}</span>
+        <span className="ia-tr-h">{t("sheet.transition")}</span>
         {nexts.map((x) => (
           <button key={x} type="button" className={clsx("btn sm", x === "TICKETED" || x === "TRIAGED" ? "primary" : x === "IGNORED" ? "" : "")} disabled={dis} title={perm.reason ?? fx.statusHelp(x)} onClick={() => void move(x)}>
             → {fx.status(x)}
@@ -236,8 +276,9 @@ function Triage({ d, fx, focusTicket }: { d: IssueDetail; fx: IssueFormat; focus
   );
 }
 
-export function IssueSheet({ id, f, fx, ids, focusTicket, onClose }: { id: string; f: IssueFiltersApi; fx: IssueFormat; ids: string[]; focusTicket: boolean; onClose: () => void }) {
+export function IssueSheet({ id, f, fx, ids, focusTicket, onClose, ts }: { id: string; f: IssueFiltersApi; fx: IssueFormat; ids: string[]; focusTicket: boolean; onClose: () => void; ts: Pick<TriageState, "lens"> }) {
   const t = useT("issuesTriage");
+  const V = useIssueViewLinks();
   const s = useT("issues");
   const fm = useFmt();
   const L = useIssueLinks();
@@ -283,7 +324,10 @@ export function IssueSheet({ id, f, fx, ids, focusTicket, onClose }: { id: strin
               {d ? ` · #${d.rank}` : ""}
             </div>
           </div>
-          <div style={{ display: "flex", gap: 4 }}>
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            <Link className="btn sm primary ia-full" href={V.issueHref(id)}>
+              <Maximize2 aria-hidden /> {t("sheet.full")}
+            </Link>
             <button type="button" className="btn icon" disabled={at <= 0} onClick={() => f.select(ids[at - 1])} aria-label={t("sheet.prev")}>
               <ChevronLeft aria-hidden />
             </button>
@@ -349,12 +393,24 @@ export function IssueSheet({ id, f, fx, ids, focusTicket, onClose }: { id: strin
                   </dl>
                   <div className="mono muted ia-span">{t("sheet.span", { first: fm.dateTimeLabel(d.first_seen), last: fm.dateTimeLabel(d.last_seen) })}</div>
                   <div className="ia-sh-links">
-                    <Link className="btn sm primary" href={L.results(d)}>
+                    <Link className="btn sm" href={L.results(d)}>
                       {s("actions.openResults")} <ArrowUpRight aria-hidden />
                     </Link>
                   </div>
                 </div>
               </header>
+              {d.bixby_regression ? (
+                <div className="note warn ia-regnote">
+                  <GitCompareArrows aria-hidden />{" "}
+                  {fx.t("reasons.bixbyRegression", {
+                    current: d.bixby_regression.current,
+                    previous: d.bixby_regression.previous,
+                    curRate: d.bixby_regression.currentRate,
+                    prevRate: d.bixby_regression.previousRate,
+                    division: fx.value("division", d.bixby_regression.division),
+                  })}
+                </div>
+              ) : null}
               {d.regression ? (
                 <div className="note warn ia-regnote">
                   <GitCompareArrows aria-hidden />{" "}
@@ -367,6 +423,7 @@ export function IssueSheet({ id, f, fx, ids, focusTicket, onClose }: { id: strin
                   })}
                 </div>
               ) : null}
+              <Types d={d} fx={fx} ts={ts} />
               <section className="ia-sec">
                 <h4>{t("sheet.reasons")}</h4>
                 <ol className="ia-reasons">

@@ -44,7 +44,7 @@ export function Appendix({ id, no, sum, f, fx }: { id: string; no: number; sum: 
     <section id={id} className="issb-sec" aria-labelledby={`${id}-h`}>
       <SecHead id={id} no={no} title={t("section.appendix.title")} lead={t("section.appendix.lead")} />
       <div className="issb-app">
-        <Figure n="6.1" title={t("appendix.figTrend", { bucket: s(`bucket.${bucket}`) })} src={t("sources.summary")} className="span2">
+        <Figure n={`${no}.1`} title={t("appendix.figTrend", { bucket: s(`bucket.${bucket}`) })} src={t("sources.summary")} className="span2">
           <EChart
             className="issb-chart"
             ariaLabel={t("appendix.figTrend", {
@@ -113,7 +113,7 @@ export function Appendix({ id, no, sum, f, fx }: { id: string; no: number; sum: 
         </Figure>
 
         <div className="issb-app-col">
-          <Figure n="6.2" title={t("appendix.figSeverity")} src={t("sources.summary")} aside={<StatusLegend fx={fx} />}>
+          <Figure n={`${no}.2`} title={t("appendix.figSeverity")} src={t("sources.summary")} aside={<StatusLegend fx={fx} />}>
             <div className="issb-rel" ref={sevTipAttach}>
               <ul className="issb-sevd">
                 {sum.severity_distribution.map((d) => (
@@ -161,7 +161,7 @@ export function Appendix({ id, no, sum, f, fx }: { id: string; no: number; sum: 
               {sevTipEl}
             </div>
           </Figure>
-          <Figure n="6.3" title={t("appendix.figClass")} src={t("sources.summary")}>
+          <Figure n={`${no}.3`} title={t("appendix.figClass")} src={t("sources.summary")}>
             <ul className="issb-clsd">
               {sum.class_distribution.map((c) => (
                 <li key={c.cls}>
@@ -186,10 +186,10 @@ export function Appendix({ id, no, sum, f, fx }: { id: string; no: number; sum: 
         </div>
 
         <div className="issb-app-col">
-          <Figure n="6.4" title={t("appendix.figFactors")} src={t("sources.summary")}>
+          <Figure n={`${no}.4`} title={t("appendix.figFactors")} src={t("sources.summary")}>
             <FactorBar parts={sum.factor_profile} fx={fx} />
           </Figure>
-          <Figure n="6.5" title={t("appendix.figMovers")} src={t("sources.summary")}>
+          <Figure n={`${no}.5`} title={t("appendix.figMovers")} src={t("sources.summary")}>
             <ul className="issb-movers">
               {sum.top_movers.slice(0, 8).map((m) => (
                 <li key={`${m.column}:${m.value}`}>
@@ -212,7 +212,7 @@ export function Appendix({ id, no, sum, f, fx }: { id: string; no: number; sum: 
           </Figure>
         </div>
 
-        <Figure n="6.6" title={t("appendix.figColumns")} src={t("sources.summary")} className="span2" aside={<span className="issb-hintx">{t("appendix.clickToFilter")}</span>}>
+        <Figure n={`${no}.6`} title={t("appendix.figColumns")} src={t("sources.summary")} className="span2" aside={<span className="issb-hintx">{t("appendix.clickToFilter")}</span>}>
           <div className="issb-coltabs" role="tablist" aria-label={t("appendix.figColumns")}>
             {ISSUE_COLUMNS.map((c) => (
               <button key={c} role="tab" type="button" aria-selected={col === c} className={clsx(col === c && "on")} onClick={() => setCol(c)}>

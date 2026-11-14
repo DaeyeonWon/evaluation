@@ -260,11 +260,11 @@ export function EmergingPatterns({ id, no, pats, f, fx }: { id: string; no: numb
       ) : (
         <>
           <div className="issb-pat-figs">
-            <Figure n="3.1" title={t("patterns.figSlope")} src={t("sources.patterns")} aside={<LangLegend langs={langs} />}>
+            <Figure n={`${no}.1`} title={t("patterns.figSlope")} src={t("sources.patterns")} aside={<LangLegend langs={langs} />}>
               {slope.length ? <Slope items={slope} fx={fx} onPick={pick} /> : <p className="issb-empty">{s("empty.patterns")}</p>}
             </Figure>
             <div className="issb-pat-side">
-              <Figure n="3.2" title={t("patterns.figTerms")} src={t("sources.patterns")}>
+              <Figure n={`${no}.2`} title={t("patterns.figTerms")} src={t("sources.patterns")}>
                 <div className="issb-cloud" ref={tipAttach}>
                   {terms.map((x) => {
                     const k = Math.sqrt(x.count / tmax);
@@ -302,7 +302,7 @@ export function EmergingPatterns({ id, no, pats, f, fx }: { id: string; no: numb
                   {tipEl}
                 </div>
               </Figure>
-              <Figure n="3.3" title={t("patterns.figKinds")} src={t("sources.patterns")} aside={<span className="issb-hintx">{t("patterns.kindsTick")}</span>}>
+              <Figure n={`${no}.3`} title={t("patterns.figKinds")} src={t("sources.patterns")} aside={<span className="issb-hintx">{t("patterns.kindsTick")}</span>}>
                 <HBars
                   fx={fx}
                   max={100}
@@ -345,7 +345,7 @@ export function EmergingPatterns({ id, no, pats, f, fx }: { id: string; no: numb
             </div>
           ) : null}
 
-          <Figure n="3.4" title={t("patterns.figShift")} src={`${t("sources.patterns")} · ${t("sources.issues")}`}>
+          <Figure n={`${no}.4`} title={t("patterns.figShift")} src={`${t("sources.patterns")} · ${t("sources.issues")}`}>
             <div className="issb-shift" role="table" aria-label={t("patterns.figShift")}>
               <div className="issb-shift-h" role="row">
                 <span role="columnheader">{t("patterns.established")}</span>

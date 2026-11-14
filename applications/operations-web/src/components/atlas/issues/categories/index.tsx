@@ -3,44 +3,95 @@
  * Issue Report — 분해 보기 / Breakdown view (/issues/categories). OWNED BY THE CATEGORIES VIEW ENGINEER.
  * The page header, view switcher, export buttons and the unified FilterBar come from the frame (../frame).
  *
- * TODO(categories): everything below is a placeholder.
- *   - dimension switch over BREAKDOWN_DIMS (category / agent_function / division / region / bixby_version /
- *     user_impact / dev_miss); keep it in a view-local URL param registered in links.ts VIEW_STATE_PARAMS
- *     (reserved: "dim", "csort", "cview").
- *   - cards from useIssueBreakdown(f, dim): issues by severity, FAIL rate + Δ, FAIL volume, sparkline,
- *     top 3 issues, top new pattern, share of total; sortable + compact ranking table.
- *   - card click → useIssueViewLinks().drillHref(dim, value) (Triage with that filter).
- *   - styles go in src/styles/atlas-issues-categories.css, scoped under [data-variant="atlas"] .iss-cat.
+ *   dim switch (?dim=, default category) → useIssueBreakdown(f, dim) → summary strip, ordered chart
+ *   (bixby_version / severity), cards (?cview=cards, default) or ranking table (?cview=table), sorted by ?csort=.
+ *   Card / row click → V.drillHref(dim, value) (Triage filtered to the value, other filters kept).
+ *   dim / csort / cview are view-local (links.ts VIEW_STATE_PARAMS.categories).
  */
-import Link from "next/link";
-import { useT } from "@/i18n/client";
-import { useDimLabel, useIssueBreakdown, useIssueFilters, useIssueViewLinks } from "../../issues-shared";
-import { ErrorNote, Plate, Skeleton } from "../../ui";
+import { AnimatePresence, motion } from "motion/react";
+import { useMemo } from "react";
+import { useFmt, useT } from "@/i18n/client";
+import { useIssueBreakdown, useIssueFilters, useIssueViewLinks } from "../../issues-shared";
+import { Empty, ErrorNote, Skeleton, useReducedMotionSafe } from "../../ui";
+import { CategoryCard } from "./card";
+import { useValueText } from "./labels";
+import { OrderedChart } from "./ordered";
+import { RankingTable } from "./table";
+import { ORDERED_DIMS, TAG_DIMS, sortItems, useCategoriesState } from "./state";
+import { SummaryStrip } from "./summary";
+import { DimSwitch, ViewControls } from "./switcher";
 import "@/styles/atlas-issues-categories.css";
 
 export function IssuesCategories() {
   const t = useT("issuesCategories");
+  const fm = useFmt();
   const f = useIssueFilters();
   const V = useIssueViewLinks();
-  const dl = useDimLabel();
-  const bd = useIssueBreakdown(f, "category");
+  const vt = useValueText();
+  const st = useCategoriesState();
+  const reduced = useReducedMotionSafe();
+  const bd = useIssueBreakdown(f, st.dim);
+  // keep the previous dim's data on screen only when it belongs to the same dim
+  const data = bd.data && bd.data.dim === st.dim ? bd.data : null;
+  const items = useMemo(() => (data ? sortItems(data.items, st.csort) : []), [data, st.csort]);
+  const bucketLabels = useMemo(() => (data ? data.t.map((ts) => (data.bucket === "hour" ? fm.dateTimeLabel(ts) : fm.dateLabel(ts))) : []), [data, fm]);
+  const maxShare = Math.max(1, ...items.map((i) => i.share));
+  const tag = TAG_DIMS.has(st.dim);
+  const notDeployed = !bd.isLoading && !bd.error && bd.data === null;
+
+  const fade = reduced ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: 1 } } : { initial: { opacity: 0, y: 10 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 } };
+
   return (
     <div className="iss-cat iss-view">
-      <Plate title={dl.dim("category")}>
-        <p className="muted iss-cat-ph">{t("placeholder")}</p>
+      <div className="cat-bar">
+        <DimSwitch dim={st.dim} setDim={st.setDim} vt={vt} />
+        <ViewControls csort={st.csort} setSort={st.setSort} cview={st.cview} setView={st.setView} />
+      </div>
+
+      <div id="cat-panel" role="tabpanel" aria-label={vt.dim(st.dim)} aria-busy={bd.isLoading || undefined}>
         {bd.error ? <ErrorNote error={bd.error} /> : null}
-        {bd.isLoading ? (
-          <Skeleton rows={3} />
-        ) : bd.data?.items.length ? (
-          <ul className="iss-cat-ph-list">
-            {bd.data.items.map((i) => (
-              <li key={i.value}>
-                <Link href={V.drillHref("category", i.value)}>{dl.value("category", i.value)}</Link> <span className="mono muted">{i.issues}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </Plate>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={st.dim} className="cat-stage" {...fade} transition={{ duration: reduced ? 0 : 0.22, ease: [0.2, 0.7, 0.2, 1] }}>
+            {!data ? (
+              notDeployed ? (
+                <Empty title={t("empty.notDeployed")} />
+              ) : bd.error ? null : (
+                <div className="cat-skel">
+                  <Skeleton rows={2} />
+                  <div className="cat-grid">
+                    {[0, 1, 2].map((k) => (
+                      <div key={k} className="cat-card skel-card">
+                        <Skeleton rows={5} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            ) : !items.length ? (
+              <Empty title={t("empty.title")}>
+                <p>{t("empty.body")}</p>
+              </Empty>
+            ) : (
+              <>
+                <SummaryStrip dim={st.dim} data={data} vt={vt} V={V} />
+                {ORDERED_DIMS.has(st.dim) ? <OrderedChart dim={st.dim} data={data} f={f} vt={vt} V={V} /> : null}
+                {st.cview === "table" ? (
+                  <RankingTable dim={st.dim} items={items} tag={tag} vt={vt} V={V} bucketLabels={bucketLabels} maxShare={maxShare} />
+                ) : (
+                  <motion.div className="cat-grid" layout={!reduced} transition={{ duration: 0.3 }}>
+                    {items.map((i, k) => (
+                      <motion.div key={i.value} layout={reduced ? false : "position"} transition={{ type: "spring", stiffness: 420, damping: 38 }} className="cat-cell">
+                        <CategoryCard dim={st.dim} item={i} tag={tag} vt={vt} V={V} bucketLabels={bucketLabels} maxShare={maxShare} order={k} />
+                      </motion.div>
+                    ))}
+                  </motion.div>
+                )}
+                {data.truncated > 0 ? <p className="cat-trunc muted">{t("truncated", { count: data.truncated })}</p> : null}
+              </>
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </div>
   );
 }

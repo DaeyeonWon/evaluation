@@ -44,7 +44,7 @@ export function MarketImpact({ id, no, sum, f, fx }: { id: string; no: number; s
         <Skeleton rows={6} />
       ) : (
         <>
-          <Figure n="4.1" title={t("markets.figGrid")} src={t("sources.summary")} aside={<DeltaLegend />}>
+          <Figure n={`${no}.1`} title={t("markets.figGrid")} src={t("sources.summary")} aside={<DeltaLegend />}>
             <div className="issb-multiples" ref={tipAttach}>
               {mm.cols.map((m) => {
                 const st = mstat.get(m);
@@ -100,7 +100,7 @@ export function MarketImpact({ id, no, sum, f, fx }: { id: string; no: number; s
           </Figure>
 
           <div className="issb-two">
-            <Figure n="4.2" title={t("markets.figDevice")} src={t("sources.summary")}>
+            <Figure n={`${no}.2`} title={t("markets.figDevice")} src={t("sources.summary")}>
               <div ref={devTipAttach} style={{ position: "relative" }}>
                 <HBars
                   fx={fx}
@@ -126,7 +126,7 @@ export function MarketImpact({ id, no, sum, f, fx }: { id: string; no: number; s
                 {devTipEl}
               </div>
             </Figure>
-            <Figure n="4.3" title={t("markets.figLang")} src={t("sources.summary")}>
+            <Figure n={`${no}.3`} title={t("markets.figLang")} src={t("sources.summary")}>
               <HBars
                 fx={fx}
                 rows={sum.columns.language.map((c) => ({

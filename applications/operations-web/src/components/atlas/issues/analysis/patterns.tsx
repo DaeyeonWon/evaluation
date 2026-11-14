@@ -32,7 +32,20 @@ function MiniSpark({ vals, kind }: { vals: number[]; kind: PatternKind }) {
   );
 }
 
-export function Patterns({ data, f, activeId, onBrush }: { data: PatternList | undefined; f: IssueFiltersApi; activeId: string | null; onBrush: (p: NewPattern | null) => void }) {
+export function Patterns({
+  data,
+  f,
+  activeId,
+  onBrush,
+  scope,
+}: {
+  data: PatternList | undefined;
+  f: IssueFiltersApi;
+  activeId: string | null;
+  onBrush: (p: NewPattern | null) => void;
+  /** ids of the issues lit by the other brushes (null = no brush) */
+  scope: Set<string> | null;
+}) {
   const t = useT("issuesAnalysis");
   const s = useT("issues");
   const fx = useIssueFormat();
@@ -42,12 +55,13 @@ export function Patterns({ data, f, activeId, onBrush }: { data: PatternList | u
   const [kinds, setKinds] = useState<PatternKind[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
-  const items = useMemo(() => (data?.items ?? []).filter((p) => !kinds.length || kinds.includes(p.kind)), [data, kinds]);
+  const scoped = useMemo(() => (data?.items ?? []).filter((p) => !scope || p.id === activeId || p.issue_ids.some((id) => scope.has(id))), [data, scope, activeId]);
+  const items = useMemo(() => scoped.filter((p) => !kinds.length || kinds.includes(p.kind)), [scoped, kinds]);
   const kindCount = useMemo(() => {
     const c: Record<PatternKind, number> = { new_feature_name: 0, code_switch: 0, new_term: 0, new_phrasing: 0 };
-    for (const p of data?.items ?? []) c[p.kind]++;
+    for (const p of scoped) c[p.kind]++;
     return c;
-  }, [data]);
+  }, [scoped]);
   const buckets = useMemo(() => data?.items[0]?.daily_t ?? [], [data]);
   const hourly = buckets.length > 1 && buckets[1] - buckets[0] < 86_400_000;
 
@@ -103,7 +117,8 @@ export function Patterns({ data, f, activeId, onBrush }: { data: PatternList | u
         ))}
       </div>
       {items.length ? <EChart className="lab-stream" option={option} ariaLabel={t("pat.streamAria")} /> : null}
-      {!items.length ? <div className="empty">{s("empty.patterns")}</div> : null}
+      {!items.length ? <div className="empty">{scope ? t("pat.noneInSel") : s("empty.patterns")}</div> : null}
+      {scope && data.items.length !== scoped.length ? <p className="lab-cap">{t("pat.scoped", { n: scoped.length, total: data.items.length })}</p> : null}
       <ol className="lab-ladder-list">
         {list.map((p, idx) => {
           const on = activeId === p.id;

@@ -1,17 +1,19 @@
 "use client";
 /**
- * Market Brief — masthead: edition line, period / baseline / model versions / scope, a generated
- * headline (top-ranked insight) + standfirst (overall insight), and the KPI ledger with the FAIL-rate trend.
+ * Report view — masthead: edition line, period / baseline / model + Bixby versions / scope, the brief's
+ * conditions (read-only: the frame FilterBar owns filtering; export lives in the frame header), a
+ * generated headline (top-ranked insight) + standfirst (overall insight), and the KPI ledger.
  */
-import { ClipboardCopy, FileDown, FileText } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useFmt, useT } from "@/i18n/client";
+import { BIXBY_VERSIONS } from "@/lib/catalog";
 import type { InsightList, IssueSummary } from "@/lib/types";
 import { useTween } from "@/components/shared";
-import type { IssueFiltersApi, IssueFormat, useIssueExport } from "../../issues-shared";
+import { ISSUE_LIST_FILTERS, useDimLabel, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
 import { Skeleton } from "../../ui";
 import { Delta, FootRef, isoWeek, Spark, useTip } from "./bits";
 
-export function Masthead({ sum, ins, f, fx, ex }: { sum: IssueSummary | undefined; ins: InsightList | undefined; f: IssueFiltersApi; fx: IssueFormat; ex: ReturnType<typeof useIssueExport> }) {
+export function Masthead({ sum, ins, f, fx, bixby, regenerating }: { sum: IssueSummary | undefined; ins: InsightList | undefined; f: IssueFiltersApi; fx: IssueFormat; bixby: string[]; regenerating: boolean }) {
   const t = useT("issuesReport");
   const s = useT("issues");
   const fmt = useFmt();
@@ -28,6 +30,17 @@ export function Masthead({ sum, ins, f, fx, ex }: { sum: IssueSummary | undefine
   const models = (sum?.columns.model_version ?? []).map((c) => c.value).sort();
   const pts = sum?.trend.points ?? [];
   const rate = useTween(k?.fail_rate ?? 0, { decimals: 1 });
+  const bxs = [...bixby].sort((a, b) => BIXBY_VERSIONS.indexOf(a) - BIXBY_VERSIONS.indexOf(b));
+  const dl = useDimLabel();
+  // the brief's conditions, read-only (the frame FilterBar edits them)
+  const conds: { k: string; dim: string; vals: string }[] = [];
+  for (const key of ISSUE_LIST_FILTERS) {
+    const vs = f.values[key];
+    if (vs.length) conds.push({ k: key, dim: key === "severity" ? s("impactLevel.label") : dl.dim(key === "severity_class" ? "risk" : key), vals: vs.map((v) => (key === "severity" ? `${v} ${s.dynamic(`impactLevel.${v}`, undefined, "")}` : dl.value(key, v))).join(", ") });
+  }
+  if (f.values.must_handle) conds.push({ k: "must_handle", dim: dl.dim("must_handle"), vals: dl.value("must_handle", f.values.must_handle) });
+  if (f.values.min_score != null) conds.push({ k: "min_score", dim: dl.dim("min_score"), vals: `≥ ${f.values.min_score}` });
+  if (f.values.q) conds.push({ k: "q", dim: dl.dim("q"), vals: `“${f.values.q}”` });
 
   return (
     <header className="issb-mast">
@@ -45,20 +58,10 @@ export function Masthead({ sum, ins, f, fx, ex }: { sum: IssueSummary | undefine
           <span className="issb-brand">{t("brand")}</span>
           <span className="issb-brand-sub">{s("title")}</span>
         </h1>
-        <div className="issb-export" role="group" aria-label={t("export.title")}>
-          <button type="button" className="btn sm" onClick={() => void ex.copyMarkdown()}>
-            <ClipboardCopy aria-hidden />
-            {t("export.copy")}
-          </button>
-          <a className="btn sm" href={ex.csvUrl} download>
-            <FileDown aria-hidden />
-            {t("export.csv")}
-          </a>
-          <a className="btn sm ghost" href={ex.markdownUrl} download>
-            <FileText aria-hidden />
-            {t("export.md")}
-          </a>
-        </div>
+        <span className="issb-regen" data-on={regenerating || undefined} role="status" aria-live="polite">
+          <RefreshCw aria-hidden />
+          {regenerating ? t("filters.regenerating") : t("filters.upToDate")}
+        </span>
       </div>
 
       <dl className="issb-mast-meta">
@@ -96,12 +99,38 @@ export function Masthead({ sum, ins, f, fx, ex }: { sum: IssueSummary | undefine
                 ))
               : "—"}
           </dd>
+          <dt className="issb-dt2">{t("mast.bixby")}</dt>
+          <dd className="issb-models">
+            {bxs.length
+              ? bxs.map((m, i) => (
+                  <span key={m} data-new={i === bxs.length - 1 && bxs.length > 1 ? "" : undefined}>
+                    {m}
+                  </span>
+                ))
+              : "—"}
+          </dd>
         </div>
         <div>
           <dt>{t("mast.scope")}</dt>
           <dd>{k ? t("mast.scopeValue", { utterances: fmt.number(k.utterances), fails: fmt.number(k.fails) }) : "—"}</dd>
         </div>
       </dl>
+
+      <div className="issb-conds-line">
+        <span className="issb-conds-k">{t("filters.title")}</span>
+        {conds.length ? (
+          <ul>
+            {conds.map((c) => (
+              <li key={c.k}>
+                <span>{c.dim}</span> {c.vals}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <span className="issb-conds-none">{t("filters.none")}</span>
+        )}
+        <span className="issb-hintx">{t("filters.hint")}</span>
+      </div>
 
       {!sum || !ins ? (
         <Skeleton rows={3} />

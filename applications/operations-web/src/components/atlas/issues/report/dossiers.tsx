@@ -6,15 +6,16 @@
  * dossier (utterances, breakdowns, workflows, history) opens in the drawer.
  */
 import clsx from "clsx";
-import { ArrowUpRight, Maximize2 } from "lucide-react";
+import { ArrowUpRight, PanelRightOpen } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { InsightList, Issue, IssueFactorKey, IssueListResponse, IssueStatus, IssueSummary } from "@/lib/types";
 import { LangBadge } from "@/components/shared";
-import { useIssueLinks, useIssuePermission, useIssueTriage, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
+import { useIssuePermission, useIssueTriage, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
 import { Skeleton } from "../../ui";
-import { ClsTag, Delta, Figure, FootRef, Sev, StatusTag, useTip } from "./bits";
+import { ClsTag, Delta, Figure, FootRef, ImpactTag, StatusTag, TypeTag, useTip } from "./bits";
+import type { BriefLinks } from "./links";
 import { SecHead } from "./sec";
 
 export const FACTORS: IssueFactorKey[] = ["volume", "severity", "trend", "regression", "reach", "novelty"];
@@ -206,11 +207,10 @@ export function PullQuote({ issue }: { issue: Issue }) {
   );
 }
 
-function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: IssueSummary | undefined; f: IssueFiltersApi; fx: IssueFormat }) {
+function Dossier({ issue, n, no, sum, f, fx, B }: { issue: Issue; n: number; no: number; sum: IssueSummary | undefined; f: IssueFiltersApi; fx: IssueFormat; B: BriefLinks }) {
   const t = useT("issuesReport");
   const s = useT("issues");
   const fmt = useFmt();
-  const L = useIssueLinks();
   const i = issue;
   const parts = Object.fromEntries(i.factors.map((x) => [x.key, x.contribution])) as Record<IssueFactorKey, number>;
   const bucket = sum?.trend.bucket ?? "day";
@@ -231,7 +231,8 @@ function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: Issue
           {String(n).padStart(2, "0")}
         </span>
         <div className="issb-dos-tags">
-          <Sev s={i.severity} />
+          <ImpactTag s={i.severity} />
+          <TypeTag kind="category" v={i.category} fx={fx} />
           <ClsTag c={i.severity_class} fx={fx} />
           {i.novelty === "new" ? <span className="issb-new">{s("novelty.new")}</span> : null}
           <span className="issb-dos-id mono">
@@ -239,9 +240,10 @@ function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: Issue
           </span>
         </div>
         <h3 id={`issb-dos-${i.id}`}>
-          <button type="button" onClick={open}>
-            {fx.text(i.title)}
-          </button>
+          <span className="issb-dos-kick">
+            {t("dossier.kicker", { level: s.dynamic(`impactLevel.${i.severity}`, undefined, i.severity), category: fx.value("category", i.category) })}
+          </span>
+          <Link href={B.issueHref(i.id)}>{fx.text(i.title)}</Link>
         </h3>
         <div className="issb-dos-score" title={s("field.score")}>
           <b>{fx.score(i.score)}</b>
@@ -266,8 +268,13 @@ function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: Issue
               </dd>
             </div>
             <div>
-              <dt>{s("field.markets")}</dt>
-              <dd>{i.markets.join(" · ")}</dd>
+              <dt>
+                {s("column.division")} · {s("column.region")}
+              </dt>
+              <dd>
+                {i.divisions.slice(0, 3).map((d) => fx.value("division", d)).join(" · ")}
+                <small>{i.regions.join(" · ")}</small>
+              </dd>
             </div>
             <div>
               <dt>{s("field.firstSeen")}</dt>
@@ -278,6 +285,20 @@ function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: Issue
             <h4>{t("dossier.breakdown")}</h4>
             <FactorBar parts={parts} fx={fx} total={i.score} />
           </div>
+          <dl className="issb-dos-types">
+            <div>
+              <dt>{t("dossier.userImpact")}</dt>
+              <dd>
+                <TypeTag kind="user_impact" v={i.user_impact_type} fx={fx} /> <span>{fx.text(i.type_reason.user_impact)}</span>
+              </dd>
+            </div>
+            <div>
+              <dt>{t("dossier.devMiss")}</dt>
+              <dd>
+                <TypeTag kind="dev_miss" v={i.dev_miss_type} fx={fx} /> <span>{fx.text(i.type_reason.dev_miss)}</span>
+              </dd>
+            </div>
+          </dl>
           <div className="issb-dos-block">
             <h4>{t("dossier.why")}</h4>
             <ol className="issb-why">
@@ -289,7 +310,7 @@ function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: Issue
         </div>
         <aside className="issb-dos-side">
           <PullQuote issue={i} />
-          <Figure n={`2.${n}`} title={t("dossier.figEvidence", { bucket: s(`bucket.${bucket}`) })} src={t("sources.issues")}>
+          <Figure n={`${no}.${n}`} title={t("dossier.figEvidence", { bucket: s(`bucket.${bucket}`) })} src={t("sources.issues")}>
             <p className="issb-ebars-cap mono">
               {t("dossier.figCaption", { total: fmt.number(sparkTotal), peak: fmt.number(peak), at: peakAt ? (bucket === "hour" ? fmt.dateTimeLabel(peakAt) : fmt.dateLabel(peakAt)) : "—" })}
             </p>
@@ -301,13 +322,17 @@ function Dossier({ issue, n, sum, f, fx }: { issue: Issue; n: number; sum: Issue
       <footer className="issb-dos-foot">
         <QuickTriage issue={i} fx={fx} onOpen={open} />
         <span className="issb-dos-links">
-          <Link className="issb-link" href={L.results(i)}>
+          <Link className="issb-link" href={B.results(i)}>
             {t("dossier.results")} <ArrowUpRight aria-hidden />
           </Link>
-          <button type="button" className="btn sm primary" onClick={open}>
-            <Maximize2 aria-hidden />
-            {t("dossier.open")}
+          <button type="button" className="btn sm ghost" onClick={open}>
+            <PanelRightOpen aria-hidden />
+            {t("dossier.quick")}
           </button>
+          <Link className="btn sm primary" href={B.issueHref(i.id)}>
+            {t("dossier.analysis")}
+            <ArrowUpRight aria-hidden />
+          </Link>
         </span>
       </footer>
     </article>
@@ -321,6 +346,7 @@ export function Dossiers({
   sum,
   f,
   fx,
+  B,
 }: {
   id: string;
   no: number;
@@ -329,6 +355,7 @@ export function Dossiers({
   insights: InsightList | undefined;
   f: IssueFiltersApi;
   fx: IssueFormat;
+  B: BriefLinks;
 }) {
   const t = useT("issuesReport");
   const [all, setAll] = useState(false);
@@ -347,7 +374,7 @@ export function Dossiers({
       ) : (
         <div className="issb-dossiers">
           {shown.map((i, n) => (
-            <Dossier key={i.id} issue={i} n={n + 1} sum={sum} f={f} fx={fx} />
+            <Dossier key={i.id} issue={i} n={n + 1} no={no} sum={sum} f={f} fx={fx} B={B} />
           ))}
         </div>
       )}

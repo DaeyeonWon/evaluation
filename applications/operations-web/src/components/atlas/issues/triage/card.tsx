@@ -1,12 +1,14 @@
 "use client";
 /** Triage Deck — the issue card (gauge · severity · trend · reach · examples · quick actions). */
 import clsx from "clsx";
-import { CheckCircle2, CircleDot, ClipboardCheck, EyeOff, Gauge as GaugeIco, GitCompareArrows, MessageSquareWarning, Scale, ShieldAlert, Shuffle, Sparkles, Ticket, UserPlus } from "lucide-react";
+import { CheckCircle2, CircleDot, CircleSlash, ClipboardCheck, EyeOff, GitCompareArrows, ListChecks, MessageSquareWarning, PanelRightOpen, Scale, ShieldAlert, Shuffle, Sparkles, Ticket, UserPlus } from "lucide-react";
+import Link from "next/link";
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { Issue, IssueFactor, IssueFactorKey, IssueStatus, SeverityClass } from "@/lib/types";
-import type { IssueFormat } from "../../issues-shared";
+import { useIssueViewLinks, type IssueFormat } from "../../issues-shared";
 import { MarketChip } from "./hero";
+import { TypeBadge, type TriageState } from "./lens";
 import { Tpl, isTemplate } from "./stream";
 import { FACTOR_ORDER, Gauge, Spark, argmax, factorVar } from "./viz";
 
@@ -87,8 +89,13 @@ export function useFactorNote(fx: IssueFormat) {
   };
 }
 
-export function IssueCard({ issue: i, labels, fx, onOpen, act, compact }: { issue: Issue; labels: string[]; fx: IssueFormat; onOpen: (id: string) => void; act: CardActions; compact?: boolean }) {
+export function IssueCard({ issue: i, labels, fx, onOpen, act, compact, ts }: { issue: Issue; labels: string[]; fx: IssueFormat; onOpen: (id: string) => void; act: CardActions; compact?: boolean; ts: Pick<TriageState, "lens" | "typeDim"> }) {
   const t = useT("issuesTriage");
+  const V = useIssueViewLinks();
+  const dev = ts.lens === "dev";
+  const typeValue = dev ? i.dev_miss_type : i.user_impact_type;
+  const typeReason = dev ? i.type_reason?.dev_miss : i.type_reason?.user_impact;
+  const br = i.bixby_regression;
   const fm = useFmt();
   const gl = useGaugeLabel(fx);
   const factorNote = useFactorNote(fx);
@@ -107,25 +114,25 @@ export function IssueCard({ issue: i, labels, fx, onOpen, act, compact }: { issu
   const busy = act.pending === i.id;
   const dis = !act.canWrite || busy;
   return (
-    <article className={clsx("ia-card", compact && "compact")} data-sev={i.severity} data-st={st} aria-labelledby={`ia-t-${i.id}`}>
+    <article className={clsx("ia-card", compact && "compact")} data-sev={i.severity} data-st={st} data-lens={ts.lens} data-oos={(dev && !i.must_handle) || undefined} aria-labelledby={`ia-t-${i.id}`}>
       <div className="ia-c-top">
         <span className="ia-rank mono">{t("card.rank", { n: String(i.rank).padStart(2, "0") })}</span>
         <span className="iss-sev" data-sev={i.severity} title={fx.severityHelp(i.severity)}>
           {i.severity}
         </span>
-        <ClsTag c={i.severity_class} fx={fx} />
+        {typeValue ? <TypeBadge dim={ts.typeDim} value={typeValue} fx={fx} /> : null}
         {i.novelty === "new" ? <span className="ia-new">{fx.value("novelty", "new")}</span> : null}
         <StatusTag s={st} fx={fx} />
       </div>
       <div className="ia-c-main">
-        <div className="ia-c-gauge">
+        <button type="button" className="ia-c-gauge" onClick={() => onOpen(i.id)} title={t("card.open")}>
           <Gauge score={i.score} factors={i.factors} size={compact ? 60 : 96} stroke={compact ? 6 : 9} label={gl(i)} sev={i.severity} focus={focus} onFocus={compact ? undefined : setFocus} />
-        </div>
+        </button>
         <div className="ia-c-head">
           <h3 id={`ia-t-${i.id}`}>
-            <button type="button" className="ia-c-open" onClick={() => onOpen(i.id)}>
+            <Link className="ia-c-open" href={V.issueHref(i.id)} title={t("card.openFull")}>
               {fx.text(i.title)}
-            </button>
+            </Link>
           </h3>
           <div className="ia-sig mono">
             <span>{fx.fn(i.signature.agent_function)}</span>
@@ -159,6 +166,23 @@ export function IssueCard({ issue: i, labels, fx, onOpen, act, compact }: { issu
           {focused ? `${factorNote(focused) ?? fx.factorHelp(focused.key)} — ${focused.contribution.toFixed(1)} / ${focused.weight}` : fx.text(i.reasons[0])}
         </p>
       ) : null}
+      {!compact && typeReason ? (
+        <div className="ia-tyr" style={{ ["--tyc" as string]: `var(--${dev ? "dm" : "ut"}-${typeValue})` } as CSSProperties}>
+          <p>
+            <span className="ia-why-k">{t(dev ? "card.devReason" : "card.userReason")}</span>
+            {fx.text(typeReason)}
+          </p>
+          {dev ? (
+            <p className="ia-mh" data-mh={String(i.must_handle)}>
+              <span className="ia-mh-tag">
+                {i.must_handle ? <ListChecks aria-hidden /> : <CircleSlash aria-hidden />}
+                {fx.t.dynamic(`mustHandleValue.${i.must_handle}`, undefined, String(i.must_handle))}
+              </span>
+              {fx.text(i.must_handle_reason)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="ia-c-metrics">
         <div className="ia-c-num">
           <b className="mono">{fm.number(i.count)}</b>
@@ -181,11 +205,37 @@ export function IssueCard({ issue: i, labels, fx, onOpen, act, compact }: { issu
             <MarketChip key={m} m={m} label={fx.value("market", m)} />
           ))}
         </span>
+        {!compact ? (
+          <span className="ia-dims">
+            {(i.divisions ?? []).slice(0, 2).map((d) => (
+              <span key={d} className="ia-dchip" data-k="division" title={`${fx.column("division")} · ${fx.value("division", d)}`}>
+                {fx.value("division", d)}
+              </span>
+            ))}
+            {(i.divisions ?? []).length > 2 ? <span className="ia-dchip more">+{i.divisions.length - 2}</span> : null}
+            {(i.regions ?? []).slice(0, 3).map((r) => (
+              <span key={r} className="ia-dchip" data-k="region" title={`${fx.column("region")} · ${fx.value("region", r)}`}>
+                {r}
+              </span>
+            ))}
+            {(i.bixby_versions ?? []).slice(0, 2).map((b) => (
+              <span key={b} className="ia-dchip mono" data-k="bixby" title={`${fx.column("bixby_version")} ${b}`}>
+                B{b}
+              </span>
+            ))}
+          </span>
+        ) : null}
         <span className="ia-devs">{i.devices.slice(0, compact ? 1 : 3).join(" · ")}{i.devices.length > (compact ? 1 : 3) ? ` ${t("card.more", { n: i.devices.length - (compact ? 1 : 3) })}` : ""}</span>
         {i.regression ? (
           <span className="ia-reg" title={`${fx.column(i.regression.axis)} · ${i.regression.previous} ${fx.pct(i.regression.previousRate)} → ${i.regression.current} ${fx.pct(i.regression.currentRate)}`}>
             <GitCompareArrows aria-hidden />
             {i.regression.current}
+          </span>
+        ) : null}
+        {br ? (
+          <span className="ia-reg bixby" title={t("card.bixbyRegTitle", { division: fx.value("division", br.division), current: br.current, previous: br.previous, cur: fx.pct(br.currentRate), prev: fx.pct(br.previousRate) })}>
+            <GitCompareArrows aria-hidden />
+            {t("card.bixbyReg", { previous: br.previous, current: br.current, division: fx.value("division", br.division) })}
           </span>
         ) : null}
         {novelPat && !compact ? (
@@ -239,7 +289,7 @@ export function IssueCard({ issue: i, labels, fx, onOpen, act, compact }: { issu
             </button>
           ) : null}
           <button type="button" className="btn sm ghost icon ia-c-more" onClick={() => onOpen(i.id)} title={t("card.open")} aria-label={t("card.open")}>
-            <GaugeIco aria-hidden />
+            <PanelRightOpen aria-hidden />
           </button>
         </span>
       </div>

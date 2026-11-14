@@ -4,7 +4,7 @@
  * delta chips, hover tooltip, sparkline, horizontal bar list.
  */
 import clsx from "clsx";
-import { CheckCircle2, CircleDot, Eye, Gauge, MinusCircle, Scale, ShieldAlert, Shuffle, Ticket, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleAlert, CircleDot, Eye, Gauge, Info, MinusCircle, OctagonAlert, Scale, ShieldAlert, Shuffle, Ticket, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { createContext, useCallback, useContext, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { useT } from "@/i18n/client";
@@ -57,6 +57,31 @@ export function Sev({ s }: { s: IssueSeverity }) {
   return (
     <span className="iss-sev" data-sev={s}>
       {s}
+    </span>
+  );
+}
+
+/** Impact level (= severity P0–P3): reserved severity colour + icon + "P0 · Critical" label. */
+const IMPACT_ICON: Record<IssueSeverity, LucideIcon> = { P0: OctagonAlert, P1: AlertTriangle, P2: CircleAlert, P3: Info };
+export function ImpactTag({ s, compact }: { s: IssueSeverity; compact?: boolean }) {
+  const t = useT("issues");
+  const I = IMPACT_ICON[s];
+  const label = t.dynamic(`impactLevel.${s}`, undefined, s);
+  return (
+    <span className="issb-imp" data-sev={s} title={`${t.dynamic("impactLevel.label", undefined, "Impact")} ${s} · ${label}`}>
+      <I aria-hidden />
+      <b>{s}</b>
+      {compact ? null : <span>{label}</span>}
+    </span>
+  );
+}
+
+/** Issue-level type tags (category / user impact / dev miss): neutral chip + kind prefix, help text as title. */
+export function TypeTag({ kind, v, fx }: { kind: "category" | "user_impact" | "dev_miss"; v: string; fx: IssueFormat }) {
+  const g = kind === "category" ? "category" : kind === "user_impact" ? "userImpact" : "devMiss";
+  return (
+    <span className="issb-type" data-kind={kind} data-v={v} title={fx.t.dynamic(`${g}Help.${v}`, undefined, "")}>
+      {fx.value(kind, v)}
     </span>
   );
 }
@@ -139,11 +164,11 @@ export function useTip() {
 }
 
 /* ───────────── sparkline (SVG) ───────────── */
-export function Spark({ values, w = 120, h = 30, base, className, label }: { values: (number | null)[]; w?: number; h?: number; base?: number | null; className?: string; label?: string }) {
+export function Spark({ values, w = 120, h = 30, base, className, label, max: maxIn }: { values: (number | null)[]; w?: number; h?: number; base?: number | null; className?: string; label?: string; max?: number }) {
   const vs = values.map((v) => (v == null ? null : v));
   const nums = vs.filter((v): v is number => v != null);
   if (!nums.length) return <svg className={clsx("issb-spark", className)} width={w} height={h} aria-hidden />;
-  const max = Math.max(...nums, base ?? 0) || 1;
+  const max = maxIn ?? (Math.max(...nums, base ?? 0) || 1);
   const min = 0;
   const x = (i: number) => (vs.length <= 1 ? w / 2 : (i / (vs.length - 1)) * (w - 4) + 2);
   const y = (v: number) => h - 3 - ((v - min) / (max - min)) * (h - 6);

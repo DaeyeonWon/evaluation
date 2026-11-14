@@ -8,8 +8,9 @@ import type { Issue, IssueStatus } from "@/lib/types";
 import { ISSUE_STATUS_ORDER, useIssuePermission, useIssueTriage, type IssueFormat } from "../../issues-shared";
 import { useReducedMotionSafe, useToast } from "../../ui";
 import { IssueCard, STATUS_ICON, type CardActions } from "./card";
+import { TypeBar, typeOf, type TriageState } from "./lens";
 
-export function Kanban({ items, labels, fx, act, onOpen, onTicket }: { items: Issue[]; labels: string[]; fx: IssueFormat; act: CardActions; onOpen: (id: string) => void; onTicket: (i: Issue) => void }) {
+export function Kanban({ items, labels, fx, act, onOpen, onTicket, ts }: { items: Issue[]; labels: string[]; fx: IssueFormat; act: CardActions; onOpen: (id: string) => void; onTicket: (i: Issue) => void; ts: TriageState }) {
   const t = useT("issuesTriage");
   const s = useT("issues");
   const perm = useIssuePermission();
@@ -64,6 +65,11 @@ export function Kanban({ items, labels, fx, act, onOpen, onTicket }: { items: Is
                 </span>
                 <span className="mono muted">{col.length}</span>
                 <small>{fx.statusHelp(st)}</small>
+                {col.length ? (
+                  <span className="ia-kb-mix">
+                    <TypeBar dim={ts.typeDim} counts={col.reduce<Record<string, number>>((m, i) => ((m[typeOf(i, ts.typeDim)] = (m[typeOf(i, ts.typeDim)] ?? 0) + 1), m), {})} fx={fx} label={fx.status(st)} />
+                  </span>
+                ) : null}
               </header>
               <div className="ia-kb-list">
                 {col.map((i) => (
@@ -86,7 +92,7 @@ export function Kanban({ items, labels, fx, act, onOpen, onTicket }: { items: Is
                         setOver(null);
                       }}
                     >
-                    <IssueCard issue={i} labels={labels} fx={fx} onOpen={onOpen} act={act} compact />
+                    <IssueCard issue={i} labels={labels} fx={fx} onOpen={onOpen} act={act} ts={ts} compact />
                     </div>
                     <label className="ia-kb-move">
                       <span className="sr">{t("deck.moveTo")}</span>

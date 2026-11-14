@@ -14,7 +14,7 @@
  *   const V = useIssueViewLinks();
  *   V.view                                  // current view: "triage" | "categories" | "analysis" | "report" | "detail"
  *   V.viewHref("analysis")                  // /issues/analysis?<filters>  (drops page/issue + other views' view-state)
- *   V.issueHref(id)                         // /issues/<id>?<filters>&from=<current view> (+ its view state, for the back link)
+ *   V.issueHref(id)                         // /issues/<id>?<filters>&via=<current view> (+ its view state, for the back link)
  *   V.drillHref("division", "TV")           // /issues?<filters>&division=TV  (view defaults to "triage")
  *   V.drillHref("category", "asr", "analysis", { replace: false })  // add to the existing values instead of replacing
  *   V.backHref                              // on /issues/[id]: the view + query it was opened from
@@ -29,6 +29,8 @@ import { ISSUE_DIMS, type IssueDimId } from "./dims";
 import { TRIAGE_STATE_PARAMS } from "./filters";
 
 // ───────────────────────────────────────── views ──
+/** /issues/[id] query param naming the list view the issue was opened from (back link). Not `from`: that is the time range's. */
+export const ORIGIN_PARAM = "via";
 export const ISSUE_VIEWS = ["triage", "categories", "analysis", "report"] as const;
 export type IssueView = (typeof ISSUE_VIEWS)[number];
 export type IssuePageKind = IssueView | "detail";
@@ -50,7 +52,12 @@ export const VIEW_STATE_PARAMS: Record<IssueView, readonly string[]> = {
   report: [],
 };
 /** never carried between pages */
-const TRANSIENT = ["page", "issue", "from"];
+const TRANSIENT = ["page", "issue", ORIGIN_PARAM];
+/**
+ * `from` belongs to the global time range (custom `from=<ISO|epoch>`); it was briefly also the detail
+ * page's origin view. Only a legacy `from=<view name>` is dropped; a real range `from` is kept.
+ */
+const isViewName = (v: string | null) => v != null && (ISSUE_VIEWS as readonly string[]).includes(v);
 
 /** pathname → view ("detail" for /issues/<id>, null outside the Issue Report) */
 export function issuePageOf(pathname: string): IssuePageKind | null {
@@ -63,6 +70,7 @@ export function issuePageOf(pathname: string): IssuePageKind | null {
 function strip(sp: URLSearchParams, keep: IssueView | null) {
   const next = new URLSearchParams(sp);
   for (const k of TRANSIENT) next.delete(k);
+  if (isViewName(next.get("from"))) next.delete("from");
   for (const v of ISSUE_VIEWS) if (v !== keep) for (const k of VIEW_STATE_PARAMS[v]) next.delete(k);
   return next;
 }
@@ -77,7 +85,7 @@ export function viewPath(view: IssueView, search: string | URLSearchParams) {
 /** /issues/<id> + the filters of `search`; `from` = the view to return to (its view state is kept) */
 export function issuePath(id: string, search: string | URLSearchParams, from: IssueView = "triage") {
   const next = strip(new URLSearchParams(search), from);
-  if (from !== "triage") next.set("from", from);
+  if (from !== "triage") next.set(ORIGIN_PARAM, from);
   return withQs(`/issues/${encodeURIComponent(id)}`, next);
 }
 
@@ -120,7 +128,7 @@ export function useIssueViewLinks() {
   const sp = useSearchParams();
   const spStr = sp.toString();
   const page = issuePageOf(pathname) ?? "triage";
-  const fromRaw = sp.get("from");
+  const fromRaw = sp.get(ORIGIN_PARAM) ?? (isViewName(sp.get("from")) ? sp.get("from") : null);
   const from: IssueView = (ISSUE_VIEWS as readonly string[]).includes(fromRaw ?? "") ? (fromRaw as IssueView) : "triage";
   /** the list view this page belongs to (detail → the view it was opened from) */
   const view: IssueView = page === "detail" ? from : page;

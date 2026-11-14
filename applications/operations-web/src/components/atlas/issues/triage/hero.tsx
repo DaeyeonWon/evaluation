@@ -1,12 +1,14 @@
 "use client";
 /** Triage Deck — hero KPI tiles (animated counters + sparklines) and the distribution ribbon. */
 import clsx from "clsx";
-import { ArrowDownRight, ArrowUpRight, GitCompareArrows, Globe2, ShieldAlert, Siren, Sparkles, TrendingUp } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Ban, Cpu, GitCompareArrows, ListChecks, ShieldAlert, ShieldOff, Shuffle, Siren, Sparkles, TrendingUp, Users } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import { useTween } from "@/components/shared";
 import { useFmt, useT } from "@/i18n/client";
-import type { IssueFactorKey, IssueSeverity, IssueStatus, IssueSummary, Market } from "@/lib/types";
-import { ISSUE_STATUS_ORDER, type IssueFiltersApi, type IssueFormat } from "../../issues-shared";
+import { BIXBY_VERSIONS } from "@/lib/catalog";
+import type { Issue, IssueFacets, IssueFactorKey, IssueSeverity, IssueStatus, IssueSummary, Market } from "@/lib/types";
+import { ISSUE_STATUS_ORDER, type IssueFiltersApi, type IssueFormat, type TriageLens } from "../../issues-shared";
+import { TypeBar } from "./lens";
 import { FACTOR_ORDER, Spark, argmax, factorVar } from "./viz";
 
 export const MARKET_LANG: Record<Market, string> = { KR: "ko", US: "en", GB: "en", JP: "ja", ES: "es", MX: "es" };
@@ -121,135 +123,228 @@ function MiniBars({ items, max, unit }: { items: MiniBar[]; max?: number; unit?:
   );
 }
 
-export function Hero({ sum, f, fx, labels, compact }: { sum: IssueSummary | undefined; f: IssueFiltersApi; fx: IssueFormat; labels: string[]; compact?: boolean }) {
+type FacetMap = IssueFacets["facets"] | undefined;
+const fv = (fc: FacetMap, dim: keyof IssueFacets["facets"], v: string) => fc?.[dim]?.find((x) => x.value === v);
+
+/**
+ * KPI band. The lens changes the emphasis:
+ * - user: safety · privacy, wrong actions, blocked tasks, affected utterances / markets, open P0·P1, FAIL rate
+ * - dev:  must-handle misses, regressions, guardrail misses, new-feature gaps, Bixby version, open P0·P1
+ * Tiles with an issue-level value toggle that value as a filter (the frame's FilterBar shows it as a chip).
+ */
+export function Hero({
+  sum,
+  facets,
+  regs,
+  lens,
+  f,
+  fx,
+  labels,
+  compact,
+}: {
+  sum: IssueSummary | undefined;
+  facets: IssueFacets | undefined;
+  regs: Issue[];
+  lens: TriageLens;
+  f: IssueFiltersApi;
+  fx: IssueFormat;
+  labels: string[];
+  compact?: boolean;
+}) {
   const t = useT("issuesTriage");
   const s = useT("issues");
+  const fm = useFmt();
   const k = sum?.kpis;
+  const fc = facets?.facets;
   const pts = sum?.trend.points ?? [];
   const bucket = sum ? s(`bucket.${sum.trend.bucket}`) : "";
   const trendAria = (name: string) => `${name} · ${t("hero.trend", { bucket })}`;
   const crit = pts.map((p) => p.critical_fails);
   const v = f.values;
   const critOn = v.severity.join() === "P0,P1";
-  const safeOn = v.severity_class.join() === "safety";
-  const newOn = v.novelty.join() === "new";
-  const markets = sum?.columns.market ?? [];
   const up = (k?.fail_rate_delta ?? 0) > 0;
+  const on = (dim: "user_impact" | "dev_miss", x: string) => v[dim].length === 1 && v[dim][0] === x;
+  const toggleOnly = (dim: "user_impact" | "dev_miss", x: string) => f.set({ [dim]: on(dim, x) ? [] : [x] });
+  const typeTile = (dim: "user_impact" | "dev_miss", x: string, icon: ReactNode, sub?: ReactNode, spark?: ReactNode) => {
+    const n = fv(fc, dim, x);
+    return (
+      <Tile
+        key={x}
+        icon={icon}
+        label={t.dynamic(`hero.${dim === "user_impact" ? "ut" : "dm"}.${x}`, undefined, fx.value(dim, x))}
+        tone={`var(--${dim === "user_impact" ? "ut" : "dm"}-${x})`}
+        value={<Count v={fc ? (n?.count ?? 0) : null} />}
+        sub={sub ?? t("hero.typeSub", { fails: fm.number(n?.fails ?? 0) })}
+        spark={spark}
+        onClick={() => toggleOnly(dim, x)}
+        active={on(dim, x)}
+        title={`${fx.t.dynamic(`${dim === "user_impact" ? "userImpactHelp" : "devMissHelp"}.${x}`, undefined, "")} — ${t("hero.apply")}`}
+      />
+    );
+  };
+  const critical = (
+    <Tile
+      key="crit"
+      icon={<Siren aria-hidden />}
+      label={t("hero.critical")}
+      tone="var(--sev-p0)"
+      value={<Count v={k?.critical_open} />}
+      sub={t("hero.criticalSub", { p0: k?.by_severity.P0 ?? 0, p1: k?.by_severity.P1 ?? 0 })}
+      spark={<Spark values={crit} labels={labels} mark={argmax(crit)} tone="var(--sev-p0)" ariaLabel={trendAria(t("hero.critical"))} />}
+      onClick={() => f.set({ severity: critOn ? [] : ["P0", "P1"] })}
+      active={critOn}
+      title={t("hero.apply")}
+    />
+  );
+
+  if (lens === "user") {
+    const regions = fc?.region ?? sum?.columns.region ?? [];
+    const markets = sum?.columns.market ?? [];
+    const ui = fc?.user_impact ?? [];
+    const uiTotal = ui.reduce((a, x) => a + x.count, 0);
+    return (
+      <section className={clsx("ia-hero", compact && "compact")} data-lens="user" aria-label={t("hero.aria")}>
+        {typeTile(
+          "user_impact",
+          "safety_privacy",
+          <ShieldAlert aria-hidden />,
+          t("hero.safetySub2", { fails: fm.number(fv(fc, "user_impact", "safety_privacy")?.fails ?? 0), score: fx.score(k?.max_score) }),
+          <ShareBar n={fv(fc, "user_impact", "safety_privacy")?.count ?? 0} total={uiTotal} tone="var(--ut-safety_privacy)" label={t("hero.shareOf", { pct: uiTotal ? Math.round(((fv(fc, "user_impact", "safety_privacy")?.count ?? 0) / uiTotal) * 100) : 0 })} />,
+        )}
+        {typeTile("user_impact", "wrong_action", <Shuffle aria-hidden />, undefined, <ShareBar n={fv(fc, "user_impact", "wrong_action")?.count ?? 0} total={uiTotal} tone="var(--ut-wrong_action)" label={t("hero.shareOf", { pct: uiTotal ? Math.round(((fv(fc, "user_impact", "wrong_action")?.count ?? 0) / uiTotal) * 100) : 0 })} />)}
+        {typeTile("user_impact", "task_blocked", <Ban aria-hidden />, undefined, <ShareBar n={fv(fc, "user_impact", "task_blocked")?.count ?? 0} total={uiTotal} tone="var(--ut-task_blocked)" label={t("hero.shareOf", { pct: uiTotal ? Math.round(((fv(fc, "user_impact", "task_blocked")?.count ?? 0) / uiTotal) * 100) : 0 })} />)}
+        <Tile
+          icon={<Users aria-hidden />}
+          label={t("hero.affected")}
+          value={<Count v={k?.fails} />}
+          sub={t("hero.affectedSub", { m: k?.markets_affected ?? 0, n: Math.max(markets.length, 6) })}
+          spark={
+            <MiniBars
+              unit={t("hero.regionsUnit")}
+              items={regions.map((m) => ({
+                key: m.value,
+                label: m.value,
+                v: m.fail_rate ?? 0,
+                text: `${(m.fail_rate ?? 0).toFixed(0)}%`,
+                tone: (m.delta ?? 0) > 0.5 ? "var(--ia-up)" : "var(--ink-3)",
+                strong: (m.delta ?? 0) > 0.5,
+                title: `${fx.value("region", m.value)} · FAIL ${fx.pct(m.fail_rate)} (${fx.pp(m.delta)})`,
+              }))}
+            />
+          }
+        />
+        {critical}
+        <Tile
+          icon={<TrendingUp aria-hidden />}
+          label={t("hero.failRate")}
+          value={<Count v={k?.fail_rate} dec={1} />}
+          unit="%"
+          sub={
+            <>
+              <span className="ia-delta" data-dir={up ? "up" : "down"}>
+                {up ? <ArrowUpRight aria-hidden /> : <ArrowDownRight aria-hidden />}
+                {fx.pp(k?.fail_rate_delta)}
+              </span>{" "}
+              {t("hero.failRateSub", { base: fx.pct(k?.baseline_fail_rate) })}
+            </>
+          }
+          spark={<Spark values={pts.map((p) => p.fail_rate)} labels={labels} fmtValue={(n) => fx.pct(n)} tone="var(--accent)" ariaLabel={trendAria(t("hero.failRate"))} />}
+        />
+      </section>
+    );
+  }
+
+  // ── dev lens ──
+  const must = fv(fc, "must_handle", "true");
+  const oos = fv(fc, "must_handle", "false");
+  const mustOn = v.must_handle === "true";
   const verOf = (col: "model_version" | "pipeline_version") => {
     const xs = [...(sum?.columns[col] ?? [])].sort((a, b) => a.value.localeCompare(b.value));
-    // "bixby-nlu-2026.11-rc" → "11-rc", "v1.2-rc" → "1.2-rc" — the group caption carries the axis and year
     return xs.map((x, n) => ({ ...x, col, newest: n === xs.length - 1, short: col === "model_version" ? x.value.replace(/^bixby-nlu-\d{4}\./, "") : x.value.replace(/^v/, "") }));
   };
   const vers = [...verOf("model_version"), ...verOf("pipeline_version")];
-  const classes = sum?.class_distribution ?? [];
+  const bixbyRegs = regs.filter((i) => i.bixby_regression);
+  const regVer = new Set(bixbyRegs.map((i) => i.bixby_regression!.current));
+  const bvStats = fc?.bixby_version ?? sum?.columns.bixby_version ?? [];
+  const bvs = [...BIXBY_VERSIONS.filter((x) => bvStats.some((b) => b.value === x)), ...bvStats.map((b) => b.value).filter((x) => !BIXBY_VERSIONS.includes(x))].map((x) => bvStats.find((b) => b.value === x)!);
+  const topReg = bixbyRegs[0]?.bixby_regression;
+  const bvOn = !!topReg && v.bixby_version.join() === topReg.current && v.division.join() === topReg.division;
+  const dmMust = (fc?.dev_miss ?? []).filter((x) => x.value !== "out_of_scope");
+  const dmCounts = Object.fromEntries(dmMust.map((x) => [x.value, x.count]));
   return (
-    <section className={clsx("ia-hero", compact && "compact")} aria-label={t("hero.aria")}>
+    <section className={clsx("ia-hero", compact && "compact")} data-lens="dev" aria-label={t("hero.aria")}>
       <Tile
-        icon={<Siren aria-hidden />}
-        label={t("hero.critical")}
-        tone="var(--sev-p0)"
-        value={<Count v={k?.critical_open} />}
-        sub={t("hero.criticalSub", { p0: k?.by_severity.P0 ?? 0, p1: k?.by_severity.P1 ?? 0 })}
-        spark={<Spark values={crit} labels={labels} mark={argmax(crit)} tone="var(--sev-p0)" ariaLabel={trendAria(t("hero.critical"))} />}
-        onClick={() => f.set({ severity: critOn ? [] : ["P0", "P1"] })}
-        active={critOn}
+        icon={<ListChecks aria-hidden />}
+        label={t("hero.mustHandle")}
+        tone="var(--accent)"
+        value={<Count v={fc ? (must?.count ?? 0) : null} />}
+        sub={t("hero.mustHandleSub", { fails: fm.number(must?.fails ?? 0), oos: fm.number(oos?.count ?? 0) })}
+        spark={<TypeBar dim="dev_miss" counts={dmCounts} fx={fx} label={t("hero.mustHandle")} />}
+        onClick={() => f.set({ must_handle: mustOn ? null : "true" })}
+        active={mustOn}
         title={t("hero.apply")}
       />
+      {typeTile(
+        "dev_miss",
+        "regression",
+        <GitCompareArrows aria-hidden />,
+        t("hero.regSub", { n: k?.regressions ?? 0, b: bixbyRegs.length }),
+        <MiniBars
+          max={Math.max(1, ...vers.map((x) => x.fail_rate))}
+          items={vers.map((x) => ({
+            key: x.col + x.value,
+            label: x.short,
+            v: x.fail_rate,
+            text: x.fail_rate.toFixed(1),
+            tone: x.newest ? "var(--dm-regression)" : "var(--ink-3)",
+            strong: x.newest,
+            group: t(x.col === "model_version" ? "hero.groupModel" : "hero.groupPipeline"),
+            title: `${fx.column(x.col)} ${x.value} · FAIL ${fx.pct(x.fail_rate)}`,
+          }))}
+        />,
+      )}
+      {typeTile("dev_miss", "guardrail_miss", <ShieldOff aria-hidden />, t("hero.guardSub", { fails: fm.number(fv(fc, "dev_miss", "guardrail_miss")?.fails ?? 0) }), <ShareBar n={fv(fc, "dev_miss", "guardrail_miss")?.count ?? 0} total={must?.count ?? 0} tone="var(--dm-guardrail_miss)" label={t("hero.shareOfMust", { pct: must?.count ? Math.round(((fv(fc, "dev_miss", "guardrail_miss")?.count ?? 0) / must.count) * 100) : 0 })} />)}
+      {typeTile("dev_miss", "new_feature_gap", <Sparkles aria-hidden />, t("hero.nfSub", { fails: fm.number(fv(fc, "dev_miss", "new_feature_gap")?.fails ?? 0), p: k?.new_patterns ?? 0 }), <ShareBar n={fv(fc, "dev_miss", "new_feature_gap")?.count ?? 0} total={must?.count ?? 0} tone="var(--dm-new_feature_gap)" label={t("hero.shareOfMust", { pct: must?.count ? Math.round(((fv(fc, "dev_miss", "new_feature_gap")?.count ?? 0) / must.count) * 100) : 0 })} />)}
       <Tile
-        icon={<TrendingUp aria-hidden />}
-        label={t("hero.failRate")}
-        value={<Count v={k?.fail_rate} dec={1} />}
-        unit="%"
-        sub={
-          <>
-            <span className="ia-delta" data-dir={up ? "up" : "down"}>
-              {up ? <ArrowUpRight aria-hidden /> : <ArrowDownRight aria-hidden />}
-              {fx.pp(k?.fail_rate_delta)}
-            </span>{" "}
-            {t("hero.failRateSub", { base: fx.pct(k?.baseline_fail_rate) })}
-          </>
-        }
-        spark={<Spark values={pts.map((p) => p.fail_rate)} labels={labels} fmtValue={(n) => fx.pct(n)} tone="var(--accent)" ariaLabel={trendAria(t("hero.failRate"))} />}
-      />
-      <Tile
-        icon={<Sparkles aria-hidden />}
-        label={t("hero.newPatterns")}
-        tone="var(--iss-new)"
-        value={<Count v={k?.new_patterns} />}
-        sub={t("hero.newPatternsSub", { n: k?.new_issues ?? 0 })}
-        spark={<Spark values={pts.map((p) => p.new_pattern_rows)} labels={labels} tone="var(--iss-new)" ariaLabel={trendAria(t("hero.newPatterns"))} />}
-        onClick={() => f.set({ novelty: newOn ? [] : ["new"] })}
-        active={newOn}
-        title={t("hero.apply")}
-      />
-      <Tile
-        icon={<Globe2 aria-hidden />}
-        label={t("hero.markets")}
-        value={<Count v={k?.markets_affected} />}
-        unit={`/${Math.max(markets.length, 6)}`}
-        sub={t("hero.marketsSub", { n: markets.length || 6 })}
+        icon={<Cpu aria-hidden />}
+        label={t("hero.bixby")}
+        tone="var(--dm-regression)"
+        value={<Count v={sum ? bixbyRegs.length : null} />}
+        unit={t("hero.bixbyUnit")}
+        sub={topReg ? t("hero.bixbySub", { current: topReg.current, previous: topReg.previous, division: fx.value("division", topReg.division), pp: fx.pp(topReg.currentRate - topReg.previousRate) }) : t("hero.bixbyNone")}
         spark={
           <MiniBars
-            unit={t("hero.marketsUnit")}
-            items={markets.map((m) => ({
-              key: m.value,
-              label: m.value,
-              v: m.fail_rate,
-              text: `${m.fail_rate.toFixed(0)}%`,
-              tone: (m.delta ?? 0) > 0.5 ? "var(--ia-up)" : "var(--ink-3)",
-              title: `${fx.value("market", m.value)} · FAIL ${fx.pct(m.fail_rate)} (${fx.pp(m.delta)})`,
+            unit={t("hero.bixbyBars")}
+            items={bvs.map((b) => ({
+              key: b.value,
+              label: b.value.replace(/-beta$/, "β"),
+              v: b.fail_rate ?? 0,
+              text: (b.fail_rate ?? 0).toFixed(1),
+              tone: regVer.has(b.value) ? "var(--dm-regression)" : "var(--ink-3)",
+              strong: regVer.has(b.value),
+              title: `Bixby ${b.value} · FAIL ${fx.pct(b.fail_rate)} (${fx.pp(b.delta)})${regVer.has(b.value) ? ` · ${t("hero.bixbyFlag")}` : ""}`,
             }))}
           />
         }
+        onClick={topReg ? () => f.set(bvOn ? { bixby_version: [], division: [] } : { bixby_version: [topReg.current], division: [topReg.division] }) : undefined}
+        active={bvOn}
+        title={topReg ? t("hero.apply") : undefined}
       />
-      <Tile
-        icon={<GitCompareArrows aria-hidden />}
-        label={t("hero.regressions")}
-        tone="var(--sev-p1)"
-        value={<Count v={k?.regressions} />}
-        sub={t("hero.regressionsSub")}
-        spark={
-          <MiniBars
-            max={Math.max(1, ...vers.map((x) => x.fail_rate))}
-            items={vers.map((x) => ({
-              key: x.col + x.value,
-              label: x.short,
-              v: x.fail_rate,
-              text: x.fail_rate.toFixed(1),
-              tone: x.newest ? "var(--sev-p1)" : "var(--ink-3)",
-              strong: x.newest,
-              group: t(x.col === "model_version" ? "hero.groupModel" : "hero.groupPipeline"),
-              title: `${fx.column(x.col)} ${x.value} · FAIL ${fx.pct(x.fail_rate)}`,
-            }))}
-          />
-        }
-      />
-      <Tile
-        icon={<ShieldAlert aria-hidden />}
-        label={t("hero.safety")}
-        tone="var(--cls-safety)"
-        value={<Count v={k?.safety_issues} />}
-        sub={t("hero.safetySub", { score: fx.score(k?.max_score) })}
-        spark={
-          <span className="ia-clsbar" role="img" aria-label={classes.map((c) => `${fx.cls(c.cls)} ${c.issues}`).join(", ")}>
-            <span className="ia-clsbar-bar">
-              {classes.map((c) => (c.issues ? <i key={c.cls} data-cls={c.cls} style={{ flexGrow: Math.sqrt(c.issues) }} /> : null))}
-            </span>
-            <span className="ia-clsbar-l">
-              {classes.map((c) => (
-                <span key={c.cls} data-cls={c.cls}>
-                  <i />
-                  {fx.cls(c.cls)} <b className="mono">{c.issues}</b>
-                </span>
-              ))}
-            </span>
-          </span>
-        }
-        onClick={() => f.set({ severity_class: safeOn ? [] : ["safety"] })}
-        active={safeOn}
-        title={t("hero.apply")}
-      />
+      {critical}
     </section>
+  );
+}
+
+/** one-value share bar (tile footer): n of total */
+function ShareBar({ n, total, tone, label }: { n: number; total: number; tone: string; label: string }) {
+  const pct = total ? Math.min(100, (n / total) * 100) : 0;
+  return (
+    <span className="ia-share" style={{ ["--tc" as string]: tone } as CSSProperties}>
+      <span className="ia-share-bar" role="img" aria-label={label}>
+        <i style={{ width: `${pct}%` }} />
+      </span>
+      <span className="ia-share-l mono">{label}</span>
+    </span>
   );
 }
 
@@ -292,6 +387,7 @@ export function Ribbon({ sum, f, fx }: { sum: IssueSummary | undefined; f: Issue
                 <span className="iss-sev" data-sev={d.severity}>
                   {d.severity}
                 </span>
+                <span className="ia-sev-lv">{fx.t.dynamic(`impactLevel.${d.severity}`, undefined, d.severity)}</span>
                 <small className="mono">{t("dist.share", { pct: Math.round((d.issues / total) * 100) })}</small>
               </span>
               <b>{fm.number(d.issues)}</b>

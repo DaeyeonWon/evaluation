@@ -1,12 +1,14 @@
 "use client";
-/** Market Brief — §1 Executive summary: ranked, data-backed insight statements with their big number and evidence refs. */
+/** Report view — Executive summary: ranked, data-backed insight statements with their big number and evidence refs. */
 import { ArrowUpRight } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { useT } from "@/i18n/client";
 import type { InsightList, IssueInsight } from "@/lib/types";
 import type { IssueFiltersApi, IssueFormat } from "../../issues-shared";
 import { Skeleton } from "../../ui";
 import { FootRef, Sev } from "./bits";
+import type { BriefLinks } from "./links";
 import { SecHead } from "./sec";
 
 const num = (v: unknown) => (typeof v === "number" ? v : typeof v === "string" && v !== "" && !isNaN(+v) ? +v : null);
@@ -22,6 +24,11 @@ function bigNumber(i: IssueInsight, fx: IssueFormat): { v: string; u: string } {
       return { v: fx.pct(num(m.current_rate) ?? num(v.curRate)), u: String(v.current ?? "") };
     case "new_pattern":
       return i.key === "insights.newPatterns" ? { v: String(num(m.patterns) ?? v.count), u: fx.t("field.pattern") } : { v: fx.pct(num(m.fail_rate)), u: "FAIL" };
+    case "bixby_version":
+      return { v: fx.pp(num(m.delta) ?? num(v.delta)), u: `Bixby ${v.version ?? ""} · ${fx.value("division", String(v.division ?? ""))}` };
+    case "division":
+    case "region":
+      return { v: fx.pp(num(m.delta) ?? num(v.delta)), u: fx.value(i.kind, String(v[i.kind] ?? "")) };
     case "market":
     case "hotspot":
     case "improvement":
@@ -40,7 +47,7 @@ function bigNumber(i: IssueInsight, fx: IssueFormat): { v: string; u: string } {
   }
 }
 
-export function ExecSummary({ id, no, ins, f, fx }: { id: string; no: number; ins: InsightList | undefined; f: IssueFiltersApi; fx: IssueFormat }) {
+export function ExecSummary({ id, no, ins, f, fx, B }: { id: string; no: number; ins: InsightList | undefined; f: IssueFiltersApi; fx: IssueFormat; B: BriefLinks }) {
   const t = useT("issuesReport");
   const s = useT("issues");
   const [all, setAll] = useState(false);
@@ -73,9 +80,9 @@ export function ExecSummary({ id, no, ins, f, fx }: { id: string; no: number; in
                     <FootRef k={`ins:${i.id}`} />
                   </p>
                   {i.evidence.issue_id ? (
-                    <button type="button" className="issb-link" onClick={() => f.select(i.evidence.issue_id!)}>
-                      {t("dossier.open")} <ArrowUpRight aria-hidden />
-                    </button>
+                    <Link className="issb-link" href={B.issueHref(i.evidence.issue_id)}>
+                      {t("dossier.analysis")} <ArrowUpRight aria-hidden />
+                    </Link>
                   ) : Object.keys(i.evidence.filter).length ? (
                     <button type="button" className="issb-link" onClick={() => f.set(Object.fromEntries(Object.entries(i.evidence.filter).map(([k, v]) => [k, k === "q" ? v : String(v).split(",")])))}>
                       {s("filters.title")}: {Object.entries(i.evidence.filter).map(([k, v]) => `${fx.column(k)} ${fx.value(k, String(v))}`).join(" · ")}

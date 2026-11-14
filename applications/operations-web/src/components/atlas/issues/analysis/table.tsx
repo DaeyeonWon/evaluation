@@ -1,14 +1,14 @@
 "use client";
 /**
- * Signal Lab — the issue ledger under the linked views: every issue that survives the URL filters
- * and the lab brushes (quadrant / pattern), ranked, with the score anatomy strip per row.
+ * Analysis — the issue ledger under the linked views: every issue that survives the URL filters
+ * and the lab brushes (heatmap cell / quadrant / treemap node / pattern), ranked, with the score anatomy strip per row.
  */
 import clsx from "clsx";
 import { CheckCircle2, CircleDot, ClipboardCheck, MinusCircle, Ticket } from "lucide-react";
 import type { ReactNode } from "react";
 import { useFmt, useT } from "@/i18n/client";
 import type { Issue, IssueStatus } from "@/lib/types";
-import { ISSUE_SORTS, useIssueFormat, type IssueFiltersApi, type IssueSort } from "../../issues-shared";
+import { ISSUE_SORTS, useDimLabel, useIssueFormat, type IssueFiltersApi, type IssueSort } from "../../issues-shared";
 import { Empty } from "../../ui";
 import { FACTOR_KEYS, deltaDir, factor, sparkPath } from "./lab";
 
@@ -48,6 +48,7 @@ export function IssueTable({ items, f, page, setPage }: { items: Issue[]; f: Iss
   const t = useT("issuesAnalysis");
   const s = useT("issues");
   const fx = useIssueFormat();
+  const dl = useDimLabel();
   const fm = useFmt();
   const pages = Math.max(1, Math.ceil(items.length / PAGE));
   const p = Math.min(page, pages);
@@ -117,7 +118,7 @@ export function IssueTable({ items, f, page, setPage }: { items: Issue[]; f: Iss
                         <span className="lab-cls" data-cls={i.severity_class}>
                           {fx.cls(i.severity_class)}
                         </span>{" "}
-                        {fx.fn(i.signature.agent_function)} · {fx.reason(i.signature.failure_reason)}
+                        {fx.fn(i.signature.agent_function)} · {fx.reason(i.signature.failure_reason)} · {dl.value("category", i.category)} · {(i.divisions ?? []).slice(0, 2).map((d) => dl.value("division", d)).join("/")}
                         {i.novelty === "new" ? <span className="lab-newtag">{t("tag.novel")}</span> : null}
                         {i.regression ? <span className="lab-regtag">{fx.factor("regression")}</span> : null}
                       </span>

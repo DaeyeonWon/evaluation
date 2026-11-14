@@ -1,19 +1,31 @@
 "use client";
 /**
- * Signal Lab — issue-cluster bubble chart. x = FAIL volume (log), y = trend z-score vs baseline,
- * size = market reach, colour = severity (legend + badge in the tooltip). Quadrant overlay:
- * act now (high volume · spiking) / emerging (low volume · spiking) / watch / noise.
- * Click a bubble → open the issue; click a quadrant chip → lab brush `quad`.
+ * Analysis — issue-cluster bubble quadrant. x = FAIL volume (log), y = trend z-score vs baseline,
+ * size = reach, colour = impact level (영향도, reserved severity colours + P-label) or, via the
+ * colour-by picker, category / user impact / Bixby miss / division. A scatter shows every pair at once,
+ * so non-impact colourings use the 3 all-pairs-validated slots for the top values (by issue count)
+ * and fold the rest into a neutral Other; legend + tooltip name every mark.
+ * Quadrant overlay: act now / emerging / watch / noise. Click a bubble → open the issue; click a
+ * quadrant chip → lab brush `quad`. Every other brush dims the bubbles outside it.
  */
 import clsx from "clsx";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { EChart, type ChartTokens } from "@/components/shared";
 import { useT } from "@/i18n/client";
 import type { Issue, IssueSeverity } from "@/lib/types";
 import { opt, tooltip } from "../../chart";
-import { useIssueFormat } from "../../issues-shared";
+import { useDimLabel, useIssueFormat } from "../../issues-shared";
 import { useReducedMotionSafe } from "../../ui";
-import { QUADRANTS, SEVERITIES, Z_CUT, matchesBrush, quadrantOf, reachValue, trendZ, type LabBrush, type Quadrant } from "./lab";
+import { CAT_SLOTS, COLOR_BY, QUADRANTS, SEVERITIES, Z_CUT, brushActive, issueValue, matchesBrush, quadrantOf, reachValue, trendZ, type ColorBy, type LabBrush, type Quadrant } from "./lab";
+
+const OTHER_KEY = "__other__";
+interface Group {
+  key: string;
+  name: string;
+  /** CSS custom property holding the colour */
+  token: string;
+  items: Issue[];
+}
 
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
 
@@ -33,8 +45,25 @@ export function Bubble({
   onSelect: (id: string) => void;
 }) {
   const t = useT("issuesAnalysis");
+  const s = useT("issues");
   const fx = useIssueFormat();
+  const dl = useDimLabel();
   const reduced = useReducedMotionSafe();
+  const [colorBy, setColorBy] = useState<ColorBy>("impact");
+  const groups = useMemo((): Group[] => {
+    if (colorBy === "impact")
+      return SEVERITIES.map((sv) => ({ key: sv, name: `${sv} ${s(`impactLevel.${sv}`)}`, token: `--sev-${sv.toLowerCase()}`, items: issues.filter((i) => i.severity === sv) }));
+    const by = new Map<string, Issue[]>();
+    for (const i of issues) {
+      const v = issueValue(i, colorBy);
+      if (!by.has(v)) by.set(v, []);
+      by.get(v)!.push(i);
+    }
+    const ranked = [...by.entries()].sort((a, b) => b[1].length - a[1].length || b[1].reduce((x, i) => x + i.count, 0) - a[1].reduce((x, i) => x + i.count, 0));
+    const head: Group[] = ranked.slice(0, CAT_SLOTS).map(([v, items], k) => ({ key: v, name: dl.value(colorBy, v), token: `--issc-c${k + 1}`, items }));
+    const tail = ranked.slice(CAT_SLOTS).flatMap(([, items]) => items);
+    return tail.length ? [...head, { key: OTHER_KEY, name: `${s("dimValue.other")} (${ranked.length - CAT_SLOTS})`, token: "--issc-other", items: tail }] : head;
+  }, [colorBy, issues, s, dl]);
   const counts = useMemo(() => {
     const c: Record<Quadrant, number> = { act: 0, watch: 0, emerging: 0, noise: 0 };
     for (const i of issues) c[quadrantOf(i, vCut)]++;
@@ -47,11 +76,11 @@ export function Bubble({
   const zCap = 12;
   const maxY = Math.min(zCap, Math.max(Z_CUT * 2.2, ...zs)) * 1.1;
   const minY = Math.min(-1, ...zs) - 0.6;
-  const brushing = !!(brush.quad || brush.pattern);
+  const brushing = brushActive(brush);
 
   const option = useCallback(
     (tk: ChartTokens) => {
-      const sev = (s: IssueSeverity) => tk.read(`--sev-${s.toLowerCase()}`);
+      const sev = (sv: IssueSeverity) => tk.read(`--sev-${sv.toLowerCase()}`);
       const ink = tk.read("--ink");
       const sheet = tk.read("--sheet");
       const axis = {
@@ -71,7 +100,7 @@ export function Bubble({
         animationDurationUpdate: reduced ? 0 : 450,
         textStyle: { fontFamily: tk.font, color: tk.muted },
         grid: { left: 40, right: 16, top: 30, bottom: 40 },
-        legend: { top: 0, right: 0, icon: "circle", itemWidth: 8, itemHeight: 8, data: SEVERITIES, textStyle: { color: tk.muted, fontSize: 11, fontFamily: tk.mono } },
+        legend: { top: 0, right: 0, icon: "circle", itemWidth: 8, itemHeight: 8, data: groups.map((g) => g.name), textStyle: { color: tk.muted, fontSize: 11, fontFamily: tk.font } },
         xAxis: { type: "log", min: 1, max: right, name: t("bubble.x"), nameLocation: "middle", nameGap: 26, splitLine: { show: false }, ...axis, axisLabel: { ...axis.axisLabel, showMaxLabel: false } },
         yAxis: { type: "value", min: bottom, max: yMax, name: t("bubble.y"), nameGap: 10, splitLine: { lineStyle: { color: tk.grid } }, ...axis, axisLabel: { ...axis.axisLabel, showMaxLabel: false } },
         tooltip: tooltip(tk, {
@@ -80,20 +109,20 @@ export function Bubble({
             const i = p.data?.id ? byId.get(p.data.id) : null;
             if (!i) return "";
             const q = quadrantOf(i, vCut);
-            return `<div style="max-width:280px;white-space:normal"><b style="color:${sev(i.severity)}">\u25A0</b> <b>${i.severity}</b> · ${esc(fx.cls(i.severity_class))} · ${esc(t(`quad.${q}`))}<br/><b>${esc(fx.text(i.title))}</b><br/><span style="font-family:${tk.mono};font-size:11px">FAIL ${i.count} · z ${trendZ(i).toFixed(1)} · ${esc(t("bubble.reach"))} ${i.markets.length}/${i.devices.length}/${i.languages.length} · ${esc(t("bubble.score"))} ${Math.round(i.score)}</span></div>`;
+            const g = colorBy === "impact" ? null : groups.find((x) => x.items.includes(i));
+            const tag = colorBy === "impact" ? "" : ` · <b style="color:${tk.read(g?.token ?? "--issc-other")}">\u25CF</b> ${esc(dl.value(colorBy, issueValue(i, colorBy)))}`;
+            return `<div style="max-width:300px;white-space:normal"><b style="color:${sev(i.severity)}">\u25A0</b> <b>${i.severity} ${esc(s(`impactLevel.${i.severity}`))}</b> · ${esc(t(`quad.${q}`))}${tag}<br/><b>${esc(fx.text(i.title))}</b><br/><span style="font-family:${tk.mono};font-size:11px">FAIL ${i.count} · z ${trendZ(i).toFixed(1)} · ${esc(t("bubble.reach"))} ${i.markets.length}/${i.devices.length}/${i.languages.length} · ${esc(t("bubble.score"))} ${Math.round(i.score)}</span></div>`;
           },
         }),
-        series: SEVERITIES.map((sv, si) => ({
+        series: groups.map((g, si) => ({
           type: "scatter",
-          name: sv,
-          color: sev(sv),
+          name: g.name,
+          color: tk.read(g.token),
           z: 10 - si,
           label: { color: tk.text, fontFamily: tk.mono },
           emphasis: { focus: "self", scale: 1.15 },
           labelLayout: { hideOverlap: true },
-          data: issues
-            .filter((i) => i.severity === sv)
-            .map((i) => {
+          data: g.items.map((i) => {
               const on = !brushing || matchesBrush(i, brush, vCut);
               const isSel = i.id === selected;
               const z = trendZ(i);
@@ -103,7 +132,7 @@ export function Bubble({
                 symbol: capped ? "triangle" : "circle",
                 id: i.id,
                 symbolSize: 7 + reachValue(i) * 30,
-                itemStyle: { opacity: on ? (sv === "P3" ? 0.4 : 0.86) : 0.07, borderWidth: isSel ? 3 : 1.5, borderColor: isSel ? ink : sheet },
+                itemStyle: { opacity: on ? (g.key === "P3" || g.key === OTHER_KEY ? 0.45 : 0.86) : 0.07, borderWidth: isSel ? 3 : 2, borderColor: isSel ? ink : sheet },
                 label:
                   topIds.has(i.id) && on
                     ? {
@@ -138,11 +167,24 @@ export function Bubble({
         })),
       });
     },
-    [issues, brush, brushing, vCut, selected, topIds, maxX, maxY, minY, reduced, t, fx, byId],
+    [groups, colorBy, brush, brushing, vCut, selected, topIds, maxX, maxY, minY, reduced, t, s, fx, dl, byId],
   );
 
   return (
     <div className="lab-bub">
+      <div className="lab-viewbar">
+        <label className="lab-axis">
+          <span>{t("bubble.colorBy")}</span>
+          <select className="in" value={colorBy} onChange={(e) => setColorBy(e.target.value as ColorBy)} aria-label={t("bubble.colorBy")}>
+            {COLOR_BY.map((c) => (
+              <option key={c} value={c}>
+                {c === "impact" ? s("impactLevel.label") : dl.dim(c)}
+              </option>
+            ))}
+          </select>
+        </label>
+        {colorBy !== "impact" ? <span className="muted lab-cap-i">{t("bubble.colorTop", { n: CAT_SLOTS })}</span> : null}
+      </div>
       <div className="lab-quads" role="group" aria-label={t("quad.aria")}>
         {QUADRANTS.map((q) => (
           <button key={q} type="button" className={clsx("lab-quad", "q-" + q)} aria-pressed={brush.quad === q} onClick={() => setQuad(brush.quad === q ? null : q)} title={t(`quad.${q}Help`)}>

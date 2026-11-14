@@ -26,7 +26,7 @@ export function RegressionWatch({ id, no, list, sum, f, fx }: { id: string; no: 
       ) : (
         <div className="issb-reg">
           <Figure
-            n="5.1"
+            n={`${no}.1`}
             title={t("regression.figDumbbell")}
             src={t("sources.issues")}
             aside={
@@ -102,7 +102,7 @@ export function RegressionWatch({ id, no, list, sum, f, fx }: { id: string; no: 
               </div>
             )}
           </Figure>
-          <Figure n="5.2" title={t("regression.figVersions")} src={t("sources.summary")}>
+          <Figure n={`${no}.2`} title={t("regression.figVersions")} src={t("sources.summary")}>
             <div className="issb-vers">
               {(["model_version", "pipeline_version"] as const).map((col) => (
                 <div key={col}>

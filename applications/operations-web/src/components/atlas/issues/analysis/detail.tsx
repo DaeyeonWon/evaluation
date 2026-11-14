@@ -9,12 +9,12 @@ import { ArrowUpRight, ChevronLeft, ChevronRight, ExternalLink, History, Lock, X
 import Link from "next/link";
 import { useCallback, useState } from "react";
 import { EChart, LangBadge, type ChartTokens } from "@/components/shared";
-import { deviceLabel, languageName } from "@/i18n";
+import { deviceLabel } from "@/i18n";
 import { useFmt, useLocale, useT } from "@/i18n/client";
 import { OPERATORS } from "@/lib/catalog";
 import type { IssueDetail, IssueFactor, IssueStatus, ResultRow } from "@/lib/types";
 import { axisX, axisY, opt, tooltip } from "../../chart";
-import { useIssue, useIssueFormat, useIssueLinks, useIssuePermission, useIssueTriage, type IssueFiltersApi } from "../../issues-shared";
+import { useDimLabel, useIssue, useIssueFormat, useIssueLinks, useIssueViewLinks, useIssuePermission, useIssueTriage, type IssueFiltersApi } from "../../issues-shared";
 import { ErrorNote, Skeleton, useReducedMotionSafe } from "../../ui";
 import { FACTOR_KEYS, deltaDir, intentDiff, wordDiff } from "./lab";
 import { StatusPill } from "./table";
@@ -137,21 +137,22 @@ function Trend({ d }: { d: IssueDetail }) {
 
 /* ───────── breakdown ───────── */
 type BK = keyof IssueDetail["breakdown"];
-const BKEYS: BK[] = ["market", "language", "device", "model_version", "pipeline_version", "one_ui_version", "os_version"];
+const BKEYS: BK[] = ["division", "region", "bixby_version", "market", "language", "device", "model_version", "pipeline_version"];
 
 function Breakdown({ d }: { d: IssueDetail }) {
   const fx = useIssueFormat();
-  const locale = useLocale();
-  const [k, setK] = useState<BK>("market");
+  const dl = useDimLabel();
+  const [k, setK] = useState<BK>("division");
+  const keys = BKEYS.filter((x) => Array.isArray(d.breakdown[x]));
   const rows = d.breakdown[k] ?? [];
   const max = Math.max(10, ...rows.map((r) => Math.max(r.fail_rate, r.baseline_fail_rate ?? 0)));
-  const lab = (v: string) => (k === "language" ? languageName(v, locale) : k === "device" ? deviceLabel(v, locale) : k === "market" ? `${v} · ${fx.market(v)}` : v);
+  const lab = (v: string) => dl.value(k, v);
   return (
     <div className="lab-bd">
       <div className="lab-tabs" role="tablist">
-        {BKEYS.map((x) => (
+        {keys.map((x) => (
           <button key={x} type="button" role="tab" aria-selected={k === x} onClick={() => setK(x)}>
-            {fx.column(x)}
+            {dl.dim(x)}
           </button>
         ))}
       </div>
@@ -382,6 +383,8 @@ export function DetailPane({ f, onClose, siblings }: { f: IssueFiltersApi; onClo
   const fx = useIssueFormat();
   const fm = useFmt();
   const L = useIssueLinks();
+  const V = useIssueViewLinks();
+  const dl = useDimLabel();
   const [page, setPage] = useState(1);
   const [prevSel, setPrevSel] = useState(f.selected);
   if (prevSel !== f.selected) {
@@ -399,6 +402,11 @@ export function DetailPane({ f, onClose, siblings }: { f: IssueFiltersApi; onClo
       <div className="lab-d-head">
         <div className="lab-d-nav">
           <span className="mono muted">{f.selected}</span>
+          {f.selected ? (
+            <Link className="btn sm lab-d-full" href={V.issueHref(f.selected)}>
+              {t("detail.openFull")} <ArrowUpRight aria-hidden />
+            </Link>
+          ) : null}
           <button type="button" className="btn icon sm ghost" disabled={at <= 0} onClick={() => f.select(siblings[at - 1])} aria-label={t("detail.prev")}>
             <ChevronLeft aria-hidden />
           </button>
@@ -434,6 +442,27 @@ export function DetailPane({ f, onClose, siblings }: { f: IssueFiltersApi; onClo
               ) : null}{" "}
               · {fx.reason(d.signature.failure_reason)}
             </p>
+            <dl className="lab-d-types">
+              <div title={fx.text(d.category_reason)}>
+                <dt>{dl.dim("category")}</dt>
+                <dd>{dl.value("category", d.category)}</dd>
+              </div>
+              <div title={fx.text(d.type_reason?.user_impact)}>
+                <dt>{dl.dim("user_impact")}</dt>
+                <dd>{dl.value("user_impact", d.user_impact_type)}</dd>
+              </div>
+              <div title={fx.text(d.type_reason?.dev_miss)}>
+                <dt>{dl.dim("dev_miss")}</dt>
+                <dd>
+                  {dl.value("dev_miss", d.dev_miss_type)}
+                  {d.must_handle ? <span className="lab-mh">{dl.value("must_handle", "true")}</span> : null}
+                </dd>
+              </div>
+              <div>
+                <dt>{dl.dim("division")}</dt>
+                <dd>{(d.divisions ?? []).map((x) => dl.value("division", x)).join(" · ") || "—"}</dd>
+              </div>
+            </dl>
             <dl className="lab-d-kpis">
               <div>
                 <dt>{s("field.score")}</dt>
