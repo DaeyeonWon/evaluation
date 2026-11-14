@@ -29,9 +29,11 @@ import ko_errors from "./ko/errors";
 import ko_status from "./ko/status";
 import ko_catalog from "./ko/catalog";
 import ko_issues from "./ko/issues";
-import ko_issuesA from "./ko/issuesA";
-import ko_issuesB from "./ko/issuesB";
-import ko_issuesC from "./ko/issuesC";
+import ko_issuesTriage from "./ko/issuesTriage";
+import ko_issuesReport from "./ko/issuesReport";
+import ko_issuesAnalysis from "./ko/issuesAnalysis";
+import ko_issuesCategories from "./ko/issuesCategories";
+import ko_issuesDetail from "./ko/issuesDetail";
 import en_common from "./en/common";
 import en_nav from "./en/nav";
 import en_shell from "./en/shell";
@@ -54,11 +56,13 @@ import en_errors from "./en/errors";
 import en_status from "./en/status";
 import en_catalog from "./en/catalog";
 import en_issues from "./en/issues";
-import en_issuesA from "./en/issuesA";
-import en_issuesB from "./en/issuesB";
-import en_issuesC from "./en/issuesC";
+import en_issuesTriage from "./en/issuesTriage";
+import en_issuesReport from "./en/issuesReport";
+import en_issuesAnalysis from "./en/issuesAnalysis";
+import en_issuesCategories from "./en/issuesCategories";
+import en_issuesDetail from "./en/issuesDetail";
 
-export const NAMESPACES = ["common", "nav", "shell", "orchestration", "inspector", "board", "overview", "capacity", "explorer", "workflow", "pipelines", "dlq", "results", "analytics", "config", "files", "auth", "hermes", "errors", "status", "catalog", "issues", "issuesA", "issuesB", "issuesC"] as const;
+export const NAMESPACES = ["common", "nav", "shell", "orchestration", "inspector", "board", "overview", "capacity", "explorer", "workflow", "pipelines", "dlq", "results", "analytics", "config", "files", "auth", "hermes", "errors", "status", "catalog", "issues", "issuesTriage", "issuesReport", "issuesAnalysis", "issuesCategories", "issuesDetail"] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
 /** ko is the schema for every locale. */
@@ -85,9 +89,11 @@ export const ko = {
   status: ko_status,
   catalog: ko_catalog,
   issues: ko_issues,
-  issuesA: ko_issuesA,
-  issuesB: ko_issuesB,
-  issuesC: ko_issuesC,
+  issuesTriage: ko_issuesTriage,
+  issuesReport: ko_issuesReport,
+  issuesAnalysis: ko_issuesAnalysis,
+  issuesCategories: ko_issuesCategories,
+  issuesDetail: ko_issuesDetail,
 };
 export type Schema = typeof ko;
 /** The full message set a locale must provide. */
@@ -116,9 +122,11 @@ export const en = {
   status: en_status,
   catalog: en_catalog,
   issues: en_issues,
-  issuesA: en_issuesA,
-  issuesB: en_issuesB,
-  issuesC: en_issuesC,
+  issuesTriage: en_issuesTriage,
+  issuesReport: en_issuesReport,
+  issuesAnalysis: en_issuesAnalysis,
+  issuesCategories: en_issuesCategories,
+  issuesDetail: en_issuesDetail,
 } satisfies LocaleMessages;
 
 export const MESSAGES: Record<Locale, LocaleMessages> = { ko, en };

@@ -1,18 +1,13 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
-import { IssuesIndex } from "@/components/atlas/issues-index";
+import { IssuesTriage } from "@/components/atlas/issues/triage";
 import { getT } from "@/i18n/server";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const t = await getT("nav");
-  return { title: t("issues.title") };
+  const [nav, v] = await Promise.all([getT("nav"), getT("issuesTriage")]);
+  return { title: `${v("view.tab")} · ${nav("issues.title")}` };
 }
 
-/** I-01 · Issue Report — design candidate chooser (A/B/C). */
+/** I-01 · Issue Report — Triage view (default). The frame comes from ./layout.tsx. */
 export default function Page() {
-  return (
-    <Suspense>
-      <IssuesIndex />
-    </Suspense>
-  );
+  return <IssuesTriage />;
 }

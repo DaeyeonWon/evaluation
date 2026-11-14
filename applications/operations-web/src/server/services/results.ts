@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { LANG_CODES, PIPELINE_VERSIONS } from "@/lib/catalog";
-import type { AgentFunction, FailureReason, Market, ResultDetail, ResultFileMeta, ResultRow, ResultsPage } from "@/lib/types";
+import type { AgentFunction, Division, FailureReason, Market, Region, ResultDetail, ResultFileMeta, ResultRow, ResultsPage } from "@/lib/types";
 import { Query, notFound, paginate } from "../http";
 import { getEngine } from "../mock/runtime";
 import { countBy, resultsAggregates, toSummary } from "../mock/projections";
@@ -56,7 +56,13 @@ export function filterResults(req: NextRequest): { rows: ResultRow[]; q: Query; 
   const predicted = q.list("intent_predicted");
   const osv = q.list("os_version");
   const oneUi = q.list("one_ui_version");
+  const divisions = q.list("division");
+  const regions = q.list("region");
+  const bixby = q.list("bixby_version");
   rows = rows.filter((r) => {
+    if (divisions && !divisions.includes(r.division)) return false;
+    if (regions && !regions.includes(r.region)) return false;
+    if (bixby && !bixby.includes(r.bixby_version)) return false;
     if (fns && !fns.includes(r.agent_function)) return false;
     if (markets && !markets.includes(r.market)) return false;
     if (patterns && !patterns.includes(r.utterance_pattern)) return false;
@@ -121,6 +127,9 @@ export function resultsPage(req: NextRequest): ResultsPage {
       language: countBy(rows, (r) => r.language) as Partial<Record<LangCode, number>>,
       agent_function: countBy(rows, (r) => r.agent_function) as Partial<Record<AgentFunction, number>>,
       market: countBy(rows, (r) => r.market) as Partial<Record<Market, number>>,
+      division: countBy(rows, (r) => r.division) as Partial<Record<Division, number>>,
+      region: countBy(rows, (r) => r.region) as Partial<Record<Region, number>>,
+      bixby_version: countBy(rows, (r) => r.bixby_version),
     },
   };
 }
@@ -158,7 +167,7 @@ export function resultsCsv(req: NextRequest): Response {
   const cols = q.list("columns");
   const csv = e.results.toCSV(rows, { bom: true, ...(cols ? { columns: cols } : {}) });
   const date = e._internal.kstDate(e.now());
-  const suffix = [range.preset !== "today" ? range.preset : null, q.list("language")?.join("-"), q.list("version")?.join("-"), q.list("model_version")?.join("-"), q.str("result")?.toLowerCase(), q.list("ids") ? "selected" : null]
+  const suffix = [range.preset !== "today" ? range.preset : null, q.list("language")?.join("-"), q.list("division")?.join("-"), q.list("region")?.join("-"), q.list("bixby_version")?.join("-"), q.list("version")?.join("-"), q.list("model_version")?.join("-"), q.str("result")?.toLowerCase(), q.list("ids") ? "selected" : null]
     .filter(Boolean)
     .join("_");
   const custom = q.str("filename")?.replace(/[^\w.\-가-힣]/g, "_");

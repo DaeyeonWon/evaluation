@@ -84,7 +84,11 @@ import type {
   ResolvedRange,
   WorkflowPipelineRuns,
   InsightList,
+  IssueBreakdown,
   IssueDetail,
+  IssueDim,
+  IssueDimMatrix,
+  IssueMatrixMetric,
   IssueFacets,
   IssueListResponse,
   IssuePatch,
@@ -321,6 +325,9 @@ export interface ResultQuery extends QueryParams {
   intent_predicted?: string | string[];
   os_version?: string | string[];
   one_ui_version?: string | string[];
+  division?: string | string[];
+  region?: string | string[];
+  bixby_version?: string | string[];
   sort?: "eval_desc" | "eval_asc" | "score_asc" | "score_desc" | "latency_desc" | "latency_asc" | "id_asc";
   page?: number;
   pageSize?: number;
@@ -400,13 +407,34 @@ export interface IssueQuery extends RangeQuery {
   failure_reason?: string | string[];
   os_version?: string | string[];
   one_ui_version?: string | string[];
+  /** Mobile | Wearable | Audio | TV | Appliance */
+  division?: string | string[];
+  /** KR | NA | EU | JP | LATAM */
+  region?: string | string[];
+  bixby_version?: string | string[];
   severity?: string | string[];
   status?: string | string[];
   novelty?: string | string[];
   severity_class?: string | string[];
+  /** issue taxonomy (IssueCategory) */
+  category?: string | string[];
+  /** UserImpactType */
+  user_impact?: string | string[];
+  /** DevMissType */
+  dev_miss?: string | string[];
+  must_handle?: boolean | "true" | "false";
   q?: string;
   min_score?: number;
   group_by?: "signature" | "pattern";
+  /** GET /issues only: group issues by a dim (row dims: dominant value) and optionally sub-group them */
+  group?: IssueDim;
+  subgroup?: IssueDim;
+  /** items per group (1–200, default 10) */
+  group_size?: number;
+  /** return only this group (and `subgroup_key`), paged by `group_page` */
+  group_key?: string;
+  subgroup_key?: string;
+  group_page?: number;
   sort?: "score_desc" | "count_desc" | "fail_rate_desc" | "delta_desc" | "recent_desc" | "first_seen_desc";
   page?: number;
   pageSize?: number;
@@ -512,6 +540,10 @@ export const api = {
   issueFacets: (q?: IssueQuery, signal?: AbortSignal) => get<IssueFacets>("/issues/facets", q, signal),
   issue: (id: string, q?: IssueQuery, signal?: AbortSignal) => get<IssueDetail>(`/issues/${enc(id)}`, q, signal),
   issuePatterns: (q?: IssueQuery & { kind?: string | string[]; limit?: number }, signal?: AbortSignal) => get<PatternList>("/issues/patterns", q, signal),
+  /** one card per value of `dim` (severity counts, FAIL rate + delta, volume, trend, top issues, top new pattern, share) */
+  issueBreakdown: (q: IssueQuery & { dim: IssueDim; limit?: number }, signal?: AbortSignal) => get<IssueBreakdown>("/issues/breakdown", q, signal),
+  /** heatmap over any two dims; axes capped by max_x / max_y (rest folded into "__other__") */
+  issueMatrix: (q: IssueQuery & { x: IssueDim; y: IssueDim; metric?: IssueMatrixMetric; max_x?: number; max_y?: number }, signal?: AbortSignal) => get<IssueDimMatrix>("/issues/matrix", q, signal),
   issueInsights: (q?: IssueQuery, signal?: AbortSignal) => get<InsightList>("/issues/insights", q, signal),
   /** issues:write (Operator / Admin) */
   patchIssue: (id: string, body: IssuePatch) => patch<IssuePatchResult>(`/issues/${enc(id)}`, body),

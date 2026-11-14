@@ -1,0 +1,10 @@
+/*
+ * Issue Report — single-issue page (/issues/[id]). Owned by the Detail view engineer.
+ * Scope every rule under [data-variant="atlas"] .iss-det; prefix keyframes with `at-issdet-`.
+ * Shared tokens (--sev-p0…p3, --cls-*, --iss-new) come from atlas-issues.css.
+ */
+[data-variant="atlas"] .iss-det {
+  & .iss-det-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  & .iss-det-title { margin: 10px 0 4px; font-size: var(--t-lg); font-weight: 800; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+  & .iss-det-meta { margin: 0 0 10px; color: var(--ink-2); font-size: var(--t-xs); }
+}

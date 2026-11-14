@@ -21,6 +21,11 @@ export const ENUM_VARS: Record<string, string> = {
   cls: "severityClass",
   status: "status",
   severity: "severity",
+  division: "division",
+  region: "region",
+  category: "category",
+  user_impact: "userImpact",
+  dev_miss: "devMiss",
 };
 
 export function issueVars(t: T, vars: IssueText["vars"]): Record<string, string | number> {

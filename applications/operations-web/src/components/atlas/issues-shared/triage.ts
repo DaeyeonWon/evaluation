@@ -1,6 +1,6 @@
 "use client";
 /**
- * Issue Report — triage + export actions with localized toasts. SHARED (do not edit in A/B/C).
+ * Issue Report — triage + export actions with localized toasts. SHARED by every view (issues/*); views do not edit it (ask the framework engineer).
  *
  *   const tri = useIssueTriage();
  *   await tri.setStatus(issue, "TRIAGED", { reason })   // toast "<issue title> → Triaged" (id without a title); 403 → localized toast

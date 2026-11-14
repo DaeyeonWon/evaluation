@@ -1,6 +1,6 @@
 "use client";
 /**
- * Issue Report — localized text for server-generated issue content. SHARED (do not edit in A/B/C).
+ * Issue Report — localized text for server-generated issue content. SHARED by every view (issues/*); views do not edit it (ask the framework engineer).
  *
  *   const fx = useIssueFormat();
  *   fx.text(issue.title)            // "smartthings.door_unlock — 확인 없이 실행 (안전)"
@@ -27,6 +27,12 @@ const VALUE_GROUP: Record<string, string> = {
   status: "status",
   novelty: "novelty",
   severity: "severity",
+  // merge dims (labels added by the data engineer in the shared `issues` namespace; raw value until then)
+  category: "category",
+  division: "division",
+  region: "region",
+  user_impact: "userImpact",
+  dev_miss: "devMiss",
 };
 
 export function useIssueFormat() {

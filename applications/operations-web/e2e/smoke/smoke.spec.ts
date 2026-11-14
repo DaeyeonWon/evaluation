@@ -25,9 +25,10 @@ const ROUTES = [
   "/dlq",
   "/results",
   "/issues",
-  "/issues/a",
-  "/issues/b",
-  "/issues/c",
+  "/issues/categories",
+  "/issues/analysis",
+  "/issues/report",
+  "/issues/:first", // replaced by the top issue id (GET /api/v1/issues) in the sweep
   "/analytics",
   "/config",
   "/hermes", // Admin: "not configured" placeholder (HERMES_DASHBOARD_URL unset)
@@ -58,7 +59,9 @@ for (const locale of LOCALES) {
     test.setTimeout(ROUTES.length * 45_000);
     await signIn(page, ADMIN, locale);
     const errors = watchConsole(page);
-    for (const route of ROUTES) {
+    const top = (await (await page.context().request.get("/api/v1/issues?pageSize=1")).json()) as { items: { id: string }[] };
+    for (const r of ROUTES) {
+      const route = r === "/issues/:first" ? `/issues/${encodeURIComponent(top.items[0]?.id ?? "iss-missing")}` : r;
       const res = await page.goto(route, { waitUntil: "load", timeout: 90_000 });
       expect(res?.status(), route).toBeLessThan(400);
       await expect(page.locator("html")).toHaveAttribute("lang", locale);
@@ -104,6 +107,36 @@ test("login page lists the demo users and the shared fonts load", async ({ page 
     return out;
   });
   expect(ok).toEqual({ "--font-atlas-sans": true, "--font-atlas-mono": true });
+});
+
+test("legacy Issue Report candidate routes 308 to the merged views, keeping the query", async ({ page }) => {
+  await signIn(page, ADMIN, "ko");
+  const request = page.context().request;
+  for (const [from, to] of [
+    ["/issues/a", "/issues"],
+    ["/issues/b", "/issues/report"],
+    ["/issues/c", "/issues/analysis"],
+  ]) {
+    const res = await request.get(`${from}?market=KR,US&range=7d`, { maxRedirects: 0 });
+    expect(res.status(), from).toBe(308);
+    const loc = new URL(res.headers()["location"], "http://x");
+    expect(loc.pathname, from).toBe(to);
+    expect(loc.searchParams.get("market"), from).toBe("KR,US");
+    expect(loc.searchParams.get("range"), from).toBe("7d");
+  }
+});
+
+test("Issue Report view switcher keeps the filter query", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop", "desktop only");
+  await signIn(page, ADMIN, "en");
+  await page.goto("/issues?division=TV&severity=P0,P1&lens=dev");
+  const nav = page.locator(".isf-views");
+  await nav.getByRole("link").nth(2).click();
+  await expect(page).toHaveURL(/\/issues\/analysis\?/);
+  const u = new URL(page.url());
+  expect(u.searchParams.get("division")).toBe("TV");
+  expect(u.searchParams.get("severity")).toBe("P0,P1");
+  expect(u.searchParams.get("lens")).toBeNull(); // Triage-only view state is dropped
 });
 
 test("API: overview + CSV headers (signed in)", async ({ page }) => {

@@ -22,6 +22,7 @@ It is the authoritative API contract (the old FOUNDATION.md was removed; see `do
 | Legacy DAG | `Workflow.dag`, `Attempt.dag`, `WorkflowDag.nodes`, `current_node`, `error.node`, `DeadLetter.failed_node` and `metrics.runningByComponent` are kept in the **six legacy phases** as a derived projection. Use the job endpoints for the real DAG. |
 | Search | `GET /files/search` (file name at every stage). `GET /stages/[id]` returns `objects` for every stage and accepts `?q=`. |
 | Issue Report | New `/issues*` endpoints (ranked FAIL clusters, criticality factors, new patterns, insights, triage `PATCH` with `issues:write`, CSV + Markdown export), SSE `issue`, result columns `agent_function`, `agent_function_predicted`, `market`, `os_version`, `one_ui_version`, `utterance_pattern`. See §8. |
+| Issue dimensions | Result columns `division`, `region`, `bixby_version` (domain.ts tables), issue taxonomy `category` + triage lenses `user_impact_type` / `dev_miss_type` / `must_handle`, new `/issues/breakdown` and `/issues/matrix`, `GET /issues?group=&subgroup=`, richer facets. See §8.10–8.11. |
 | Results | `model_version` (e.g. `bixby-nlu-2026.10`, independent of `pipeline_version`), plus `pipeline_id`. Both are filters and facets (`aggregates.byModelVersion`, `aggregates.byPipeline`, `facets`). |
 | Fixes | Config drift `changedBy`/`changedAt`/`reason` update on every PATCH (config, language capacity, global capacity). `api.gcsObjects({ delimiter: "" })` now sends `delimiter=` (flat listing). |
 | SSE | New event `job` (`PipelineJobTransition`) for root and child job status changes. |
@@ -441,18 +442,26 @@ novelty), `issues-store.ts` (triage lifecycle), `issues-text.ts` (tokenizer, lex
 | `market` | `KR` (ko) · `US`/`GB` (en) · `JP` (ja) · `ES`/`MX` (es) |
 | `os_version`, `one_ui_version` | e.g. `Android 16` / `One UI 8.5`, `Wear OS 6` / `One UI 8 Watch`, `Tizen 9.0` / `One UI Tizen` |
 | `utterance_pattern` | `up-{lang}-{hash}` of the utterance template (slot values replaced by placeholders) |
+| `division` | `Mobile · Wearable · Audio · TV · Appliance` — `device_type` through `domain.ts` `deviceDivision` (Galaxy S26 / Z Fold7 / Tab S11 → Mobile, Galaxy Watch → Wearable, Galaxy Buds → Audio, TV / Neo QLED → TV, Family Hub / Bespoke AI Washer / Oven → Appliance; unknown → `defaultDivision`) |
+| `region` | `KR · NA · EU · JP · LATAM` — `market` through `marketRegion` (KR→KR, US→NA, GB/ES→EU, JP→JP, MX→LATAM) |
+| `bixby_version` | Bixby client version on the device, semver with optional pre-release (`3.6.12`, `4.0.1`, `4.0.3`, `4.1.0-beta`); known versions in `bixbyVersions` (oldest first), sorted by semver (`4.1.0-beta` < `4.1.0`) |
 
 `GET /results` and `/results/csv` accept `agent_function`, `market`, `utterance_pattern`, `intent_predicted`,
-`os_version`, `one_ui_version` filters; `ResultsPage.facets` adds `agent_function` and `market`.
+`os_version`, `one_ui_version`, `division`, `region`, `bixby_version` filters; `ResultsPage.facets` adds `agent_function`,
+`market`, `division`, `region`, `bixby_version`. The CSV appends the three columns after `utterance_pattern`.
+Catalog: `DIVISIONS`, `DIVISION_INFO`, `DEVICE_DIVISION`, `REGIONS`, `REGION_INFO`, `MARKET_REGION`, `BIXBY_VERSIONS`,
+`BIXBY_VERSION_INFO`, `CAPABILITIES` (`src/lib/catalog.ts`, from `domain.ts`); `DEVICES` lists every concrete model.
 
 ### 8.2 Endpoints (all GET need `view`; all ranged; errors localized)
 
 | Endpoint | Returns |
 | --- | --- |
-| `GET /issues` | `IssueListResponse` = `{ items: Issue[], total, page, pageSize, range, baseline, unfiltered_total, factor_weights }` |
+| `GET /issues` | `IssueListResponse` = `{ items: Issue[], total, page, pageSize, range, baseline, unfiltered_total, factor_weights }`; with `group=<dim>` also `group`, `subgroup`, `groups: IssueGroup[]` (§8.11) |
+| `GET /issues/breakdown` | `IssueBreakdown` — one card per value of `dim` (§8.11) |
+| `GET /issues/matrix` | `IssueDimMatrix` — any two dims × `metric` (§8.11) |
 | `GET /issues/summary` | `IssueSummary`: `kpis`, `severity_distribution`, `class_distribution`, `status_distribution`, `factor_weights`, `factor_profile`, `columns` (per-column fail stats with baseline deltas), `trend` (hour ≤ 48 h, else day), `matrix` (agent_function × language), `market_matrix` (agent_function × market), `top_movers`, `top_issues` |
-| `GET /issues/facets` | `IssueFacets`: values + FAIL counts per column (each ignoring its own filter) and issue counts per severity / status / novelty / severity_class |
-| `GET /issues/{id}` | `IssueDetail` = `Issue` + `utterances` (paged, newest first, `page`/`pageSize` ≤ 200), `trend`, `breakdown` (language, market, device, model_version, pipeline_version, os_version, one_ui_version with baseline), `workflows`, `similar` |
+| `GET /issues/facets` | `IssueFacets`: per column (incl. division, region, bixby_version) values with `count` (= FAILs), `fails`, `total`, `fail_rate`, `baseline_fail_rate`, `delta`, `issues` — each ignoring its own filter; per issue-level dim (severity, status, novelty, severity_class, category, user_impact, dev_miss, must_handle) `count` (= issues) + `fails` |
+| `GET /issues/{id}` | `IssueDetail` = `Issue` + `utterances` (paged, newest first, `page`/`pageSize` ≤ 200), `trend`, `breakdown` (language, market, device, model_version, pipeline_version, os_version, one_ui_version, division, region, bixby_version with baseline), `workflows`, `similar` (relations same_intent · same_function_reason · same_prediction · **same_category**, max 8), `same_category` (issues of the same category, max 8) |
 | `GET /issues/patterns` | `PatternList` = `{ items: NewPattern[], total, range, baseline, terms: NovelTerm[] }`; extra `kind`, `limit` (≤ 200) |
 | `GET /issues/insights` | `InsightList` = `{ items: IssueInsight[], total, range, baseline }` |
 | `PATCH /issues/{id}` | `IssuePatchResult`; body `IssuePatch { status?, owner?, note?, ticket_id?, reason? }`; needs `issues:write`; Idempotency-Key supported; audited `ISSUE_UPDATE`; SSE `issue` |
@@ -460,9 +469,11 @@ novelty), `issues-store.ts` (triage lifecycle), `issues-text.ts` (tokenizer, lex
 | `GET /issues/report.md` | Markdown summary in the request locale (KPIs, insights, top issues with reasons and score breakdown, new patterns, triage counts). Absolute evidence links to `/results` keep the request range; optional `issue_base=/issues/a` adds issue deep links (`?issue=<id>`) |
 
 Query params (all optional): `range`/`from`/`to`; row filters `agent_function, capsule, intent, language,
-market, device, model_version, pipeline, pipeline_version, failure_reason, os_version, one_ui_version`
-(comma lists; applied before clustering); issue filters `severity (P0..P3), status, novelty (new|recurring),
-severity_class, q, min_score`; `group_by=signature|pattern`; `sort=score_desc|count_desc|fail_rate_desc|delta_desc|recent_desc|first_seen_desc`; `page`, `pageSize` (≤ 500, default 25).
+market, device, model_version, pipeline, pipeline_version, failure_reason, os_version, one_ui_version, division, region,
+bixby_version` (comma lists; applied before clustering); issue filters `severity (P0..P3), status, novelty (new|recurring),
+severity_class, category, user_impact, dev_miss, must_handle (true|false), q, min_score`; `group_by=signature|pattern`; `sort=score_desc|count_desc|fail_rate_desc|delta_desc|recent_desc|first_seen_desc`; `page`, `pageSize` (≤ 500, default 25).
+Every `/issues*` endpoint (list, summary, facets, breakdown, matrix, detail, patterns, insights, export.csv, report.md) accepts all of them.
+`bixby_version` is a release column: when the selected versions have < 50 baseline rows the baseline drops that filter (`baseline.relaxed_columns`).
 Errors: `domain.issueNotFound` (404), `domain.issueTransition` (409), `domain.issueTicketRequired` /
 `domain.issueTicketInvalid` / `domain.unknownOperator` / `validation.*` (400), `permission.*` (403).
 
@@ -484,7 +495,7 @@ patterns in `Issue.patterns[]`. Minimum support: 3 FAILs (2 for safety / policy)
 | `severity` | 25 | severity class: safety 1.0 · policy 0.7 · wrong_action 0.45 · quality 0.2 |
 | `trend` | 15 | Poisson z of FAILs in the compare window vs `expected = (baseline_count + 1) / (baseline_scope + 1) × compare_scope` (scope = rows with the same `intent_expected`; 0.5 when the intent is new); value `z / 5` clipped to [0, 1] |
 | `regression` | 15 | newest vs previous `model_version` and `pipeline_version` (max of both), counted only since the newest version's release (co-existence window), each ≥ 6 scope rows, ≥ 3 FAILs on the newest, one-sided two-proportion z ≥ 1.64; value `clip(max((rate_new − rate_prev) / max(rate_prev, 2%) / 1.5, (rate_new − rate_prev) / 25pp)) × clip(z / 3, 0.6, 1)` (saturates at 2.5× or +25 pp). When no axis qualifies, `detail` carries `why` (`insufficient_sample` · `not_significant` · `no_increase`) with `candidate_axis`, `current`, `previous`, `current_rate`, `previous_rate` of the closest candidate |
-| `reach` | 10 | `0.4·markets/6 + 0.3·devices/5 + 0.3·languages/4` |
+| `reach` | 10 | `0.4·markets/6 + 0.3·divisions/5 + 0.3·languages/4` (divisions = the five device families; identical to the former 5-device count) |
 | `novelty` | 15 | new cluster (intent unseen in the baseline, or 0 baseline FAILs where ≥ 1.5 were expected): `0.35 + 0.65 × novel-pattern share`; otherwise `0.7 × novel-pattern share`; 0 without a sufficient baseline |
 
 Severity class (`severity_class`): `POLICY_VIOLATION` on a lock/door/gas/oven/garage/window intent or on
@@ -496,7 +507,7 @@ Level: P0 ≥ 60 · P1 ≥ 45 · P2 ≥ 30 · P3. Floors: safety with ≥ 3 FAIL
 
 `reasons[]` are `IssueText { key, vars }` under the `issues` i18n namespace (`reasons.safety, policy,
 wrongAction, wrongSlot (SLOT_ERROR with the right intent: most frequent `want → got` value pair parsed from judge reasons), wrongSlotNoPair, quality, regression, spike, newCluster, novelPattern, concentration, reach, volume,
-baselineInsufficient`), ordered by weight. `title` is `titles.<failure_reason>` or `titles.safety`. Enum-coded vars
+baselineInsufficient`), ordered by weight (plus `reasons.bixbyRegression`; `reasons.concentration` checks one_ui_version, division, device, market, bixby_version in that order). `title` is `titles.<failure_reason>` or `titles.safety`. Enum-coded vars
 (`fn, reason, axis, column, market, kind, cls, status, severity`) are translated by `formatIssueText()`
 (`src/lib/issue-text.ts`); rates are already percentages.
 
@@ -522,8 +533,11 @@ and digits, plus multi-word product names (`PRODUCT_TERMS`); a **novel term** ha
 ranked by `score`. Kinds: `overall`, `safety`, `critical` (top 3 non-safety P0/P1; `insights.criticalSameIntent` when predicted = expected), `regression` (strongest),
 `spike` (largest z among recurring), `new_pattern` (summary + top failing patterns; `insights.newPatternSameIntent` when every
 FAIL kept the expected intent, naming the dominant failure reason and an actual response), `market` (largest market
-delta), `hotspot` (agent_function × language cell), `concentration` (FAILs ≥ 80 % on one One UI / device /
-market that is < 50 % of traffic), `improvement`. `evidence.results` opens `/results`; `evidence.filter`
+delta), `hotspot` (agent_function × language cell), `concentration` (FAILs ≥ 80 % on one One UI / division / device /
+market / Bixby version that is < 50 % of traffic), `improvement`, `division` / `region` (largest FAIL-rate delta ≥ 1.5 pp, ≥ 30 rows;
+`insights.division|region`), `bixby_version` (`insights.bixbyVersion`: per division × agent_function, the division's newest Bixby
+version vs the previous one, rows since the newest first appeared in that division, ≥ 15 rows each, ≥ 5 FAILs, one-sided z ≥ 2.33;
+strongest delta; evidence filter `division, bixby_version, agent_function`; e.g. "Bixby 4.0.3 on TV: media_play FAIL +34 pp"). `evidence.results` opens `/results`; `evidence.filter`
 reproduces it on `/issues`.
 
 ### 8.8 Triage lifecycle
@@ -544,4 +558,102 @@ medical / financial advice (policy), ko code-switched toggles (`와이파이 off
 regression on v1.2-rc, Gemini hand-off (new, mostly healthy) and a camera baseline. Recent scenarios are gated
 by days before `BASE_NOW`, so they follow the day re-seed.
 
-Performance (dev, warm): `/issues*` 5–25 ms; first call per range ≈ 60–140 ms.
+Issue Report dimensions (own streams `|dim`, `|dim2`, `|model` — every pre-existing column of every row is byte-identical):
+`division` from the base device; `bixby_version` from `bixbyRollout[division]` (weight × linear ramp since `sinceDays`);
+the base device is re-labelled to a concrete model (`deviceModels`) after `deviceOs()` (rows a scenario put on a device keep it).
+Two more `own` scenarios at the end of `SCENARIOS` re-label FAIL rows only (no PASS/FAIL change, sources are weather /
+general_qa FAILs so no seeded issue loses rows): **`tv_bixby_403_media`** — the Bixby 4.0.3 TV OTA (last ~9 days) routes
+existing music phrasings (`{genre} 틀어줘`, `play {genre}`, …) to `video.search`; together with 4.0.3 being drawn more
+often for TV media FAILs this yields the Bixby regression (4.0.3 vs 4.0.1 on TV, media_play ≈ +35 pp, `iss-11n6j97`
+`music.play_genre → video.search`, `bixby_regression`, dev lens `regression`); **`buds_navigation_unsupported`** — Galaxy
+Buds asked for directions (capability table: navigation is not on Audio) → the out-of-scope example (`must_handle=false`).
+
+Performance (dev, warm): `/issues*` 3–35 ms (breakdown / matrix ≤ 70 ms over 30 d); first call per range ≈ 60–140 ms.
+
+### 8.10 Issue taxonomy and triage lenses (`issues-taxonomy.ts`)
+
+Deterministic rules over real columns only (failure_reason, intent pair, agent_function / agent_function_predicted,
+judge_reason keywords, the pattern template with slot placeholders removed, division, bixby_version) plus the engine's
+severity class, regression factor and Bixby regression. The same rules classify one row (FAIL rows outside any issue,
+baseline rows) so dims have baselines. Every issue carries the result and a localized why (`IssueText`).
+
+`Issue.category` (+ `category_reason`, `categoryReason.*`) — first match wins:
+
+| # | category | rule |
+| ---: | --- | --- |
+| 1 | `safety` | severity class safety |
+| 2 | `policy` | severity class policy |
+| 3 | `new_feature` | ≥ 50 % of FAILs: expected `galaxy_ai.*`, a product / feature term in the template (`PRODUCT_TERMS` minus service names) or judge "기능명" |
+| 4 | `locale` | ≥ 50 % of FAILs code-switched (template with a Latin word in ko/ja, English lexicon word in es, or judge "code-switching") or time-zone errors (judge "시간대 / timezone / UTC") |
+| 5 | `timeout` | `TIMEOUT` |
+| 6 | `asr` | `ASR_ERROR` |
+| 7 | `wrong_action` | severity class wrong_action with predicted ≠ expected |
+| 8 | `slot` | `SLOT_ERROR` |
+| 9 | `misroute` | `INTENT_MISMATCH` |
+| 10 | `response_quality` | otherwise |
+
+`must_handle` (+ `must_handle_reason`, `mustHandle.*`): `POLICY_VIOLATION` → always (guardrail); else true when ≥ 50 % of
+the FAIL rows run on a device / Bixby version that `domain.ts` `capabilities` supports (first intent-prefix match: listed
+division or extra device, and `bixby_version ≥ minBixby`; no match = supported everywhere). Otherwise false with
+`unsupportedDevice` / `unsupportedVersion`.
+
+`user_impact_type` (user lens, `type_reason.user_impact`, `userImpactReason.*`) — first match: `safety_privacy` (safety class;
+or POLICY_VIOLATION with privacy keywords / on call_message, calendar) · `inappropriate_content` (policy class) · `degraded`
+(TIMEOUT; SLOT_ERROR whose judge reasons mostly ask again for a missing value) · `wrong_action` (wrong_action class, or
+SLOT_ERROR on a task intent) · `minor` (RESPONSE_QUALITY, mostly "verbose") · `task_blocked` (RESPONSE_QUALITY mostly
+"evasive"; or a task intent — not general_qa / weather / a query intent — that was not carried out) · `misunderstood`.
+
+`dev_miss_type` (dev lens, `type_reason.dev_miss`, `devMissReason.*`) — first match: `out_of_scope` (must_handle = false) ·
+`guardrail_miss` (POLICY_VIOLATION) · `regression` (regression factor ≥ 0.15, or `bixby_regression`) · `new_feature_gap`
+(category new_feature) · `locale_gap` (category locale) · `performance` (TIMEOUT) · `asr_robustness` (ASR_ERROR) ·
+`slot_extraction` (SLOT_ERROR) · `routing` (INTENT_MISMATCH to another agent function) · `supported_intent_failed`.
+
+Both lenses group by the same impact level = `severity` (P0 Critical · P1 High · P2 Medium · P3 Low, `issues.impactLevel.*`).
+The dev lens is `must_handle=true` by default (UI) and sorted by `score_desc`.
+
+`Issue.bixby_regression` (`IssueBixbyRegression | null`, informational — no score change): on the issue's dominant division,
+newest vs previous Bixby version with ≥ 10 scope rows each (same intent_expected, rows since the newest version first appeared
+in that division), ≥ 4 FAILs on the newest, rate +2 pp and one-sided z ≥ 2.33.
+
+Other new `Issue` fields: `divisions`, `regions`, `bixby_versions` (by FAIL count), `dominant` (`IssueDominant`: the value with
+the most FAILs for every row dim — group membership on row dims).
+
+### 8.11 Dimensions: breakdown, matrix, grouped list (`issues-dims.ts`)
+
+`IssueDim` = row dims (`IssueColumn`: agent_function, capsule, intent, language, market, device, model_version, pipeline,
+pipeline_version, failure_reason, os_version, one_ui_version, division, region, bixby_version) + issue-level dims
+(`IssueTagDim`: category, user_impact, dev_miss, must_handle, severity, status, novelty, severity_class). A FAIL row takes its
+issue's value on issue-level dims (rows of a signature that is an issue now — e.g. baseline rows — too; other FAIL rows:
+the §8.10 rules on the row, severity / status / novelty: none); PASS rows have none. Hence issue-level dims do not split
+PASS rows: their `total` is every row in scope and `fail_rate` is that value's share of the FAIL rate (for category /
+user_impact / dev_miss / must_handle every FAIL row has a value, so Σ over values = overall FAIL rate).
+
+Counted FAILs: without issue-level filters every FAIL row counts. With them a FAIL row counts when its issue passes the
+issue filters; rows outside any issue count only for the taxonomy filters (category / user_impact / dev_miss / must_handle,
+by row tags). Totals never change. (`/issues/summary` keeps its legacy semantics: row stats ignore issue-level filters.)
+
+`IssueDimStat { value, total, fails, fail_rate, baseline_total, baseline_fails, baseline_fail_rate, delta (pp), issues }`.
+
+- **`GET /issues/breakdown?dim=<IssueDim>[&limit=50]`** → `IssueBreakdown { range, baseline, dim, bucket, t[] (bucket starts),
+  totals: IssueDimStat, items: IssueBreakdownItem[], truncated }`. Item = `IssueDimStat` + `label` (`IssueText` or null),
+  `rank`, `share` (% of counted FAILs), `by_severity` (issues touching the value), `trend[]` (FAILs per bucket — hour ≤ 48 h,
+  else day), `trend_rate[]`, `top_issues` (3 by score, + `count_in_value`, `category`, `user_impact_type`, `dev_miss_type`,
+  `signature`), `top_pattern` (new pattern with the most compare-window rows in the value, or null). Items: values with counted
+  FAILs (and a selected row-dim value), most FAILs first. Missing / unknown `dim` → 400.
+- **`GET /issues/matrix?x=<IssueDim>&y=<IssueDim>&metric=fail_rate|fail_count|delta|issue_count[&max_x=12&max_y=12]`**
+  (2–40) → `IssueDimMatrix { range, baseline, x, y, metric, x_values, y_values, x_labels, y_labels, x_totals, y_totals,
+  cells: IssueDimMatrixCell[] (y-major), domain: [min,max] | null, folded: { x, y } }`. Cell = `IssueDimStat` (without
+  `value`) + `x`, `y`, `value` (the metric; null without rows / baseline), `top_issue_id` (highest score). Axis order: natural
+  for enumerated dims (severity P0→P3, category / lens order, division, region, market, language, agent_function,
+  failure_reason, Bixby semver), else by FAILs. Beyond `max_*` the smallest values fold into `"__other__"` (label
+  `dimValue.other`). A cell's total ignores an issue-level axis.
+- **`GET /issues?group=<IssueDim>[&subgroup=<IssueDim>&group_size=10&group_key=…&subgroup_key=…&group_page=1]`** adds
+  `groups: IssueGroup[]` (`{ key, label, count, fails, by_severity, max_score, items, page, pageSize, subgroups? }`) over the
+  filtered, sorted issues. Row dims use `Issue.dominant`, so every issue is in exactly one group. Natural group order for
+  enumerated dims, else by top score; items keep `sort`. `group_key` (+ `subgroup_key`) returns only that group / subgroup,
+  its items paged by `group_page`. `items` / `total` / `page` keep their usual meaning.
+- Labels (`issues` namespace): `agentFunction.*`, `market.*`, `failureReason.*`, `severity.*`, `status.*`, `novelty.*`,
+  `severityClass.*`, `category.*` (+ `categoryHelp.*`), `userImpact.*` (+ `userImpactHelp.*`), `devMiss.*` (+ `devMissHelp.*`),
+  `mustHandleValue.true|false`, `division.*`, `region.*`, `language.*`, `impactLevel.*`, `dimValue.other`; device, versions,
+  intent, capsule, pipeline: the raw value. `ENUM_VARS` (`src/lib/issue-text.ts`) also translates `division`, `region`,
+  `category`, `user_impact`, `dev_miss` vars.

@@ -27,7 +27,7 @@ parts.push(`/**
  */
 import { domain } from "@/config/domain";
 import type {
-  AttemptStatus, Capsule, ComponentSpec, DagTemplateNode, DlqStatus, DomainLanguage, EventCatalogEntry, FailureCategory,
+  AttemptStatus, BixbyVersionInfo, CapabilityRule, Capsule, ComponentSpec, Division, Market, Region, DagTemplateNode, DlqStatus, DomainLanguage, EventCatalogEntry, FailureCategory,
   FailureCategoryMetaEntry, FailureReason, FailureReasonMetaEntry, LangCode, MetaEntry, ModelVersionInfo,
   NodeStatus, Operator, PipelineDef, ResultColumn, RolePermission, Severity, SeverityMetaEntry, Stage, StageEdge, StageId,
   StatusMetaEntry, Tone, WorkflowStatus,
@@ -87,6 +87,17 @@ export const COMPONENTS: Record<string, ComponentSpec> = domain.components;
 /** Models under test (results.model_version) — distinct from pipeline_version. */
 export const MODELS: ModelVersionInfo[] = domain.models;
 export const MODEL_VERSIONS: string[] = MODELS.map((m) => m.id);
+/** Issue Report dimensions (docs/data-contract.md §8.1): device → division, market → region, Bixby versions, capability table. */
+export const DIVISIONS: Division[] = (domain.divisions ?? []).map((d) => d.id);
+export const DIVISION_INFO = domain.divisions ?? [];
+export const DEVICE_DIVISION: Record<string, Division> = domain.deviceDivision ?? {};
+export const REGIONS: Region[] = (domain.regions ?? []).map((r) => r.id);
+export const REGION_INFO = domain.regions ?? [];
+export const MARKET_REGION: Record<Market, Region> = domain.marketRegion ?? ({} as Record<Market, Region>);
+export const BIXBY_VERSION_INFO: BixbyVersionInfo[] = domain.bixbyVersions ?? [];
+/** oldest first */
+export const BIXBY_VERSIONS: string[] = BIXBY_VERSION_INFO.map((v) => v.version);
+export const CAPABILITIES: CapabilityRule[] = domain.capabilities ?? [];
 `);
 parts.push(`/** Standardized status tones (CSS tokens --st-<tone>). */
 export const TONES: Tone[] = ["success", "running", "queued", "retry", "failed", "dlq", "cancelled"];

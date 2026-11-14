@@ -1104,6 +1104,12 @@ export interface ResultRow {
   one_ui_version: string;
   /** normalized utterance pattern id (the utterance template with slot values replaced), e.g. "up-ko-1x2y3z" */
   utterance_pattern: string;
+  /** business division of device_type (domain.ts `deviceDivision`): Mobile · Wearable · Audio · TV · Appliance */
+  division: Division;
+  /** region of market (domain.ts `marketRegion`): KR · NA · EU · JP · LATAM */
+  region: Region;
+  /** Bixby client version on the device, e.g. "4.0.3", "4.1.0-beta" */
+  bixby_version: string;
 }
 
 export interface ResultsSummary extends RateStat {
@@ -1156,6 +1162,9 @@ export interface ResultsPage {
     language: Partial<Record<LangCode, number>>;
     agent_function: Partial<Record<AgentFunction, number>>;
     market: Partial<Record<Market, number>>;
+    division: Partial<Record<Division, number>>;
+    region: Partial<Record<Region, number>>;
+    bixby_version: Record<string, number>;
   };
 }
 
@@ -1567,6 +1576,19 @@ export interface PipelineReleaseInfo {
   passAdj: number;
   costPerRunUsd: number;
 }
+export interface BixbyVersionInfo {
+  version: string;
+  status: "LEGACY" | "STABLE" | "ROLLOUT" | "BETA";
+  notes: string;
+}
+/** Capability rule: intent prefix → divisions (or extra devices) and minimum Bixby version that must handle it. */
+export interface CapabilityRule {
+  intent: string;
+  divisions: Division[];
+  devices?: string[];
+  minBixby?: string;
+  note?: string;
+}
 export interface DomainConfig {
   id: string;
   name: string;
@@ -1589,6 +1611,21 @@ export interface DomainConfig {
   stageEdges: StageEdge[];
   capsules: Capsule[];
   devices: { id: string; weight: number; adj: number; lat: [number, number] }[];
+  /** base device → concrete models [id, weight] (mock re-label from its own random stream; Issue Report dims) */
+  deviceModels?: Record<string, [string, number][]>;
+  divisions?: { id: Division; label: string; labelEn: string }[];
+  /** device_type → division */
+  deviceDivision?: Record<string, Division>;
+  defaultDivision?: Division;
+  regions?: { id: Region; label: string; labelEn: string }[];
+  /** market → region */
+  marketRegion?: Record<Market, Region>;
+  /** Bixby client versions, oldest first */
+  bixbyVersions?: BixbyVersionInfo[];
+  /** mock rollout per division (weight × linear ramp since `sinceDays` days ago over `rampDays`) */
+  bixbyRollout?: Partial<Record<Division, { version: string; weight: number; sinceDays?: number; rampDays?: number }[]>>;
+  /** capability table behind Issue.must_handle (first prefix match on intent_expected wins) */
+  capabilities?: CapabilityRule[];
   models: ModelVersionInfo[];
   /** release train shared by root pipelines (v1.0 / v1.1 / v1.2-rc) */
   releases: PipelineReleaseInfo[];
@@ -1856,6 +1893,30 @@ export type AgentFunction =
   | "camera"
   | "galaxy_ai_feature";
 export type Market = "KR" | "US" | "GB" | "JP" | "ES" | "MX";
+/** ResultRow.division — derived from device_type (src/config/domain.ts `deviceDivision`) */
+export type Division = "Mobile" | "Wearable" | "Audio" | "TV" | "Appliance";
+/** ResultRow.region — derived from market (src/config/domain.ts `marketRegion`) */
+export type Region = "KR" | "NA" | "EU" | "JP" | "LATAM";
+/** Issue.category — rule-based issue taxonomy (docs/data-contract.md §8.10), first matching rule wins */
+export type IssueCategory = "safety" | "policy" | "new_feature" | "locale" | "timeout" | "asr" | "wrong_action" | "slot" | "misroute" | "response_quality";
+/** Issue.user_impact_type — what the user experienced (user lens) */
+export type UserImpactType = "safety_privacy" | "wrong_action" | "task_blocked" | "misunderstood" | "inappropriate_content" | "degraded" | "minor";
+/** Issue.dev_miss_type — why Bixby missed something it must handle (dev lens); out_of_scope when must_handle = false */
+export type DevMissType =
+  | "supported_intent_failed"
+  | "regression"
+  | "slot_extraction"
+  | "routing"
+  | "asr_robustness"
+  | "guardrail_miss"
+  | "new_feature_gap"
+  | "locale_gap"
+  | "performance"
+  | "out_of_scope";
+/** Issue-level (derived) dimensions: a row takes the value of its issue (FAIL rows outside an issue: same rules per row; PASS rows: none) */
+export type IssueTagDim = "category" | "user_impact" | "dev_miss" | "must_handle" | "severity" | "status" | "novelty" | "severity_class";
+/** Every dimension accepted by /issues/breakdown (dim), /issues/matrix (x, y) and GET /issues (group, subgroup). */
+export type IssueDim = IssueColumn | IssueTagDim;
 /** P0 = critical market issue … P3 = low */
 export type IssueSeverity = "P0" | "P1" | "P2" | "P3";
 /** Triage lifecycle: NEW → TRIAGED → TICKETED → RESOLVED, any open state → IGNORED; RESOLVED/IGNORED → NEW (reopen) */
@@ -1879,7 +1940,10 @@ export type IssueColumn =
   | "pipeline_version"
   | "failure_reason"
   | "os_version"
-  | "one_ui_version";
+  | "one_ui_version"
+  | "division"
+  | "region"
+  | "bixby_version";
 export type PatternKind = "new_feature_name" | "code_switch" | "new_term" | "new_phrasing";
 export type InsightKind =
   | "overall"
@@ -1891,7 +1955,10 @@ export type InsightKind =
   | "market"
   | "hotspot"
   | "concentration"
-  | "improvement";
+  | "improvement"
+  | "division"
+  | "region"
+  | "bixby_version";
 
 /**
  * A message key under the `issues` i18n namespace + its variables. Variables named `fn`, `fn2`
@@ -1945,6 +2012,19 @@ export interface IssueRegression {
   previousRate: number;
   currentTotal: number;
   previousTotal: number;
+}
+
+/** Bixby-version regression of an issue on its dominant division (informational — not a score factor) */
+export interface IssueBixbyRegression {
+  division: Division;
+  current: string;
+  previous: string;
+  /** fail rate of this signature within its intent scope on that division, % */
+  currentRate: number;
+  previousRate: number;
+  currentTotal: number;
+  previousTotal: number;
+  z: number;
 }
 
 export interface IssueSignature {
@@ -2039,9 +2119,47 @@ export interface Issue {
   patterns: IssuePatternShare[];
   sample: IssueSample;
   regression: IssueRegression | null;
+  /** newest vs previous Bixby version on the dominant division (rows since the newest appeared there) */
+  bixby_regression: IssueBixbyRegression | null;
   state: IssueState;
   /** query for /results that selects this issue's rows (add the range yourself) */
   results_query: Record<string, string>;
+  /** issue taxonomy (rule-based, §8.10) + why */
+  category: IssueCategory;
+  category_reason: IssueText;
+  /** user lens: what the user experienced */
+  user_impact_type: UserImpactType;
+  /** dev lens: why Bixby missed it (out_of_scope when must_handle = false) */
+  dev_miss_type: DevMissType;
+  /** true when the capability is supported on the issue's devices / Bixby versions (domain.ts `capabilities`) and in scope */
+  must_handle: boolean;
+  must_handle_reason: IssueText;
+  /** why user_impact_type / dev_miss_type were chosen */
+  type_reason: { user_impact: IssueText; dev_miss: IssueText };
+  /** FAIL rows by division / region / Bixby version, most FAILs first */
+  divisions: Division[];
+  regions: Region[];
+  bixby_versions: string[];
+  /** value with the most FAIL rows per row dimension (group membership of GET /issues?group=<row dim>) */
+  dominant: IssueDominant;
+}
+
+export interface IssueDominant {
+  agent_function: AgentFunction;
+  capsule: string;
+  intent: string;
+  language: LangCode;
+  market: Market;
+  device: string;
+  model_version: string;
+  pipeline: string;
+  pipeline_version: string;
+  failure_reason: FailureReason;
+  os_version: string;
+  one_ui_version: string;
+  division: Division;
+  region: Region;
+  bixby_version: string;
 }
 
 export interface IssueListResponse extends RangedList<Issue> {
@@ -2051,6 +2169,106 @@ export interface IssueListResponse extends RangedList<Issue> {
   /** total before issue-level filters (severity/status/novelty/q/min_score) */
   unfiltered_total: number;
   factor_weights: Record<IssueFactorKey, number>;
+  /** only with `group=<dim>` (and optional `subgroup=<dim>`): issues grouped by that dim */
+  group?: IssueDim;
+  subgroup?: IssueDim | null;
+  groups?: IssueGroup[];
+}
+
+/** One group of GET /issues?group=<dim>[&subgroup=<dim>] */
+export interface IssueGroup {
+  /** dim value ("" never appears; row dims use the issue's dominant value) */
+  key: string;
+  /** i18n label under the `issues` namespace (e.g. "severity.P0", "division.TV"); null → the key is its own label (device, versions) */
+  label: IssueText | null;
+  /** issues in the group (after issue-level filters) */
+  count: number;
+  /** Σ FAIL rows of those issues */
+  fails: number;
+  by_severity: Record<IssueSeverity, number>;
+  max_score: number;
+  /** top issues of this group, sorted by `sort` — page `group_page` (only for `group_key`) of size `group_size` */
+  items: Issue[];
+  page: number;
+  pageSize: number;
+  /** nested groups (only with subgroup; their items follow the same paging) */
+  subgroups?: IssueGroup[];
+}
+
+export type IssueMatrixMetric = "fail_rate" | "fail_count" | "delta" | "issue_count";
+
+/** Per-value statistics shared by facets, breakdown and matrix cells. */
+export interface IssueDimStat {
+  value: string;
+  /** rows (PASS+FAIL) — for issue-level dims (category, user_impact, …) every row in scope (the dim does not split PASS rows) */
+  total: number;
+  fails: number;
+  /** fails / total, % (null when total = 0) */
+  fail_rate: number | null;
+  baseline_total: number;
+  baseline_fails: number;
+  baseline_fail_rate: number | null;
+  /** fail_rate − baseline_fail_rate, pp */
+  delta: number | null;
+  /** distinct issues with ≥ 1 counted FAIL in this value */
+  issues: number;
+}
+
+/** GET /issues/breakdown?dim=… — one card per value */
+export interface IssueBreakdownItem extends IssueDimStat {
+  label: IssueText | null;
+  rank: number;
+  /** share of all counted FAILs, % */
+  share: number;
+  /** issues touching this value, by severity */
+  by_severity: Record<IssueSeverity, number>;
+  /** FAIL rows per bucket (`IssueBreakdown.t`) */
+  trend: number[];
+  /** FAIL rate per bucket, % */
+  trend_rate: (number | null)[];
+  /** top 3 issues by score: count_in_value = their FAILs in this value */
+  top_issues: (Pick<Issue, "id" | "title" | "severity" | "severity_class" | "score" | "count" | "category" | "user_impact_type" | "dev_miss_type" | "signature"> & { count_in_value: number })[];
+  /** new utterance pattern with the most rows in this value (compare window), null when none */
+  top_pattern: Pick<NewPattern, "id" | "template" | "language" | "kind" | "fail_rate" | "intent_expected"> & { count_in_value: number } | null;
+}
+export interface IssueBreakdown {
+  range: ResolvedRange;
+  baseline: IssueBaseline;
+  dim: IssueDim;
+  bucket: "hour" | "day";
+  /** bucket starts */
+  t: EpochMs[];
+  totals: IssueDimStat;
+  items: IssueBreakdownItem[];
+  /** values left out by `limit` */
+  truncated: number;
+}
+
+/** GET /issues/matrix?x=&y=&metric= */
+export interface IssueDimMatrixCell extends Omit<IssueDimStat, "value"> {
+  x: string;
+  y: string;
+  /** the requested metric (null: no rows / no baseline) */
+  value: number | null;
+  top_issue_id: string | null;
+}
+export interface IssueDimMatrix {
+  range: ResolvedRange;
+  baseline: IssueBaseline;
+  x: IssueDim;
+  y: IssueDim;
+  metric: IssueMatrixMetric;
+  /** axis values, most FAILs first; "__other__" = folded values beyond max_x / max_y */
+  x_values: string[];
+  y_values: string[];
+  x_labels: (IssueText | null)[];
+  y_labels: (IssueText | null)[];
+  x_totals: IssueDimStat[];
+  y_totals: IssueDimStat[];
+  cells: IssueDimMatrixCell[];
+  /** min / max of `value` over cells with a value */
+  domain: [number, number] | null;
+  folded: { x: number; y: number };
 }
 
 export interface IssueColumnStat {
@@ -2144,10 +2362,21 @@ export interface IssueSummary {
 
 export interface IssueFacetValue {
   value: string;
-  /** FAIL rows (columns) or issues (severity/status/novelty/severity_class) */
+  /** FAIL rows (columns) or issues (severity/status/novelty/severity_class/category/user_impact/dev_miss/must_handle) */
   count: number;
+  /** FAIL rows (also for issue-level dims: Σ FAILs of the matching issues) */
+  fails?: number;
+  /** rows (PASS+FAIL) — columns only */
+  total?: number;
+  /** % — columns only */
+  fail_rate?: number | null;
+  baseline_fail_rate?: number | null;
+  /** pp */
+  delta?: number | null;
+  /** issues with FAILs in this value */
+  issues?: number;
 }
-export type IssueFacetKey = IssueColumn | "severity" | "status" | "novelty" | "severity_class";
+export type IssueFacetKey = IssueColumn | IssueTagDim;
 export interface IssueFacets {
   range: ResolvedRange;
   facets: Record<IssueFacetKey, IssueFacetValue[]>;
@@ -2158,9 +2387,11 @@ export interface IssueDetail extends Issue {
   baseline: IssueBaseline;
   utterances: Paginated<ResultRow>;
   trend: { bucket: "hour" | "day"; points: { t: EpochMs; fails: number; total: number; fail_rate: number | null }[] };
-  breakdown: Record<"language" | "market" | "device" | "model_version" | "pipeline_version" | "os_version" | "one_ui_version", IssueColumnStat[]>;
+  breakdown: Record<"language" | "market" | "device" | "model_version" | "pipeline_version" | "os_version" | "one_ui_version" | "division" | "region" | "bixby_version", IssueColumnStat[]>;
   workflows: { workflow_id: string; language: LangCode; pipeline_id: string; pipeline_version: string; model_version: string; created_at: EpochMs; completed_at: EpochMs | null; fails: number }[];
-  similar: { id: string; title: IssueText; severity: IssueSeverity; score: number; count: number; relation: "same_intent" | "same_function_reason" | "same_prediction" }[];
+  similar: { id: string; title: IssueText; severity: IssueSeverity; score: number; count: number; category: IssueCategory; relation: "same_intent" | "same_function_reason" | "same_prediction" | "same_category" }[];
+  /** other issues of the same category, by score (max 8) */
+  same_category: { id: string; title: IssueText; severity: IssueSeverity; score: number; count: number; signature: IssueSignature }[];
 }
 
 export interface NovelTerm {
@@ -2196,6 +2427,8 @@ export interface NewPattern {
   intents_predicted: { intent: string; count: number }[];
   markets: Market[];
   devices: string[];
+  divisions?: Division[];
+  bixby_versions?: string[];
   examples: Pick<ResultRow, "utterance_id" | "utterance_text" | "asr_text" | "result" | "failure_reason" | "intent_predicted" | "device_type" | "market" | "actual_response">[];
   issue_ids: string[];
   /**

@@ -1,0 +1,161 @@
+/*
+ * Issue Report — shared frame of /issues/** (header, view switcher, unified FilterBar, back link).
+ * Owned by the framework engineer. Scoped under [data-variant="atlas"] .iss-frame; keyframes `at-issf-`.
+ * Views render inside .isf-body as `.iss-<view> .iss-view` (a grid with the sheet rhythm).
+ */
+[data-variant="atlas"] .iss-frame {
+  --isf-up: var(--st-failed);
+  --isf-down: var(--st-success);
+
+  & .iss-view { display: grid; gap: 18px; min-width: 0; }
+  & .isf-body { display: grid; min-width: 0; }
+
+  /* ───── header ───── */
+  & .isf-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; border-bottom: 1.5px solid var(--ink); padding-bottom: 12px; }
+  & .isf-title { min-width: 0; flex: 1 1 420px; }
+  & .isf-title .dwg { font: 400 11px var(--f-mono); color: var(--ink-3); letter-spacing: 0.08em; display: block; margin-bottom: 6px; }
+  & .isf-title h1 { margin: 0; font-size: var(--t-2xl); font-weight: 800; letter-spacing: -0.025em; line-height: 1.12; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; overflow-wrap: anywhere; }
+  & .isf-h-view { font: 500 var(--t-md) var(--f-mono); letter-spacing: 0; color: var(--accent); padding: 1px 8px; border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--rule)); border-radius: 2px; background: var(--accent-soft); }
+  & .isf-title p { margin: 7px 0 0; color: var(--ink-2); max-width: 78ch; }
+  & .isf-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+  & .isf-export { display: flex; gap: 6px; flex-wrap: wrap; }
+  & .isf-export .btn svg { width: 13px; height: 13px; }
+
+  & .isf-base { display: inline-flex; align-items: center; gap: 6px; height: 25px; padding: 0 9px; border: 1px dashed var(--ink-3); border-radius: 2px; font: 500 11px var(--f-mono); color: var(--ink-2); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  & .isf-base-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--st-success); flex: none; }
+  & .isf-base.warn { border-color: var(--st-retry); color: var(--st-retry); }
+  & .isf-base.warn .isf-base-dot { background: var(--st-retry); }
+  & .isf-base.skel-line { width: 150px; border-style: solid; border-color: var(--rule-2); background: linear-gradient(90deg, var(--paper-2), var(--sheet-2), var(--paper-2)); background-size: 200% 100%; animation: at-shimmer 1.4s linear infinite; }
+
+  /* ───── view switcher ───── */
+  & .isf-views { display: flex; gap: 2px; border-bottom: 1px solid var(--rule); margin-top: -6px; overflow-x: auto; scrollbar-width: none; }
+  & .isf-views::-webkit-scrollbar { display: none; }
+  & .isf-view { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 14px; color: var(--ink-2); text-decoration: none; font-weight: 650; font-size: var(--t-sm); white-space: nowrap; border-radius: 2px 2px 0 0; transition: color 0.15s, background 0.15s; }
+  & .isf-view svg { width: 15px; height: 15px; color: var(--ink-3); transition: color 0.15s; }
+  & .isf-view:hover { color: var(--ink); background: var(--sheet-2); }
+  & .isf-view.on { color: var(--ink); }
+  & .isf-view.on svg { color: var(--accent); }
+  & .isf-view:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  & .isf-view-ind { position: absolute; left: 6px; right: 6px; bottom: -1px; height: 3px; background: var(--accent); border-radius: 2px 2px 0 0; }
+
+  /* ───── filter bar ───── */
+  & .isf { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--r); background: var(--sheet); position: relative; z-index: 6; }
+  & .isf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+  & .isf-row-more { padding-top: 8px; border-top: 1px dashed var(--rule-2); }
+  & .isf-label { display: inline-flex; align-items: center; gap: 6px; font: 600 10px var(--f-mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3); }
+  & .isf-label svg { width: 13px; height: 13px; }
+  & .isf-dims { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1 1 auto; min-width: 0; }
+  & .isf-mob-btn { display: none; }
+  & .isf-more { gap: 4px; }
+  & .isf-more svg { width: 12px; height: 12px; transition: transform 0.2s; }
+  & .isf-more svg[data-open] { transform: rotate(180deg); }
+  & .isf-more.on { color: var(--accent); }
+
+  & .isf-dimw { position: relative; min-width: 0; }
+  & .isf-dim { appearance: none; display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 7px 0 9px; border: 1px solid var(--rule); border-radius: 2px; background: var(--sheet); cursor: pointer; font-size: var(--t-xs); color: var(--ink-2); max-width: 240px; transition: border-color 0.15s, background 0.15s; }
+  & .isf-dim:hover { border-color: var(--ink-3); background: var(--sheet-2); }
+  & .isf-dim:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  & .isf-dim[aria-expanded="true"] { border-color: var(--ink); }
+  & .isf-dim svg { width: 12px; height: 12px; flex: none; color: var(--ink-3); transition: transform 0.18s; }
+  & .isf-dim[aria-expanded="true"] svg { transform: rotate(180deg); }
+  & .isf-dim.on { border-color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--accent); }
+  & .isf-dim-k { font-weight: 650; white-space: nowrap; }
+  & .isf-dim-all { color: var(--ink-3); font: 400 10.5px var(--f-mono); }
+  & .isf-dim-v { font: 600 11px var(--f-mono); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+  & .isf-pop { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; width: 340px; max-width: calc(100vw - 32px); background: var(--sheet); border: 1px solid var(--ink-3); border-radius: var(--r); box-shadow: var(--shadow); padding: 8px; display: grid; gap: 6px; transform-origin: top left; }
+  & .isf-pop.right { left: auto; right: 0; transform-origin: top right; }
+  & .isf-pop-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 2px 2px 4px; border-bottom: 1px solid var(--rule-2); }
+  & .isf-pop-head .mono { font-size: 10px; }
+  & .isf-pop .in { height: 28px; }
+  & .isf-pop .isf-vals { max-height: 320px; overflow: auto; }
+  & .isf-pop-foot { display: flex; justify-content: space-between; gap: 6px; padding-top: 4px; border-top: 1px solid var(--rule-2); }
+
+  & .isf-vals { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; overscroll-behavior: contain; }
+  & .isf-val { position: relative; appearance: none; width: 100%; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 46px 62px; align-items: center; gap: 8px; padding: 5px 6px; border: 0; border-radius: 2px; background: transparent; cursor: pointer; text-align: left; font-size: var(--t-xs); color: var(--ink); isolation: isolate; }
+  & .isf-val::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 2px; width: var(--w); background: color-mix(in srgb, var(--accent) 9%, transparent); border-radius: 2px; z-index: -1; transition: width 0.3s; }
+  & .isf-val:hover { background: var(--sheet-2); }
+  & .isf-val:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  & .isf-val.on { font-weight: 650; }
+  & .isf-box { width: 14px; height: 14px; border: 1px solid var(--ink-3); border-radius: 2px; display: grid; place-items: center; background: var(--sheet); }
+  & .isf-val.on .isf-box { background: var(--ink); border-color: var(--ink); color: var(--ink-inv); }
+  & .isf-box svg { width: 11px; height: 11px; }
+  & .isf-vl { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  & .isf-vl-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  & .isf-n { color: var(--ink); font-size: 11px; text-align: right; }
+  & .isf-r { color: var(--ink-2); font-size: 10.5px; text-align: right; }
+  & .isf-d { font: 500 10.5px var(--f-mono); text-align: right; white-space: nowrap; color: var(--ink-3); }
+  & .isf-d[data-dir="up"] { color: var(--isf-up); }
+  & .isf-d[data-dir="down"] { color: var(--isf-down); }
+  & .isf-empty { padding: 8px 6px; font-size: var(--t-xs); list-style: none; margin: 0; }
+
+  & .isf-search { position: relative; display: block; flex: 0 1 240px; min-width: 160px; margin-left: auto; }
+  & .isf-search svg { position: absolute; left: 8px; top: 50%; width: 13px; height: 13px; transform: translateY(-50%); color: var(--ink-3); pointer-events: none; }
+  & .isf-search .in { height: 28px; padding-left: 27px; }
+
+  & .isf-ctl { display: inline-flex; align-items: center; gap: 6px; }
+  & .isf-ctl-k { font: 600 10px var(--f-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); white-space: nowrap; }
+  & .isf-ctl .seg { height: 27px; }
+
+  & .isf-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font: 700 10px var(--f-mono); }
+
+  /* active chips */
+  & .isf-chips { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-width: 0; }
+  & .isf .isf-chips { padding-top: 8px; border-top: 1px solid var(--rule-2); }
+  & .isf-chips-k { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  & .isf-chips ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; }
+  & .isf-chips li { min-width: 0; max-width: 100%; }
+  & .isf-chip { appearance: none; display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 6px 0 8px; border: 1px solid var(--accent); border-radius: 12px; background: var(--accent-soft); font-size: var(--t-xs); color: var(--ink); cursor: pointer; max-width: 100%; }
+  & .isf-chip .muted { font-weight: 500; white-space: nowrap; }
+  & .isf-chip-v { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  & .isf-chip svg { width: 12px; height: 12px; color: var(--accent); flex: none; }
+  & .isf-chip:hover svg { color: var(--st-failed); }
+  & .isf-chip:focus-visible, & .isf-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  & .isf-clear { appearance: none; height: 24px; border: 0; background: none; color: var(--accent); font: 600 11px var(--f-mono); cursor: pointer; padding: 0 4px; }
+  & .isf-clear:hover { text-decoration: underline; }
+
+  /* ───── detail crumb ───── */
+  & .isf-crumb { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin-top: -6px; }
+  & .isf-back { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px 0 8px; border: 1px solid var(--rule); border-radius: 2px; background: var(--sheet); color: var(--ink); text-decoration: none; font-weight: 650; font-size: var(--t-xs); }
+  & .isf-back svg { width: 14px; height: 14px; transition: transform 0.18s; }
+  & .isf-back:hover { border-color: var(--ink); }
+  & .isf-back:hover svg { transform: translateX(-2px); }
+
+  /* ───── mobile sheet ───── */
+  & .isf-scrim { position: fixed; inset: 0; z-index: 90; background: var(--overlay); }
+  & .isf-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; max-height: min(86vh, 760px); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: var(--sheet); border-top: 1.5px solid var(--ink); border-radius: 8px 8px 0 0; box-shadow: var(--shadow); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  & .isf-sheet-head { display: flex; align-items: center; gap: 8px; padding: 12px 16px 10px; border-bottom: 1px solid var(--rule); }
+  & .isf-sheet-head b { font-size: var(--t-lg); font-weight: 800; margin-right: auto; }
+  & .isf-sheet-body { overflow: auto; overscroll-behavior: contain; padding: 6px 16px 12px; display: grid; gap: 0; align-content: start; }
+  & .isf-sheet-scalars { display: grid; gap: 8px; padding: 8px 0 12px; border-bottom: 1px solid var(--rule-2); }
+  & .isf-sheet-scalars .isf-ctl { display: grid; gap: 6px; }
+  & .isf-sheet-scalars .seg { width: 100%; }
+  & .isf-sheet-scalars .seg button { flex: 1 1 0; }
+  & .isf-acc { border-bottom: 1px solid var(--rule-2); }
+  & .isf-acc summary { list-style: none; display: flex; align-items: center; gap: 8px; min-height: 42px; cursor: pointer; font-weight: 650; }
+  & .isf-acc summary::-webkit-details-marker { display: none; }
+  & .isf-acc summary svg { width: 14px; height: 14px; margin-left: auto; color: var(--ink-3); transition: transform 0.18s; }
+  & .isf-acc[open] summary svg { transform: rotate(180deg); }
+  & .isf-acc .isf-vals { padding-bottom: 10px; }
+  & .isf-acc .isf-val { min-height: 36px; }
+  & .isf-sheet-foot { padding: 10px 16px 12px; border-top: 1px solid var(--rule); }
+  & .isf-sheet-foot .btn { width: 100%; height: 38px; justify-content: center; }
+
+  @media (max-width: 900px) {
+    & .isf-export .btn span { display: none; }
+    & .isf-export .btn { padding: 0 7px; }
+  }
+  @media (max-width: 720px) {
+    & .isf-title h1 { font-size: 24px; }
+    & .isf-acts { justify-content: flex-start; }
+    & .isf-label, & .isf-dims, & .isf-row-more { display: none; }
+    & .isf-mob-btn { display: inline-flex; gap: 6px; }
+    & .isf-search { flex: 1 1 140px; min-width: 0; }
+    & .isf-view { padding: 0 10px; }
+    & .isf-val { grid-template-columns: 14px minmax(0, 1fr) auto 44px 58px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    & .isf-val::before, & .isf-dim svg, & .isf-more svg, & .isf-acc summary svg, & .isf-back svg, & .isf-view { transition: none; }
+    & .isf-base.skel-line { animation: none; }
+  }
+}

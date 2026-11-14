@@ -1,6 +1,6 @@
 "use client";
 /**
- * Issue Report — triage permission helper. SHARED (do not edit in A/B/C).
+ * Issue Report — triage permission helper. SHARED by every view (issues/*); views do not edit it (ask the framework engineer).
  *
  *   const perm = useIssuePermission();
  *   <button disabled={!perm.canWrite} title={perm.reason ?? undefined}>Triage</button>

@@ -14,13 +14,15 @@
  *   novelty    15  new cluster (absent in baseline) 0.35 + 0.65·novel-pattern share; else 0.7·share
  * Severity: P0 ≥ 60 (or safety with ≥ 3 FAILs and ≥ 45) · P1 ≥ 45 · P2 ≥ 30 · P3 below.
  */
-import { LANG_CODES, PIPELINE_VERSIONS } from "@/lib/catalog";
+import { DIVISIONS, LANG_CODES, PIPELINE_VERSIONS, REGIONS } from "@/lib/catalog";
 import type {
   AgentFunction,
   FailureReason,
   Issue,
   IssueBaseline,
+  IssueBixbyRegression,
   IssueColumn,
+  IssueDominant,
   IssueFactor,
   IssueFactorKey,
   IssueGroupBy,
@@ -38,6 +40,7 @@ import type {
 import { getEngine } from "../mock/runtime";
 import { announceCritical, issueIdOf, issueState } from "./issues-store";
 import { hasProductTerm, patternKind, PRODUCT_TERMS, terms as termsOf, tokens } from "./issues-text";
+import { bixbyOrder, classify, type RowTags } from "./issues-taxonomy";
 
 export const FACTOR_WEIGHTS: Record<IssueFactorKey, number> = { volume: 20, severity: 25, trend: 15, regression: 15, reach: 10, novelty: 15 };
 export const FACTOR_KEYS: IssueFactorKey[] = ["volume", "severity", "trend", "regression", "reach", "novelty"];
@@ -73,7 +76,11 @@ export const COLUMNS: IssueColumn[] = [
   "failure_reason",
   "os_version",
   "one_ui_version",
+  "division",
+  "region",
+  "bixby_version",
 ];
+export { DIVISIONS, REGIONS };
 export const COLUMN_GET: Record<IssueColumn, (r: ResultRow) => string> = {
   agent_function: (r) => r.agent_function,
   capsule: (r) => r.capsule_id,
@@ -87,6 +94,9 @@ export const COLUMN_GET: Record<IssueColumn, (r: ResultRow) => string> = {
   failure_reason: (r) => r.failure_reason,
   os_version: (r) => r.os_version,
   one_ui_version: (r) => r.one_ui_version,
+  division: (r) => r.division,
+  region: (r) => r.region,
+  bixby_version: (r) => r.bixby_version,
 };
 /** IssueColumn → GET /api/v1/results query param */
 export const RESULTS_PARAM: Record<IssueColumn, string> = {
@@ -102,6 +112,9 @@ export const RESULTS_PARAM: Record<IssueColumn, string> = {
   failure_reason: "failure_reason",
   os_version: "os_version",
   one_ui_version: "one_ui_version",
+  division: "division",
+  region: "region",
+  bixby_version: "bixby_version",
 };
 
 export type RowFilters = Partial<Record<IssueColumn, string[]>>;
@@ -111,7 +124,7 @@ const DAY = 24 * H;
 const MIN_BASELINE = 7 * DAY;
 const MIN_SUPPORT = 3;
 /** release columns a baseline may be relaxed on (see compute) and the minimum baseline rows to keep such a filter */
-const RELEASE_COLUMNS: IssueColumn[] = ["model_version", "pipeline", "pipeline_version", "os_version", "one_ui_version"];
+const RELEASE_COLUMNS: IssueColumn[] = ["model_version", "pipeline", "pipeline_version", "os_version", "one_ui_version", "bixby_version"];
 const MIN_BASELINE_ROWS = 50;
 const MIN_SUPPORT_SEVERE = 2;
 const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
@@ -229,8 +242,13 @@ export interface Analysis {
   basePatternCount: Map<string, number>;
   /** utterance_id → issue id */
   rowIssue: Map<string, string>;
+  issueById: Map<string, Issue>;
   /** lazily computed */
   _patterns?: { items: NewPattern[]; terms: NovelTerm[] };
+  /** row-level taxonomy of FAIL rows outside an issue / in the baseline (lazy, see rowTag) */
+  _rowTags?: Map<string, RowTags>;
+  /** utterance_id → issue id of the row's signature (lazy, see issueOfRow) */
+  _sig?: Map<string, string>;
 }
 
 export function rowMatches(r: ResultRow, f: RowFilters, skip?: IssueColumn): boolean {
@@ -242,7 +260,7 @@ export function rowMatches(r: ResultRow, f: RowFilters, skip?: IssueColumn): boo
   return true;
 }
 
-function groupKey(r: ResultRow, g: IssueGroupBy): string {
+export function groupKey(r: ResultRow, g: IssueGroupBy): string {
   const base = `${g}|${r.agent_function}|${r.intent_expected}|${r.intent_predicted}|${r.failure_reason}`;
   return g === "pattern" ? base + "|" + r.utterance_pattern : base;
 }
@@ -334,7 +352,30 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
   const marketTotals = new Map<string, number>();
   const deviceTotals = new Map<string, number>();
   const oneUiTotals = new Map<string, number>();
+  const divisionTotals = new Map<string, number>();
+  const bixbyTotals = new Map<string, number>();
+  // Bixby version regression (not a score factor): per division, rows since the division's newest version appeared
+  const bixFirst = new Map<string, number>();
+  const bixNewest = new Map<string, string>();
   for (const r of rows) {
+    const k = r.division + "|" + r.bixby_version;
+    if (!bixFirst.has(k) || r.eval_ts < bixFirst.get(k)!) bixFirst.set(k, r.eval_ts);
+  }
+  const bixOrd = bixbyOrder(rows.map((r) => r.bixby_version));
+  for (const k of bixFirst.keys()) {
+    const [dv, v] = k.split("|");
+    const cur = bixNewest.get(dv);
+    if (!cur || bixOrd.indexOf(v) > bixOrd.indexOf(cur)) bixNewest.set(dv, v);
+  }
+  const bixCoexist = new Map<string, number>([...bixNewest.entries()].map(([dv, v]) => [dv, bixFirst.get(dv + "|" + v) ?? 0]));
+  const scopeBix = new Map<string, number>();
+  for (const r of rows) {
+    divisionTotals.set(r.division, (divisionTotals.get(r.division) ?? 0) + 1);
+    bixbyTotals.set(r.bixby_version, (bixbyTotals.get(r.bixby_version) ?? 0) + 1);
+    if (r.eval_ts >= (bixCoexist.get(r.division) ?? Infinity)) {
+      const kb = `${r.intent_expected}|${r.division}|${r.bixby_version}`;
+      scopeBix.set(kb, (scopeBix.get(kb) ?? 0) + 1);
+    }
     scope.set(r.intent_expected, (scope.get(r.intent_expected) ?? 0) + 1);
     if (inCmp(r)) scopeCmp.set(r.intent_expected, (scopeCmp.get(r.intent_expected) ?? 0) + 1);
     if (r.eval_ts >= coexist.m) {
@@ -390,6 +431,10 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
     const markets = new Map<string, number>();
     const devices = new Map<string, number>();
     const oneUi = new Map<string, number>();
+    const divisions = new Map<string, number>();
+    const regions = new Map<string, number>();
+    const bixby = new Map<string, number>();
+    const bixCount = new Map<string, number>();
     const models = new Set<string>();
     const pats = new Map<string, number>();
     const verCount = new Map<string, number>();
@@ -403,6 +448,10 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
       markets.set(r.market, (markets.get(r.market) ?? 0) + 1);
       devices.set(r.device_type, (devices.get(r.device_type) ?? 0) + 1);
       oneUi.set(r.one_ui_version, (oneUi.get(r.one_ui_version) ?? 0) + 1);
+      divisions.set(r.division, (divisions.get(r.division) ?? 0) + 1);
+      regions.set(r.region, (regions.get(r.region) ?? 0) + 1);
+      bixby.set(r.bixby_version, (bixby.get(r.bixby_version) ?? 0) + 1);
+      if (r.eval_ts >= (bixCoexist.get(r.division) ?? Infinity)) bixCount.set(r.division + "|" + r.bixby_version, (bixCount.get(r.division + "|" + r.bixby_version) ?? 0) + 1);
       models.add(r.model_version);
       pats.set(r.utterance_pattern, (pats.get(r.utterance_pattern) ?? 0) + 1);
       if (r.eval_ts >= coexist.m) verCount.set(`m|${r.model_version}`, (verCount.get(`m|${r.model_version}`) ?? 0) + 1);
@@ -489,8 +538,29 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
         regression = { axis, current: cur, previous: prev, currentRate: r1(rc * 100), previousRate: r1(rp * 100), currentTotal: ct, previousTotal: pt };
       }
     }
-    // reach
-    const vReach = clamp(0.4 * (markets.size / MARKETS.length) + 0.3 * (devices.size / 5) + 0.3 * (langs.size / LANG_CODES.length), 0, 1);
+    // Bixby version regression on the dominant division: newest vs previous version present (≥ 10 scope rows each),
+    // only rows since the newest version appeared in that division; one-sided two-proportion z ≥ 2.33, ≥ 4 FAILs.
+    // Informational (reason, dev lens, insights) — it does not change the score.
+    let bixbyReg: IssueBixbyRegression | null = null;
+    {
+      const dv = [...divisions.entries()].sort((x, y) => y[1] - x[1])[0][0];
+      const present = bixOrd.filter((v) => (scopeBix.get(`${c.expected}|${dv}|${v}`) ?? 0) >= 10);
+      if (present.length >= 2) {
+        const [pv, cv] = present.slice(-2);
+        const ct = scopeBix.get(`${c.expected}|${dv}|${cv}`)!;
+        const pt = scopeBix.get(`${c.expected}|${dv}|${pv}`)!;
+        const cc = bixCount.get(dv + "|" + cv) ?? 0;
+        const pc = bixCount.get(dv + "|" + pv) ?? 0;
+        const diff = cc / ct - pc / pt;
+        const pool = (cc + pc) / (ct + pt);
+        const zb = diff / Math.sqrt(Math.max(1e-9, pool * (1 - pool) * (1 / ct + 1 / pt)));
+        // stricter than the score's regression test (z ≥ 2.33, ≥ 4 FAILs): several divisions × versions are tested
+        if (cc >= 4 && diff > 0.02 && zb >= 2.33)
+          bixbyReg = { division: dv as IssueBixbyRegression["division"], current: cv, previous: pv, currentRate: r1((cc / ct) * 100), previousRate: r1((pc / pt) * 100), currentTotal: ct, previousTotal: pt, z: r1(zb) };
+      }
+    }
+    // reach (divisions: the five device families; identical to the former 5-device count)
+    const vReach = clamp(0.4 * (markets.size / MARKETS.length) + 0.3 * (divisions.size / DIVISIONS.length) + 0.3 * (langs.size / LANG_CODES.length), 0, 1);
     // novelty
     const novelShare = cmpCount ? cmpNovel / cmpCount : 0;
     // new = intent never seen in the baseline, or 0 baseline FAILs where the baseline volume would have shown ≥ 1.5
@@ -507,7 +577,7 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
         : rm.v
           ? { axis: null, why: rm.v.why, candidate_axis: rm.v.axis, current: rm.v.current, previous: rm.v.previous, current_rate: rm.v.current_rate, previous_rate: rm.v.previous_rate }
           : { axis: null },
-      reach: { markets: markets.size, devices: devices.size, languages: langs.size },
+      reach: { markets: markets.size, devices: devices.size, divisions: divisions.size, languages: langs.size },
       novelty: { new_cluster: isNew ? 1 : 0, novel_share: pct(cmpNovel, cmpCount) },
     };
     const factors: IssueFactor[] = FACTOR_KEYS.map((k) => ({ key: k, weight: FACTOR_WEIGHTS[k], value: r3(values[k]), contribution: r1(values[k] * FACTOR_WEIGHTS[k]), detail: details[k] }));
@@ -530,6 +600,7 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
         t: sp ? { key: "reasons.wrongSlot", vars: { intent: c.expected, want: sp.want, got: sp.got, pairs: sp.count, count: n } } : { key: "reasons.wrongSlotNoPair", vars: { intent: c.expected, count: n } },
       });
     } else if (cls === "wrong_action") reasons.push({ w: values.severity * 25, t: { key: "reasons.wrongAction", vars: { expected: c.expected, predicted: c.predicted } } });
+    if (bixbyReg) reasons.push({ w: 9, t: { key: "reasons.bixbyRegression", vars: { division: bixbyReg.division, current: bixbyReg.current, previous: bixbyReg.previous, curRate: bixbyReg.currentRate, prevRate: bixbyReg.previousRate } } });
     if (regression && vReg >= 0.15) reasons.push({ w: vReg * 15 + 5, t: { key: "reasons.regression", vars: { axis: regression.axis, current: regression.current, previous: regression.previous, curRate: regression.currentRate, prevRate: regression.previousRate } } });
     if (baseline.sufficient && z >= 3) {
       if (isNew) reasons.push({ w: vTrend * 15 + 2, t: { key: "reasons.newCluster", vars: { count: cmpCount, days: baseline.days } } });
@@ -543,8 +614,10 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
     if (n >= 5) {
       const conc: [IssueColumn, Map<string, number>, Map<string, number>][] = [
         ["one_ui_version", oneUi, oneUiTotals],
+        ["division", divisions, divisionTotals],
         ["device", devices, deviceTotals],
         ["market", markets, marketTotals],
+        ["bixby_version", bixby, bixbyTotals],
       ];
       for (const [col, m, tot] of conc) {
         const [v, k] = [...m.entries()].sort((x, y) => y[1] - x[1])[0];
@@ -556,7 +629,7 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
         }
       }
     }
-    if (markets.size >= 2 || devices.size >= 4) reasons.push({ w: vReach * 10, t: { key: "reasons.reach", vars: { markets: markets.size, devices: devices.size, languages: langs.size, list: [...markets.keys()].join(", ") } } });
+    if (markets.size >= 2 || divisions.size >= 4) reasons.push({ w: vReach * 10, t: { key: "reasons.reach", vars: { markets: markets.size, devices: devices.size, divisions: divisions.size, languages: langs.size, list: [...markets.keys()].join(", ") } } });
     if (n >= 15 || n / totalFails >= 0.02) reasons.push({ w: vVolume * 20 * 0.6, t: { key: "reasons.volume", vars: { count: n, share: pct(n, totalFails), rate: r1(failRate * 100) } } });
     if (!baseline.sufficient) reasons.push({ w: 0, t: { key: "reasons.baselineInsufficient", vars: { days: baseline.days } } });
     if (cls === "quality" && reasons.length < 2) reasons.push({ w: 1, t: { key: "reasons.quality", vars: { reason: c.reason } } });
@@ -569,6 +642,24 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
     for (const col of COLUMNS) if (filters[col]?.length && !resultsQuery[RESULTS_PARAM[col]]) resultsQuery[RESULTS_PARAM[col]] = filters[col]!.join(",");
     const novelty: IssueNovelty = isNew ? "new" : "recurring";
     const domPattern = c.pattern ?? topPat[0][0];
+    const byCount = (m: Map<string, number>) => [...m.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([v]) => v);
+    const dominant = {} as Record<IssueColumn, string>;
+    for (const col of COLUMNS) {
+      const m = new Map<string, number>();
+      for (const r of c.rows) m.set(COLUMN_GET[col](r), (m.get(COLUMN_GET[col](r)) ?? 0) + 1);
+      dominant[col] = byCount(m)[0] ?? "";
+    }
+    const tags = classify({
+      fn: c.fn,
+      expected: c.expected,
+      predicted: c.predicted,
+      fnPredicted: c.rows[0].agent_function_predicted,
+      reason: c.reason,
+      cls,
+      rows: c.rows,
+      regression: regression && vReg >= 0.15 ? regression : null,
+      bixby: bixbyReg,
+    });
     issues.push({
       id: c.id,
       rank: 0,
@@ -622,15 +713,87 @@ function compute(from: number, to: number, filters: RowFilters, groupBy: IssueGr
         eval_ts: samp.eval_ts,
       },
       regression,
+      bixby_regression: bixbyReg,
       state: issueState(c.id),
       results_query: resultsQuery,
+      ...tags,
+      divisions: byCount(divisions) as Issue["divisions"],
+      regions: byCount(regions) as Issue["regions"],
+      bixby_versions: byCount(bixby),
+      dominant: dominant as unknown as IssueDominant,
     });
   }
   issues.sort((x, y) => y.score - x.score || y.count - x.count || (x.id < y.id ? -1 : 1));
   issues.forEach((i, k) => (i.rank = k + 1));
   const rowIssue = new Map<string, string>();
   for (const c of clusters.values()) for (const r of c.rows) rowIssue.set(r.utterance_id, c.id);
-  return { from, to, groupBy, filters, baseline, buckets, rows, baseRows, fails, issues, clusters, novelPatterns, basePatternCount, rowIssue };
+  const issueById = new Map(issues.map((i) => [i.id, i]));
+  return { from, to, groupBy, filters, baseline, buckets, rows, baseRows, fails, issues, clusters, novelPatterns, basePatternCount, rowIssue, issueById };
+}
+
+// ───────────────────────────────────────── issue-level dims on rows ──
+/** Issue-level (derived) dims that rows inherit from their issue. */
+export const TAG_DIMS = ["category", "user_impact", "dev_miss", "must_handle", "severity", "status", "novelty", "severity_class"] as const;
+export type TagDim = (typeof TAG_DIMS)[number];
+
+function rowTagsOf(a: Analysis, r: ResultRow): RowTags {
+  let m = a._rowTags;
+  if (!m) m = a._rowTags = new Map();
+  let x = m.get(r.utterance_id);
+  if (!x) {
+    const reason = r.failure_reason as FailureReason;
+    const cls = severityClassOf(r.agent_function, r.intent_expected, r.intent_predicted, reason);
+    const t = classify({ fn: r.agent_function, expected: r.intent_expected, predicted: r.intent_predicted, fnPredicted: r.agent_function_predicted, reason, cls, rows: [r], regression: null, bixby: null });
+    x = { category: t.category, user_impact: t.user_impact_type, dev_miss: t.dev_miss_type, must_handle: t.must_handle ? "true" : "false", severity_class: cls };
+    m.set(r.utterance_id, x);
+  }
+  return x;
+}
+
+/**
+ * Value of an issue-level dim for a row: the row's issue value; FAIL rows outside any issue (and baseline rows)
+ * use the same rules on the single row (severity / status / novelty: "" — they only exist for issues); PASS rows "".
+ */
+/**
+ * Issue a FAIL row belongs to: its cluster in this analysis, else the issue with the same signature id (a baseline
+ * row of an issue that exists now). Rows of signatures below minimum support → undefined.
+ */
+export function issueOfRow(a: Analysis, r: ResultRow): Issue | undefined {
+  if (r.result !== "FAIL") return undefined;
+  const iid = a.rowIssue.get(r.utterance_id);
+  if (iid) return a.issueById.get(iid);
+  let m = a._sig;
+  if (!m) m = a._sig = new Map();
+  let id = m.get(r.utterance_id);
+  if (id == null) m.set(r.utterance_id, (id = issueIdOf(groupKey(r, a.groupBy))));
+  return a.issueById.get(id);
+}
+
+export function rowTag(a: Analysis, r: ResultRow, dim: TagDim): string {
+  if (r.result !== "FAIL") return "";
+  const i = issueOfRow(a, r);
+  if (i) {
+    switch (dim) {
+      case "category":
+        return i.category;
+      case "user_impact":
+        return i.user_impact_type;
+      case "dev_miss":
+        return i.dev_miss_type;
+      case "must_handle":
+        return i.must_handle ? "true" : "false";
+      case "severity":
+        return i.severity;
+      case "status":
+        return issueState(i.id).status;
+      case "novelty":
+        return i.novelty;
+      case "severity_class":
+        return i.severity_class;
+    }
+  }
+  if (dim === "severity" || dim === "status" || dim === "novelty") return "";
+  return rowTagsOf(a, r)[dim];
 }
 
 /** Refresh lifecycle state on cached issues (PATCH changes must show immediately). */
@@ -666,13 +829,15 @@ export function patternsOf(a: Analysis): { items: NewPattern[]; terms: NovelTerm
     pred: Map<string, number>;
     markets: Set<string>;
     devices: Set<string>;
+    divisions: Set<string>;
+    bixby: Set<string>;
   }
   const acc = new Map<string, Acc>();
   for (const r of a.rows) {
     if (r.eval_ts < cmpFrom || !a.novelPatterns.has(r.utterance_pattern)) continue;
     let x = acc.get(r.utterance_pattern);
     if (!x) {
-      x = { rows: [], fails: 0, h1: 0, h2: 0, daily: new Array(cb.starts.length).fill(0), first: Infinity, pred: new Map(), markets: new Set(), devices: new Set() };
+      x = { rows: [], fails: 0, h1: 0, h2: 0, daily: new Array(cb.starts.length).fill(0), first: Infinity, pred: new Map(), markets: new Set(), devices: new Set(), divisions: new Set(), bixby: new Set() };
       acc.set(r.utterance_pattern, x);
     }
     x.rows.push(r);
@@ -684,6 +849,8 @@ export function patternsOf(a: Analysis): { items: NewPattern[]; terms: NovelTerm
     x.pred.set(r.intent_predicted, (x.pred.get(r.intent_predicted) ?? 0) + 1);
     x.markets.add(r.market);
     x.devices.add(r.device_type);
+    x.divisions.add(r.division);
+    x.bixby.add(r.bixby_version);
     const ts = new Set(tokens(r.utterance_text, r.language));
     const prod = hasProductTerm(r.utterance_text);
     if (prod) ts.add(prod);
@@ -753,6 +920,8 @@ export function patternsOf(a: Analysis): { items: NewPattern[]; terms: NovelTerm
       intents_predicted: [...x.pred.entries()].sort((u, v) => v[1] - u[1]).map(([i, count]) => ({ intent: i, count })),
       markets: [...x.markets].sort() as Market[],
       devices: [...x.devices].sort(),
+      divisions: [...x.divisions].sort() as NewPattern["divisions"],
+      bixby_versions: bixbyOrder().filter((v) => x.bixby.has(v)),
       examples: ex.map((r) => ({
         utterance_id: r.utterance_id,
         utterance_text: r.utterance_text,

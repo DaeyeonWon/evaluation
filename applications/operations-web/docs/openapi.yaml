@@ -1384,14 +1384,27 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
         - $ref: '#/components/parameters/Issue_sort'
+        - $ref: '#/components/parameters/Issue_group'
+        - $ref: '#/components/parameters/Issue_subgroup'
+        - $ref: '#/components/parameters/Issue_group_size'
+        - $ref: '#/components/parameters/Issue_group_key'
+        - $ref: '#/components/parameters/Issue_subgroup_key'
+        - $ref: '#/components/parameters/Issue_group_page'
         - $ref: '#/components/parameters/Page'
         - name: pageSize
           in: query
@@ -1440,10 +1453,17 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
@@ -1486,10 +1506,17 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
@@ -1532,10 +1559,17 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
@@ -1594,10 +1628,17 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
@@ -1640,10 +1681,17 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
@@ -1687,17 +1735,24 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
         - name: issue_base
           in: query
           required: false
-          description: "Console page that opens `?issue=<id>` (`/issues` or `/issues/<x>`). When set, each issue row also links to it; FAIL-row (`/results`) evidence links are always included and keep the request range."
+          description: "Legacy: `/issues/a|b|c` links issues as `?issue=<id>`. Without it issue rows link to the single-issue page `/issues/<id>` (keeping the row filters); FAIL-row (`/results`) evidence links keep the request range."
           schema:
             type: string
             pattern: '^/issues(/[a-z])?$'
@@ -1708,6 +1763,149 @@ paths:
             text/markdown:
               schema:
                 type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/breakdown:
+    get:
+      tags:
+        - Issues
+      summary: "One card per value of a dim — severity counts, FAIL rate + delta vs baseline, FAIL volume and share, trend, top 3 issues, top new pattern (\u00a78.11)"
+      operationId: get__issues_breakdown
+      parameters:
+        - $ref: '#/components/parameters/Issue_dim'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+          description: max cards (rest counted in `truncated`)
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueBreakdown'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+      x-permission: view
+      x-range: true
+  /issues/matrix:
+    get:
+      tags:
+        - Issues
+      summary: "Heatmap over any two dims (fail_rate | fail_count | delta | issue_count); axes capped with \"__other__\" folding (\u00a78.11)"
+      operationId: get__issues_matrix
+      parameters:
+        - name: x
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/IssueDim'
+        - name: y
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/IssueDim'
+        - name: metric
+          in: query
+          schema:
+            $ref: '#/components/schemas/IssueMatrixMetric'
+        - name: max_x
+          in: query
+          schema:
+            type: integer
+            minimum: 2
+            maximum: 40
+            default: 12
+        - name: max_y
+          in: query
+          schema:
+            type: integer
+            minimum: 2
+            maximum: 40
+            default: 12
+        - $ref: '#/components/parameters/Range'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - $ref: '#/components/parameters/Issue_agent_function'
+        - $ref: '#/components/parameters/Issue_capsule'
+        - $ref: '#/components/parameters/Issue_intent'
+        - $ref: '#/components/parameters/Issue_language'
+        - $ref: '#/components/parameters/Issue_market'
+        - $ref: '#/components/parameters/Issue_device'
+        - $ref: '#/components/parameters/Issue_model_version'
+        - $ref: '#/components/parameters/Issue_pipeline'
+        - $ref: '#/components/parameters/Issue_pipeline_version'
+        - $ref: '#/components/parameters/Issue_failure_reason'
+        - $ref: '#/components/parameters/Issue_os_version'
+        - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
+        - $ref: '#/components/parameters/Issue_severity'
+        - $ref: '#/components/parameters/Issue_status'
+        - $ref: '#/components/parameters/Issue_novelty'
+        - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
+        - $ref: '#/components/parameters/Issue_q'
+        - $ref: '#/components/parameters/Issue_min_score'
+        - $ref: '#/components/parameters/Issue_group_by'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueDimMatrix'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1740,10 +1938,17 @@ paths:
         - $ref: '#/components/parameters/Issue_failure_reason'
         - $ref: '#/components/parameters/Issue_os_version'
         - $ref: '#/components/parameters/Issue_one_ui_version'
+        - $ref: '#/components/parameters/Issue_division'
+        - $ref: '#/components/parameters/Issue_region'
+        - $ref: '#/components/parameters/Issue_bixby_version'
         - $ref: '#/components/parameters/Issue_severity'
         - $ref: '#/components/parameters/Issue_status'
         - $ref: '#/components/parameters/Issue_novelty'
         - $ref: '#/components/parameters/Issue_severity_class'
+        - $ref: '#/components/parameters/Issue_category'
+        - $ref: '#/components/parameters/Issue_user_impact'
+        - $ref: '#/components/parameters/Issue_dev_miss'
+        - $ref: '#/components/parameters/Issue_must_handle'
         - $ref: '#/components/parameters/Issue_q'
         - $ref: '#/components/parameters/Issue_min_score'
         - $ref: '#/components/parameters/Issue_group_by'
@@ -1890,6 +2095,33 @@ paths:
             type: array
             items:
               $ref: '#/components/schemas/FailureReason'
+        - name: division
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Division'
+          description: Issue Report dimension (device_type → division)
+        - name: region
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Region'
+          description: Issue Report dimension (market → region)
+        - name: bixby_version
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: Bixby client version
         - $ref: '#/components/parameters/WorkflowIdQ'
         - name: batch_id
           in: query
@@ -2046,6 +2278,33 @@ paths:
             type: array
             items:
               $ref: '#/components/schemas/FailureReason'
+        - name: division
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Division'
+          description: Issue Report dimension (device_type → division)
+        - name: region
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/Region'
+          description: Issue Report dimension (market → region)
+        - name: bixby_version
+          in: query
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+          description: Bixby client version
         - $ref: '#/components/parameters/WorkflowIdQ'
         - name: batch_id
           in: query
@@ -3342,6 +3601,36 @@ components:
         items:
           type: string
       description: "Row filter (before clustering): one_ui_version"
+    Issue_division:
+      name: division
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/Division'
+      description: "Row filter (before clustering): division (device_type → division, domain.ts deviceDivision)"
+    Issue_region:
+      name: region
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/Region'
+      description: "Row filter (before clustering): region (market → region, domain.ts marketRegion)"
+    Issue_bixby_version:
+      name: bixby_version
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          type: string
+      description: "Row filter (before clustering): bixby_version (Bixby client version)"
     Issue_severity:
       name: severity
       in: query
@@ -3386,6 +3675,88 @@ components:
           type: string
           enum: ["safety", "policy", "wrong_action", "quality"]
       description: "Issue filter (after scoring): severity_class"
+    Issue_category:
+      name: category
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/IssueCategory'
+      description: "Issue filter (after scoring): issue taxonomy category (§8.10); also restricts counted FAILs of breakdown / matrix"
+    Issue_user_impact:
+      name: user_impact
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/UserImpactType'
+      description: "Issue filter (after scoring): user_impact_type (user lens)"
+    Issue_dev_miss:
+      name: dev_miss
+      in: query
+      style: form
+      explode: false
+      schema:
+        type: array
+        items:
+          $ref: '#/components/schemas/DevMissType'
+      description: "Issue filter (after scoring): dev_miss_type (dev lens)"
+    Issue_must_handle:
+      name: must_handle
+      in: query
+      schema:
+        type: boolean
+      description: "Issue filter (after scoring): must_handle (true | false; also 1/0, yes/no)"
+    Issue_group:
+      name: group
+      in: query
+      schema:
+        $ref: '#/components/schemas/IssueDim'
+      description: "GET /issues only: also return `groups` — issues grouped by this dim (row dims: the issue's dominant value)"
+    Issue_subgroup:
+      name: subgroup
+      in: query
+      schema:
+        $ref: '#/components/schemas/IssueDim'
+      description: Nested grouping inside each group
+    Issue_group_size:
+      name: group_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 10
+      description: Items per group (and per subgroup)
+    Issue_group_key:
+      name: group_key
+      in: query
+      schema:
+        type: string
+      description: Return only this group, its items paged by `group_page`
+    Issue_subgroup_key:
+      name: subgroup_key
+      in: query
+      schema:
+        type: string
+      description: With group_key — only this subgroup, paged by `group_page`
+    Issue_group_page:
+      name: group_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Issue_dim:
+      name: dim
+      in: query
+      required: true
+      schema:
+        $ref: '#/components/schemas/IssueDim'
     Issue_q:
       name: q
       in: query
@@ -7836,6 +8207,283 @@ components:
     Market:
       type: string
       enum: ["KR", "US", "GB", "JP", "ES", "MX"]
+    Division:
+      type: string
+      enum: ["Mobile", "Wearable", "Audio", "TV", "Appliance"]
+      description: ResultRow.division — device_type mapped by domain.ts `deviceDivision`
+    Region:
+      type: string
+      enum: ["KR", "NA", "EU", "JP", "LATAM"]
+      description: ResultRow.region — market mapped by domain.ts `marketRegion`
+    IssueCategory:
+      type: string
+      enum: ["safety", "policy", "new_feature", "locale", "timeout", "asr", "wrong_action", "slot", "misroute", "response_quality"]
+      description: Rule-based issue taxonomy (data-contract §8.10), first matching rule wins
+    UserImpactType:
+      type: string
+      enum: ["safety_privacy", "wrong_action", "task_blocked", "misunderstood", "inappropriate_content", "degraded", "minor"]
+    DevMissType:
+      type: string
+      enum: ["supported_intent_failed", "regression", "slot_extraction", "routing", "asr_robustness", "guardrail_miss", "new_feature_gap", "locale_gap", "performance", "out_of_scope"]
+    IssueDim:
+      type: string
+      enum: ["agent_function", "capsule", "intent", "language", "market", "device", "model_version", "pipeline", "pipeline_version", "failure_reason", "os_version", "one_ui_version", "division", "region", "bixby_version", "category", "user_impact", "dev_miss", "must_handle", "severity", "status", "novelty", "severity_class"]
+      description: Row dims read a result column; category / user_impact / dev_miss / must_handle / severity / status / novelty / severity_class are issue-level (rows take their issue's value)
+    IssueMatrixMetric:
+      type: string
+      enum: ["fail_rate", "fail_count", "delta", "issue_count"]
+      default: fail_rate
+    IssueDimStat:
+      type: object
+      properties:
+        value:
+          type: string
+        total:
+          type: integer
+          description: rows (PASS+FAIL); issue-level dims — every row in scope
+        fails:
+          type: integer
+        fail_rate:
+          type: [number, 'null']
+        baseline_total:
+          type: integer
+        baseline_fails:
+          type: integer
+        baseline_fail_rate:
+          type: [number, 'null']
+        delta:
+          type: [number, 'null']
+          description: percentage points
+        issues:
+          type: integer
+      required: [value, total, fails, fail_rate, baseline_total, baseline_fails, baseline_fail_rate, delta, issues]
+    IssueBreakdownItem:
+      allOf:
+        - $ref: '#/components/schemas/IssueDimStat'
+        - type: object
+          properties:
+            label:
+              oneOf:
+                - $ref: '#/components/schemas/IssueText'
+                - type: 'null'
+            rank:
+              type: integer
+            share:
+              type: number
+              description: share of counted FAILs, %
+            by_severity:
+              type: object
+              additionalProperties:
+                type: integer
+            trend:
+              type: array
+              items:
+                type: integer
+            trend_rate:
+              type: array
+              items:
+                type: [number, 'null']
+            top_issues:
+              type: array
+              maxItems: 3
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  title:
+                    $ref: '#/components/schemas/IssueText'
+                  severity:
+                    $ref: '#/components/schemas/IssueSeverity'
+                  severity_class:
+                    $ref: '#/components/schemas/SeverityClass'
+                  score:
+                    type: number
+                  count:
+                    type: integer
+                  count_in_value:
+                    type: integer
+                  category:
+                    $ref: '#/components/schemas/IssueCategory'
+                  user_impact_type:
+                    $ref: '#/components/schemas/UserImpactType'
+                  dev_miss_type:
+                    $ref: '#/components/schemas/DevMissType'
+                  signature:
+                    type: object
+                    additionalProperties: true
+            top_pattern:
+              oneOf:
+                - type: object
+                  properties:
+                    id:
+                      type: string
+                    template:
+                      type: string
+                    language:
+                      type: string
+                    kind:
+                      type: string
+                    fail_rate:
+                      type: number
+                    intent_expected:
+                      type: string
+                    count_in_value:
+                      type: integer
+                - type: 'null'
+    IssueBreakdown:
+      type: object
+      properties:
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        baseline:
+          $ref: '#/components/schemas/IssueBaseline'
+        dim:
+          $ref: '#/components/schemas/IssueDim'
+        bucket:
+          type: string
+          enum: [hour, day]
+        t:
+          type: array
+          items:
+            type: number
+        totals:
+          $ref: '#/components/schemas/IssueDimStat'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueBreakdownItem'
+        truncated:
+          type: integer
+      required: [range, baseline, dim, bucket, t, totals, items, truncated]
+    IssueDimMatrixCell:
+      allOf:
+        - $ref: '#/components/schemas/IssueDimStat'
+        - type: object
+          properties:
+            x:
+              type: string
+            y:
+              type: string
+            value:
+              type: [number, 'null']
+              description: the requested metric
+            top_issue_id:
+              type: [string, 'null']
+    IssueDimMatrix:
+      type: object
+      properties:
+        range:
+          $ref: '#/components/schemas/ResolvedRange'
+        baseline:
+          $ref: '#/components/schemas/IssueBaseline'
+        x:
+          $ref: '#/components/schemas/IssueDim'
+        y:
+          $ref: '#/components/schemas/IssueDim'
+        metric:
+          $ref: '#/components/schemas/IssueMatrixMetric'
+        x_values:
+          type: array
+          items:
+            type: string
+          description: '"__other__" = folded values beyond max_x'
+        y_values:
+          type: array
+          items:
+            type: string
+        x_labels:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/IssueText'
+              - type: 'null'
+        y_labels:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/IssueText'
+              - type: 'null'
+        x_totals:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueDimStat'
+        y_totals:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueDimStat'
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueDimMatrixCell'
+        domain:
+          oneOf:
+            - type: array
+              items:
+                type: number
+              minItems: 2
+              maxItems: 2
+            - type: 'null'
+        folded:
+          type: object
+          properties:
+            x:
+              type: integer
+            y:
+              type: integer
+      required: [range, baseline, x, y, metric, x_values, y_values, cells, folded]
+    IssueGroup:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          oneOf:
+            - $ref: '#/components/schemas/IssueText'
+            - type: 'null'
+        count:
+          type: integer
+        fails:
+          type: integer
+        by_severity:
+          type: object
+          additionalProperties:
+            type: integer
+        max_score:
+          type: number
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        subgroups:
+          type: array
+          items:
+            $ref: '#/components/schemas/IssueGroup'
+      required: [key, label, count, fails, by_severity, max_score, items, page, pageSize]
+    IssueBixbyRegression:
+      type: object
+      description: newest vs previous Bixby version on the issue's dominant division (informational, not a score factor)
+      properties:
+        division:
+          $ref: '#/components/schemas/Division'
+        current:
+          type: string
+        previous:
+          type: string
+        currentRate:
+          type: number
+        previousRate:
+          type: number
+        currentTotal:
+          type: integer
+        previousTotal:
+          type: integer
+        z:
+          type: number
     IssueSeverity:
       type: string
       enum: ["P0", "P1", "P2", "P3"]
@@ -8084,6 +8732,46 @@ components:
           type: object
           additionalProperties:
             type: string
+        bixby_regression:
+          oneOf:
+            - $ref: '#/components/schemas/IssueBixbyRegression'
+            - type: 'null'
+        category:
+          $ref: '#/components/schemas/IssueCategory'
+        category_reason:
+          $ref: '#/components/schemas/IssueText'
+        user_impact_type:
+          $ref: '#/components/schemas/UserImpactType'
+        dev_miss_type:
+          $ref: '#/components/schemas/DevMissType'
+        must_handle:
+          type: boolean
+        must_handle_reason:
+          $ref: '#/components/schemas/IssueText'
+        type_reason:
+          type: object
+          properties:
+            user_impact:
+              $ref: '#/components/schemas/IssueText'
+            dev_miss:
+              $ref: '#/components/schemas/IssueText'
+        divisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Division'
+        regions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Region'
+        bixby_versions:
+          type: array
+          items:
+            type: string
+        dominant:
+          type: object
+          description: value with the most FAIL rows per row dim (agent_function … bixby_version)
+          additionalProperties:
+            type: string
       required:
         - id
         - rank
@@ -8122,6 +8810,17 @@ components:
           type: object
           additionalProperties:
             type: number
+        group:
+          $ref: '#/components/schemas/IssueDim'
+        subgroup:
+          oneOf:
+            - $ref: '#/components/schemas/IssueDim'
+            - type: 'null'
+        groups:
+          type: array
+          description: only with `group`
+          items:
+            $ref: '#/components/schemas/IssueGroup'
       required:
         - items
         - total
@@ -8272,6 +8971,19 @@ components:
                   type: string
                 count:
                   type: integer
+                  description: FAIL rows (columns) or issues (issue-level dims)
+                fails:
+                  type: integer
+                total:
+                  type: integer
+                fail_rate:
+                  type: [number, 'null']
+                baseline_fail_rate:
+                  type: [number, 'null']
+                delta:
+                  type: [number, 'null']
+                issues:
+                  type: integer
     IssueDetail:
       allOf:
         - $ref: '#/components/schemas/Issue'
@@ -8299,6 +9011,7 @@ components:
               additionalProperties: true
             breakdown:
               type: object
+              description: language, market, device, model_version, pipeline_version, os_version, one_ui_version, division, region, bixby_version
               additionalProperties:
                 type: array
                 items:
@@ -8309,6 +9022,12 @@ components:
                 type: object
                 additionalProperties: true
             similar:
+              type: array
+              description: relation same_intent | same_function_reason | same_prediction | same_category (+ category)
+              items:
+                type: object
+                additionalProperties: true
+            same_category:
               type: array
               items:
                 type: object
@@ -8370,6 +9089,14 @@ components:
           type: array
           items:
             type: string
+        divisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Division'
+        bixby_versions:
+          type: array
+          items:
+            type: string
         examples:
           type: array
           items:
@@ -8418,7 +9145,7 @@ components:
           type: string
         kind:
           type: string
-          enum: ["overall", "critical", "safety", "regression", "spike", "new_pattern", "market", "hotspot", "concentration", "improvement"]
+          enum: ["overall", "critical", "safety", "regression", "spike", "new_pattern", "market", "hotspot", "concentration", "improvement", "division", "region", "bixby_version"]
         key:
           type: string
           description: issues.insights.*
@@ -8591,6 +9318,13 @@ components:
         utterance_pattern:
           type: string
           description: normalized utterance template id (up-{lang}-{hash})
+        division:
+          $ref: '#/components/schemas/Division'
+        region:
+          $ref: '#/components/schemas/Region'
+        bixby_version:
+          type: string
+          description: Bixby client version on the device (e.g. 4.0.3, 4.1.0-beta)
       required:
         - utterance_id
         - workflow_id

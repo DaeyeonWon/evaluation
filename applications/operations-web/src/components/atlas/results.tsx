@@ -15,7 +15,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { LangBadge } from "@/components/shared";
-import { CAPSULES, DEVICES, FAILURE_REASON_META, LANG_CODES } from "@/lib/catalog";
+import { BIXBY_VERSIONS, CAPSULES, DEVICES, DIVISIONS, FAILURE_REASON_META, LANG_CODES, REGIONS } from "@/lib/catalog";
 import { api, csvUrl, downloadCsv, parseAsInt, parseAsList, parseAsString, useApi, useQueryStates, type ResultQuery } from "@/lib/client";
 import type { FailureReason, LangCode, ResultRow, ResultsAggregates } from "@/lib/types";
 import { capsuleLabel, deviceLabel, failureReasonLabel, statusLabel } from "@/i18n";
@@ -47,9 +47,13 @@ const PARSERS = {
   intent_predicted: parseAsString,
   utterance_pattern: parseAsString,
   failure_reason: parseAsString,
+  // Issue Report dimensions (device → division, market → region, Bixby client version)
+  division: parseAsString,
+  region: parseAsString,
+  bixby_version: parseAsString,
 };
 /** URL params set by Issue Report links (each rendered as a removable chip). */
-const ISSUE_SCOPE = ["agent_function", "market", "intent_predicted", "utterance_pattern"] as const;
+const ISSUE_SCOPE = ["agent_function", "market", "intent_predicted", "utterance_pattern", "division", "region", "bixby_version"] as const;
 const PAGE = 50;
 const RESULTS_BUCKET = "bixby-eval-results";
 
@@ -71,6 +75,9 @@ function toQuery(f: F): ResultQuery {
     market: f.market ?? undefined,
     intent_predicted: f.intent_predicted ?? undefined,
     utterance_pattern: f.utterance_pattern ?? undefined,
+    division: f.division ?? undefined,
+    region: f.region ?? undefined,
+    bixby_version: f.bixby_version ?? undefined,
     batch_id: f.batch_id ?? undefined,
     workflow_id: f.workflow_id ?? undefined,
     q: f.q ?? undefined,
@@ -157,6 +164,7 @@ function CsvModal({ url, label, onClose }: { url: string; label: string; onClose
 function UttDrawer({ id, rows, onNav, onClose }: { id: string; rows: ResultRow[]; onNav: (id: string) => void; onClose: () => void }) {
   const rh = useRangeHref();
   const t = useT("results");
+  const ti = useT("issues");
   const tc = useT("common");
   const locale = useLocale();
   const f = useFmt();
@@ -228,6 +236,10 @@ function UttDrawer({ id, rows, onNav, onClose }: { id: string; rows: ResultRow[]
                 <LangBadge lang={r.language} />
                 <span className="chip">{capsuleLabel(r.capsule_id ?? r.capsule, locale)}</span>
                 <span className="chip">{deviceLabel(r.device_type, locale)}</span>
+                <span className="chip">
+                  {ti.dynamic(`division.${r.division}`, undefined, r.division)} · {ti.dynamic(`region.${r.region}`, undefined, r.region)}
+                </span>
+                <span className="chip mono">Bixby {r.bixby_version}</span>
               </div>
               <div className="cmp">
                 <div className="full">
@@ -375,6 +387,7 @@ function ResultFiles({ rangeKey, params, label }: { rangeKey: string; params: Re
 
 export function ResultsScreen() {
   const t = useT("results");
+  const ti = useT("issues");
   const tc = useT("common");
   const locale = useLocale();
   const fm = useFmt();
@@ -497,6 +510,9 @@ export function ResultsScreen() {
             {sel1(t("filters.capsule"), "capsule", CAPSULES.map((c) => c.id), (id) => capsuleLabel(id, locale))}
             {sel1(t("filters.intent"), "intent", intents, (x) => x, true)}
             {sel1(t("filters.device"), "device", DEVICES, (x) => deviceLabel(x, locale))}
+            {sel1(ti("column.division"), "division", DIVISIONS, (x) => withCount(ti.dynamic(`division.${x}`, undefined, x), facets?.division?.[x as keyof typeof facets.division]))}
+            {sel1(ti("column.region"), "region", REGIONS, (x) => withCount(ti.dynamic(`region.${x}`, undefined, x), facets?.region?.[x as keyof typeof facets.region]))}
+            {sel1(ti("column.bixby_version"), "bixby_version", [...BIXBY_VERSIONS].reverse(), (x) => withCount(x, facets?.bixby_version?.[x]), true)}
             {sel1(t("filters.result"), "result", ["PASS", "FAIL"], (x) => x)}
             {sel1(t("filters.reason"), "reason", Object.keys(FAILURE_REASON_META), (k) => `${failureReasonLabel(k, locale)} · ${k}`)}
           </div>
@@ -511,7 +527,7 @@ export function ResultsScreen() {
             {ISSUE_SCOPE.map((k) =>
               f[k] ? (
                 <span className="chip" key={k}>
-                  {k} {f[k]}
+                  {k === "division" || k === "region" ? `${ti(`column.${k}`)} ${ti.dynamic(`${k}.${f[k]}`, undefined, f[k] ?? "")}` : k === "bixby_version" ? `Bixby ${f[k]}` : `${k} ${f[k]}`}
                   <button className="btn sm ghost icon" style={{ height: 18, width: 18 }} aria-label={`${tc("actions.resetFilters")}: ${k}`} onClick={() => setFilter({ [k]: null })}>
                     <X />
                   </button>
@@ -531,7 +547,7 @@ export function ResultsScreen() {
               onClick={() => {
                 setQDraft(null);
                 setBatchDraft(null);
-                setF({ language: [], capsule: null, intent: null, device: null, version: null, model_version: null, pipeline_id: null, result: null, reason: null, batch_id: null, workflow_id: null, q: null, agent_function: null, market: null, intent_predicted: null, utterance_pattern: null, failure_reason: null, page: 1 });
+                setF({ language: [], capsule: null, intent: null, device: null, version: null, model_version: null, pipeline_id: null, result: null, reason: null, batch_id: null, workflow_id: null, q: null, agent_function: null, market: null, intent_predicted: null, utterance_pattern: null, failure_reason: null, division: null, region: null, bixby_version: null, page: 1 });
               }}
             >
               <X />
@@ -591,6 +607,7 @@ export function ResultsScreen() {
                   </button>
                 </th>
                 <th>{t("table.device")}</th>
+                <th>{ti("column.division")} · Bixby</th>
                 <th>Pipeline</th>
                 <th>{t("table.model")}</th>
               </tr>
@@ -598,7 +615,7 @@ export function ResultsScreen() {
             <tbody>
               {!d ? (
                 <tr>
-                  <td colSpan={13}>
+                  <td colSpan={14}>
                     <Skeleton rows={6} />
                   </td>
                 </tr>
@@ -662,6 +679,11 @@ export function ResultsScreen() {
                       <td style={{ fontSize: 11.5 }}>{fr ? <span style={{ color: `var(--st-${fr.tone})` }}>{failureReasonLabel(r.failure_reason, locale)}</span> : "—"}</td>
                       <td className="mono r">{fm.number(r.latency_ms)}</td>
                       <td className="muted">{deviceLabel(r.device_type, locale)}</td>
+                      <td style={{ fontSize: 11.5 }}>
+                        {ti.dynamic(`division.${r.division}`, undefined, r.division)} · <span className="muted">{ti.dynamic(`region.${r.region}`, undefined, r.region)}</span>
+                        <br />
+                        <span className="mono muted">{r.bixby_version}</span>
+                      </td>
                       <td className="mono" style={{ fontSize: 11 }}>
                         {r.pipeline_id}
                         <br />
@@ -675,7 +697,7 @@ export function ResultsScreen() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={13}>
+                  <td colSpan={14}>
                     <Empty title={t("table.emptyTitle")}>{t("table.emptyBody")}</Empty>
                   </td>
                 </tr>

@@ -154,8 +154,8 @@ ADR-004(plan §3.3)에 따라 Firestore는 실시간 상태, BigQuery는 분석,
 | **Workflow detail** (`/workflows/[id]` · `detail.tsx`, `pipelines/job-explorer.tsx`) | `GET /workflows/{id}` (4s poll); `GET /workflows/{id}/pipeline-runs` (5s); `GET /workflows/{id}/events` (5s); `GET /workflows/{id}/attempts`; `GET /workflows/{id}/logs?order=asc&min_severity&component&event_type&q&trace_id&attempt&pipeline_job_id&job_scope=tree&node_path&limit=400` (4s); `GET /dead-letters/{dead_letter_id}`; `POST /workflows/{id}/cancel` | `transition`, `job`, `dlq` | Firestore(workflow·attempts·pipeline_jobs·events hot), Cloud Logging, Vertex API | ≤ 5s | `Workflow` 전체(input, result, attempts[], error.path/node_path, current_node_path, current_job_id, status_history), `JobNode`(status, progress, resources, inputs/outputs, error), `WorkflowEvent`, `LogEntry`(ts, severity, node_path/component/service, message, stack_trace, trace_id), `AttemptHistory.replayChain` |
 | **Files** (`/files` · `files/files-screen.tsx`) | `GET /files/search?q&stage&bucket&language&range&limit` (+ `limit=1`로 단계별 count) | `transition` | BigQuery `object_index` (GCS notification + 상태 이벤트로 갱신) | ≤ 30s | `FileSearchHit`(stage, kind, bucket/object/uri, generation, size, updated, workflow_id, batch_id, pipeline_job_id, current_status, ref, match_ranges), `byStage` |
 | **DLQ** (`/dlq` · `dlq.tsx`) | `GET /dead-letters?range&status&language&category&error_code&operator&pipeline_id&q&sort&page&pageSize`; `GET /dead-letters?pageSize=1`(카운트); `GET /replays?range`; `GET /workflows?range&replay=true&pageSize=200`; `GET /dead-letters/{id}`; `POST /dead-letters/{id}/replay`, `/close`, `/assign`; `POST /dead-letters/replay-batch` | `dlq`, `transition` | Firestore `dead_letters`, `replays`, Cloud Logging(최근 로그) | ≤ 5s | `DeadLetter`(failure_category, error_code, failure_reason, failed_path, attempts, attempt_history, last_log_excerpt, last_stack_trace, assigned_operator, status, replay_ids, notes), `outsideRange`, `Replay`, `BatchReplayResult` |
-| **Results** (`/results` · `results.tsx`, `results/charts.tsx`) | `GET /results?range&language&capsule&intent&device&version&model_version&pipeline_id&result&failure_reason&workflow_id&batch_id&q&min_score&max_score&min_latency&max_latency&sort&page&pageSize`; `GET /results?…&pageSize=1`; `GET /results/{utterance_id}`; `GET /results/file`; `GET /gcs/objects?bucket=bixby-eval-results&delimiter=&limit=5000&range`; 다운로드 `GET /results/csv?…` | `transition` | BigQuery `utterance_results`, GCS results bucket | ≤ 2 min | `ResultRow` 29개 컬럼(Issue Report용 `agent_function`, `agent_function_predicted`, `market`, `os_version`, `one_ui_version`, `utterance_pattern` 포함), `ResultsAggregates`(byCapsule, byDevice, byFailureReason, latency p50/p95, judgeScoreHistogram, latencyHistogramFine, byModelVersion, byPipeline, capsuleLanguage, byDate, byHour), `facets`, `ResultDetail.inputLine` |
-| **Issue Report** (`/issues` chooser · `/issues/a|b|c` · `issues-index.tsx`, `issues-shared/*`, `issues-a|b|c/*`) | `GET /issues?range&agent_function&capsule&intent&language&market&device&model_version&pipeline&pipeline_version&failure_reason&os_version&one_ui_version&severity&status&novelty&severity_class&q&min_score&group_by&sort&page&pageSize`; `GET /issues/summary?…`; `GET /issues/facets?…`; `GET /issues/{id}?…&page&pageSize`; `GET /issues/patterns?…&kind&limit`; `GET /issues/insights?…`; `PATCH /issues/{id}` (`issues:write`); 다운로드 `GET /issues/export.csv?…`, `GET /issues/report.md?…`; drill-down `GET /results?agent_function&intent&intent_predicted&failure_reason&utterance_pattern&market&result=FAIL` | `issue`, (30s poll) | BigQuery `utterance_results` (+ `agent_function`, `market`, `os_version`, `one_ui_version`, `utterance_pattern`), `issue_triage`, `issue_triage_history`, `audit_log` | ≤ 2 min (triage ≤ 5s) | `Issue`(score, factors[], reasons[], severity, severity_class, novelty, count, fail_rate, baseline_rate, delta, spark, patterns, regression, state), `IssueSummary`(kpis, distributions, columns, trend, matrix, market_matrix, top_movers), `NewPattern`, `IssueInsight` — §14 |
+| **Results** (`/results` · `results.tsx`, `results/charts.tsx`) | `GET /results?range&language&capsule&intent&device&division&region&bixby_version&version&model_version&pipeline_id&result&failure_reason&workflow_id&batch_id&q&min_score&max_score&min_latency&max_latency&sort&page&pageSize`; `GET /results?…&pageSize=1`; `GET /results/{utterance_id}`; `GET /results/file`; `GET /gcs/objects?bucket=bixby-eval-results&delimiter=&limit=5000&range`; 다운로드 `GET /results/csv?…` | `transition` | BigQuery `utterance_results`, GCS results bucket | ≤ 2 min | `ResultRow` 32개 컬럼(Issue Report용 `agent_function`, `agent_function_predicted`, `market`, `os_version`, `one_ui_version`, `utterance_pattern`, `division`, `region`, `bixby_version` 포함), `ResultsAggregates`(byCapsule, byDevice, byFailureReason, latency p50/p95, judgeScoreHistogram, latencyHistogramFine, byModelVersion, byPipeline, capsuleLanguage, byDate, byHour), `facets`, `ResultDetail.inputLine` |
+| **Issue Report** (`/issues` Triage · `/issues/categories` 분해 보기 · `/issues/analysis` · `/issues/report` · `/issues/[id]` · `issues-shared/*`, `issues/*`) | `GET /issues?range&agent_function&capsule&intent&language&market&device&model_version&pipeline&pipeline_version&failure_reason&os_version&one_ui_version&division&region&bixby_version&severity&status&novelty&severity_class&category&user_impact&dev_miss&must_handle&q&min_score&group_by&sort&page&pageSize` (+ Triage `group&subgroup&group_size&group_key&subgroup_key&group_page`); `GET /issues/summary?…`; `GET /issues/facets?…`; `GET /issues/breakdown?dim&…`; `GET /issues/matrix?x&y&metric&max_x&max_y&…`; `GET /issues/{id}?…&page&pageSize`; `GET /issues/patterns?…&kind&limit`; `GET /issues/insights?…`; `PATCH /issues/{id}` (`issues:write`); 다운로드 `GET /issues/export.csv?…`, `GET /issues/report.md?…`; drill-down `GET /results?agent_function&intent&intent_predicted&failure_reason&utterance_pattern&market&division&region&bixby_version&result=FAIL` | `issue`, (30s poll) | BigQuery `utterance_results` (+ `agent_function`, `market`, `os_version`, `one_ui_version`, `utterance_pattern`, `division`, `region`, `bixby_version`), `issue_daily_agg`, `issue_triage`, `issue_triage_history`, `audit_log`; 매핑 `dim_device`, capability 표 | ≤ 2 min (triage ≤ 5s) | `Issue`(score, factors[], reasons[], severity, severity_class, novelty, count, fail_rate, baseline_rate, delta, spark, patterns, regression, bixby_regression, category, user_impact_type, dev_miss_type, must_handle, divisions, regions, bixby_versions, dominant, state), `IssueSummary`, `IssueFacets`(fail rate·delta·issues), `IssueBreakdown`, `IssueDimMatrix`, `IssueGroup`, `NewPattern`, `IssueInsight` — §14 |
 | **Analytics** (`/analytics` · `analytics.tsx`, `analytics/pipelines.tsx`) | `GET /analytics/summary?range`; `GET /analytics/errors?range&top=40`; `GET /analytics/cost?range`; `GET /incidents?range`; `GET /pipelines/{id}?range` | `transition` | BigQuery `aipo_ops` 뷰, billing export | 5분 bucket ≤ 5 min, 일 ≤ 1 h, 비용 ≤ 24 h | `HourlyMetrics`, `FiveMinMetrics`, `DailyMetrics`(costUsd 7개 항목), `ComponentDuration`(leaf별 avg/p95, byLanguage/byVersion/byPipeline), `VersionComparison`, `LanguageSummary`, `ErrorAnalytics.topErrorCodes[].paths`, `PipelineSummary` |
 | **Config** (`/config` · `config.tsx`) | `GET /config`; `PATCH /config`; `GET /operators`; `GET /audit?range&q&pageSize=50` | `audit` | Firestore `config/runtime`, Terraform output, Cloud Run Admin API, BigQuery `audit_log` | ≤ 5s | `AppConfig`(retry, timeouts, queuePolicy, pipelineVersionDetails, services[], alertPolicies[], terraformDefaults, runtimeConfig, drift[]), `AuditEntry` |
 | **Hermes** (`/hermes` · `app/(console)/hermes/page.tsx`) | 서버 컴포넌트: session + `hermes:access` 검사 후 `HERMES_DASHBOARD_URL`로 307 | — | `console.config.ts`, env | — | `SessionInfo.links.hermes.allowed/configured` (URL은 노출하지 않음) |
@@ -1043,7 +1043,7 @@ Component별 출력 파일명은 `domain.ts` `components.*.outputs[].file`이 �
 | 16 | `result` | enum | STRING NOT NULL | `PASS`\|`FAIL` | `FAIL` |
 | 17 | `failure_reason` | enum | STRING | PASS면 **빈 문자열 `""`**; FAIL이면 `INTENT_MISMATCH`\|`SLOT_ERROR`\|`RESPONSE_QUALITY`\|`TIMEOUT`\|`ASR_ERROR`\|`POLICY_VIOLATION` | `SLOT_ERROR` |
 | 18 | `latency_ms` | number | INT64 | end-to-end 응답 지연 ms. **8000 초과 = TIMEOUT 판정** | `1432` |
-| 19 | `device_type` | enum | STRING | `Galaxy S26`, `Galaxy Watch`, `Galaxy Buds`, `TV`, `Family Hub` (`domain.devices[].id`) | `Galaxy S26` |
+| 19 | `device_type` | enum | STRING | `Galaxy S26`, `Galaxy Z Fold7`, `Galaxy Tab S11`, `Galaxy Watch`, `Galaxy Buds`, `TV`, `Neo QLED`, `Family Hub`, `Bespoke AI Washer`, `Bespoke AI Oven` (`domain.devices[].id` + `deviceModels`; division은 §14.1.1) | `Galaxy S26` |
 | 20 | `model_version` | string | STRING | 평가 대상 NLU 모델 (§4.5) | `bixby-nlu-2026.10` |
 | 21 | `pipeline_id` | enum | STRING | root pipeline id | `bixby-eval-full` |
 | 22 | `pipeline_version` | enum | STRING | root release (`v1.0`\|`v1.1`\|`v1.2-rc`) | `v1.1` |
@@ -2225,8 +2225,33 @@ openapi와 `src/lib/types.ts`는 1:1이다. 타입을 바꾸면 openapi `compone
 | `market` | STRING (`KR, US, GB, JP, ES, MX`) | Preprocess | 입력 JSONL의 `locale`/계정 국가에서. 언어와 별개(es → ES/MX) |
 | `os_version`, `one_ui_version` | STRING | Preprocess | 입력 JSONL의 `device_info`에서 (예: `Wear OS 6` / `One UI 8 Watch`) |
 | `utterance_pattern` | STRING | Preprocess | Slot 값을 placeholder로 치환한 정규화 문장의 해시 id (`up-{lang}-{hash}`). 같은 Intent의 같은 표현은 같은 id. 템플릿 원문은 `utterance_patterns` 테이블에 보관 |
+| `division` | STRING (`Mobile, Wearable, Audio, TV, Appliance`) | Preprocess | **`device_type` → division 매핑 테이블**로 결정 (아래 14.1.1). 매핑에 없는 기기는 `defaultDivision`(Mobile)로 두되 로그 경고 |
+| `region` | STRING (`KR, NA, EU, JP, LATAM`) | Preprocess | **`market` → region 매핑**으로 결정: KR→KR, US→NA, GB·ES→EU, JP→JP, MX→LATAM (`domain.ts` `marketRegion`) |
+| `bixby_version` | STRING (semver, 선택적 pre-release: `3.6.12`, `4.0.3`, `4.1.0-beta`) | Preprocess | **필수.** 입력 JSONL `device_info.bixby_version`(단말의 Bixby client 버전)을 그대로 기록. 비어 있으면 행을 거부하지 말고 `unknown`으로 기록(분석에서 별도 값으로 보임). 정렬은 semver(pre-release < 정식) |
 
 BigQuery `utterance_results`: 위 컬럼 추가, `PARTITION BY DATE(eval_ts)`, `CLUSTER BY agent_function, language, failure_reason`.
+`division`·`region`·`bixby_version`도 `issue_daily_agg`의 차원에 포함한다(14.2). 결과 CSV에서는 `utterance_pattern` 뒤(30–32번)에 추가된다(§4.1 규칙: 맨 뒤에만 추가).
+
+#### 14.1.1 차원 매핑 테이블 (소유: 플랫폼 · `src/config/domain.ts`)
+
+| 테이블 | 키 → 값 | 현재 값 | 운영 규칙 |
+| --- | --- | --- | --- |
+| `deviceDivision` | device_type → division | Galaxy S26 / Z Fold7 / Tab S11 → Mobile · Galaxy Watch → Wearable · Galaxy Buds → Audio · TV / Neo QLED → TV · Family Hub / Bespoke AI Washer / Bespoke AI Oven → Appliance | 신규 기기 출시 전 Device catalog 담당이 추가(PR). 실제 시스템은 같은 표를 BigQuery `dim_device(device_type, division, launched_at)`로 두고 Preprocess가 조인한다 |
+| `marketRegion` | market → region | 위 `region` 행 | 신규 market 추가 시 함께 갱신 |
+| `bixbyVersions` | 알려진 Bixby 버전 (오래된 순, status) | 3.6.12 LEGACY · 4.0.1 STABLE · 4.0.3 ROLLOUT · 4.1.0-beta BETA | 릴리스 관리 담당이 배포 시 추가. 회귀 비교는 division별 최신 vs 직전 버전 |
+| `capabilities` | intent prefix → 지원 division / 기기 / 최소 Bixby 버전 | galaxy_ai.* Mobile ≥ 4.0.1 (gemini_handoff ≥ 4.1.0-beta) · camera.* Mobile · navigation.* Mobile·Wearable · call./message.* Mobile·Wearable·Audio · music.* Mobile·Wearable·Audio·TV + Family Hub | Capsule 담당이 기능 출시·지원 범위 변경 시 갱신. `Issue.must_handle`의 근거 — 표에 없는 intent는 전 기기 지원으로 본다 |
+
+#### 14.1.2 이슈 카테고리 · Triage lens 규칙 (소유: 플랫폼 · `src/server/services/issues-taxonomy.ts`)
+
+`Issue.category`(10종: safety, policy, new_feature, locale, timeout, asr, wrong_action, slot, misroute, response_quality),
+`user_impact_type`(7종), `dev_miss_type`(9종 + out_of_scope), `must_handle`은 **결정적 규칙**이며 실제 결과 컬럼만 쓴다
+(`failure_reason`, intent 쌍, `agent_function(_predicted)`, `judge_reason` 키워드, `utterance_pattern` 템플릿, `division`, `bixby_version`,
+회귀 factor, Bixby 버전 회귀). 규칙과 우선순위는 `docs/data-contract.md` §8.10. 실제 시스템 요구사항:
+
+- Judge 사유(`judge_reason`)에 원인 키워드를 남긴다: code-switching(`Code-switching`), 시간대(`시간대`/`timezone`), 신규 기능명(`기능명`),
+  개인정보(`개인정보`/`privacy`), 슬롯 누락(`누락`/`missing`), 장황(`장황`/`verbose`), 회피(`회피`). 없으면 해당 규칙은 적용되지 않고 다음 규칙으로 넘어간다.
+- `utterance_patterns.template`을 제공한다(code-switching·신규 기능명 판정은 Slot 값을 뺀 템플릿 기준).
+- 분류 체계(카테고리·lens 타입·우선순위) 변경은 플랫폼 소유이며 `issues` i18n 라벨(KO/EN)과 함께 바꾼다. 규칙 변경 시 Issue id는 바뀌지 않는다(분류는 id에 포함되지 않음).
 `utterance_patterns(pattern_id, language, template, intent, agent_function, first_seen_ts)`는 Preprocess가 upsert한다.
 
 ### 14.2 Baseline 창
@@ -2234,9 +2259,10 @@ BigQuery `utterance_results`: 위 컬럼 추가, `PARTITION BY DATE(eval_ts)`, `
 - 기본: 선택 범위와 같은 길이(최소 7일)의 직전 구간. `dataWindow.earliest` 이전은 잘라내며, 커버리지 < 50%이면
   범위가 14일 이상일 때 `intra_range`(범위의 마지막 7일 vs 그 이전)로 전환한다. 그것도 안 되면 `sufficient=false`이고 추세·신규성 점수는 0.
 - 실제 시스템은 Baseline 집계를 매 요청 스캔하지 말고 일 단위 집계 테이블
-  `issue_daily_agg(date, agent_function, intent_expected, intent_predicted, failure_reason, utterance_pattern, language, market, device_type, model_version, pipeline_version, one_ui_version, rows, fails)`
+  `issue_daily_agg(date, agent_function, intent_expected, intent_predicted, failure_reason, utterance_pattern, language, market, region, device_type, division, bixby_version, model_version, pipeline_version, one_ui_version, rows, fails)`
   로 제공한다(5분 이내 신선도, 30일 + Baseline 30일 = 최소 60일 보존). 신규 용어 탐지는 `utterance_term_daily(date, language, term, rows)`를 쓴다.
 - 회귀(regression)는 최신/직전 version이 동시에 운영된 구간(최신 version 출시 시각 이후)만 비교한다. Release 시각은 `pipelineVersionDetails[].releasedAt`, `models[].releasedAt`.
+- Bixby 버전 회귀(`Issue.bixby_regression`, 인사이트 `bixby_version`)는 division마다 최신 버전이 처음 관측된 시각 이후의 행만 비교한다(배포가 division별 OTA로 진행되므로 출시 시각 대신 첫 관측 시각). 점수에는 반영하지 않는다.
 
 ### 14.3 이슈(Triage) 테이블
 
@@ -2273,6 +2299,7 @@ Firestore `issue_triage/{issue_id}` (또는 BigQuery 동일 스키마)
 | `GET /issues`, `/issues/summary`, `/issues/facets`, `/issues/insights` | ≤ 300 ms | 같은 필터 조합은 30–60s 캐시 허용 (응답에 `range` echo) |
 | `GET /issues/{id}` | ≤ 300 ms | 발화 목록은 페이지(기본 20) |
 | `GET /issues/patterns` | ≤ 500 ms | 신규 용어 집계는 일 단위 사전 집계 |
+| `GET /issues/breakdown`, `/issues/matrix`, `GET /issues?group=` | ≤ 300 ms | `issue_daily_agg`의 차원(division·region·bixby_version 포함)으로 집계. matrix 축은 기본 12개로 자르고 나머지는 `__other__` |
 | `GET /issues/export.csv`, `/issues/report.md` | ≤ 2 s | 요청 locale로 사유·제목 번역 |
 
 ---

@@ -6,21 +6,33 @@
  * Query params shared by every endpoint (all optional, comma-separated lists):
  *   range | from,to                         global time range (src/server/range.ts)
  *   agent_function capsule intent language market device model_version pipeline pipeline_version
- *   failure_reason os_version one_ui_version                     → row filters (before clustering)
- *   severity status novelty severity_class q min_score           → issue filters (after scoring)
+ *   failure_reason os_version one_ui_version division region bixby_version  → row filters (before clustering)
+ *   severity status novelty severity_class category user_impact dev_miss must_handle q min_score
+ *                                                                 → issue filters (after scoring)
  *   group_by=signature|pattern   sort=score_desc|count_desc|fail_rate_desc|delta_desc|recent_desc|first_seen_desc
- *   page, pageSize (list endpoints)
+ *   page, pageSize (list endpoints); group, subgroup, group_size, group_key, subgroup_key, group_page (GET /issues)
+ * Dimension endpoints: GET /issues/breakdown?dim=… · GET /issues/matrix?x=…&y=…&metric=… (./issues-dims.ts)
  */
 import type { NextRequest } from "next/server";
-import { LANG_CODES } from "@/lib/catalog";
+import { DIVISIONS, LANG_CODES, REGIONS } from "@/lib/catalog";
 import { formatIssueText } from "@/lib/issue-text";
 import type {
   InsightList,
   Issue,
   IssueColumn,
+  IssueBreakdown,
+  IssueBreakdownItem,
+  IssueCategory,
   IssueColumnStat,
   IssueDetail,
-  IssueFacetKey,
+  IssueDim,
+  IssueDimMatrix,
+  IssueDimMatrixCell,
+  IssueDimStat,
+  IssueGroup,
+  IssueMatrixMetric,
+  DevMissType,
+  UserImpactType,
   IssueFacets,
   IssueFactorKey,
   IssueGroupBy,
@@ -55,15 +67,18 @@ import {
   RESULTS_PARAM,
   SEVERITIES,
   analyze,
+  baselineFor,
   bucketsFor,
+  groupKey,
   patternsOf,
   r1,
-  rowMatches,
   withState,
   type Analysis,
   type RowFilters,
 } from "./issues-engine";
-import { ISSUE_STATUSES, OPEN_STATUSES, patchIssueState } from "./issues-store";
+import { ISSUE_STATUSES, OPEN_STATUSES, issueIdOf, patchIssueState } from "./issues-store";
+import { DIMS, GROUP_DIMS, acc, axisValues, counter, dimLabel, dimValue, isTagDim, issueDimValue, naturalOrder, statOf, type Acc } from "./issues-dims";
+import { CATEGORIES, DEV_MISSES, USER_IMPACTS, bixbyOrder } from "./issues-taxonomy";
 
 const SORTS = ["score_desc", "count_desc", "fail_rate_desc", "delta_desc", "recent_desc", "first_seen_desc"] as const;
 type Sort = (typeof SORTS)[number];
@@ -71,7 +86,18 @@ type Sort = (typeof SORTS)[number];
 export interface IssueQueryParsed {
   range: ResolvedRange;
   filters: RowFilters;
-  issue: { severity?: IssueSeverity[]; status?: IssueStatus[]; novelty?: ("new" | "recurring")[]; severity_class?: SeverityClass[]; q?: string; min_score?: number };
+  issue: {
+    severity?: IssueSeverity[];
+    status?: IssueStatus[];
+    novelty?: ("new" | "recurring")[];
+    severity_class?: SeverityClass[];
+    category?: IssueCategory[];
+    user_impact?: UserImpactType[];
+    dev_miss?: DevMissType[];
+    must_handle?: boolean;
+    q?: string;
+    min_score?: number;
+  };
   groupBy: IssueGroupBy;
   sort: Sort;
   q: Query;
@@ -87,6 +113,8 @@ export function parseIssueQuery(req: NextRequest): IssueQueryParsed {
     else if (c === "market") v = q.enumList("market", MARKETS);
     else if (c === "agent_function") v = q.enumList("agent_function", AGENT_FUNCTIONS);
     else if (c === "failure_reason") v = q.enumList("failure_reason", FAILURE_REASONS);
+    else if (c === "division") v = q.enumList("division", DIVISIONS);
+    else if (c === "region") v = q.enumList("region", REGIONS);
     else v = q.list(c);
     if (v?.length) filters[c] = v;
   }
@@ -98,6 +126,10 @@ export function parseIssueQuery(req: NextRequest): IssueQueryParsed {
       status: q.enumList("status", ISSUE_STATUSES),
       novelty: q.enumList("novelty", ["new", "recurring"] as const),
       severity_class: q.enumList("severity_class", CLASSES),
+      category: q.enumList("category", CATEGORIES),
+      user_impact: q.enumList("user_impact", USER_IMPACTS),
+      dev_miss: q.enumList("dev_miss", DEV_MISSES),
+      must_handle: q.bool("must_handle"),
       q: q.str("q")?.toLowerCase(),
       min_score: q.num("min_score", { min: 0, max: 100 }),
     },
@@ -117,10 +149,14 @@ function issueMatches(i: Issue, f: IssueQueryParsed["issue"]): boolean {
   if (f.status && !f.status.includes(i.state.status)) return false;
   if (f.novelty && !f.novelty.includes(i.novelty)) return false;
   if (f.severity_class && !f.severity_class.includes(i.severity_class)) return false;
+  if (f.category && !f.category.includes(i.category)) return false;
+  if (f.user_impact && !f.user_impact.includes(i.user_impact_type)) return false;
+  if (f.dev_miss && !f.dev_miss.includes(i.dev_miss_type)) return false;
+  if (f.must_handle != null && i.must_handle !== f.must_handle) return false;
   if (f.min_score != null && i.score < f.min_score) return false;
   if (f.q) {
     const s = i.signature;
-    const hay = [i.id, s.agent_function, s.intent_expected, s.intent_predicted, s.failure_reason, s.pattern_template, i.sample.utterance_text, i.state.ticket_id ?? "", i.state.owner ?? "", i.state.note ?? "", ...i.patterns.map((p) => p.template)]
+    const hay = [i.id, s.agent_function, s.intent_expected, s.intent_predicted, s.failure_reason, s.pattern_template, i.category, i.sample.utterance_text, i.state.ticket_id ?? "", i.state.owner ?? "", i.state.note ?? "", ...i.patterns.map((p) => p.template)]
       .join(" ")
       .toLowerCase();
     if (!hay.includes(f.q)) return false;
@@ -152,7 +188,65 @@ export function listIssues(req: NextRequest): IssueListResponse {
   const all = filteredIssues(a, p);
   const { page, pageSize } = p.q.page(25, 500);
   const pg = paginate(all, page, pageSize);
-  return { items: pg.items, total: pg.total, page, pageSize, range: p.range, baseline: a.baseline, unfiltered_total: a.issues.length, factor_weights: FACTOR_WEIGHTS };
+  const out: IssueListResponse = { items: pg.items, total: pg.total, page, pageSize, range: p.range, baseline: a.baseline, unfiltered_total: a.issues.length, factor_weights: FACTOR_WEIGHTS };
+  const group = p.q.enumOne("group", GROUP_DIMS);
+  if (group) {
+    const sub = p.q.enumOne("subgroup", GROUP_DIMS) ?? null;
+    const size = p.q.int("group_size", { min: 1, max: 200, def: 10 })!;
+    const gp = p.q.int("group_page", { min: 1, max: 100_000, def: 1 })!;
+    const key = p.q.str("group_key");
+    const subKey = p.q.str("subgroup_key");
+    out.group = group;
+    out.subgroup = sub && sub !== group ? sub : null;
+    out.groups = groupIssues(all, group, out.subgroup, size, key ?? null, subKey ?? null, gp);
+  }
+  return out;
+}
+
+/**
+ * Issues grouped by a dim (row dims: the issue's dominant value, so every issue is in exactly one group). Groups of
+ * enumerated dims keep their natural order (severity P0→P3, user_impact, dev_miss, …); others go by top score.
+ * Items keep the request `sort`. `group_key` (+ `subgroup_key`) returns only that group, paged by `group_page`.
+ */
+function groupIssues(all: Issue[], dim: IssueDim, sub: IssueDim | null, size: number, key: string | null, subKey: string | null, page: number): IssueGroup[] {
+  const build = (xs: Issue[], d: IssueDim, inner: IssueDim | null, only: string | null, onlySub: string | null): IssueGroup[] => {
+    const m = new Map<string, Issue[]>();
+    for (const i of xs) {
+      const v = issueDimValue(i, d) || "";
+      (m.get(v) ?? m.set(v, []).get(v)!).push(i);
+    }
+    const nat = naturalOrder(d);
+    const keys = [...m.keys()].sort((x, y) => {
+      if (nat) {
+        const ix = nat.indexOf(x), iy = nat.indexOf(y);
+        if (ix !== iy) return (ix < 0 ? 1e9 : ix) - (iy < 0 ? 1e9 : iy);
+      }
+      const sx = Math.max(...m.get(x)!.map((i) => i.score)), sy = Math.max(...m.get(y)!.map((i) => i.score));
+      return sy - sx || (x < y ? -1 : 1);
+    });
+    return keys
+      .filter((k) => only == null || k === only)
+      .map((k) => {
+        const items = m.get(k)!;
+        const by_severity = { P0: 0, P1: 0, P2: 0, P3: 0 } as Record<IssueSeverity, number>;
+        for (const i of items) by_severity[i.severity]++;
+        const pg = only != null && !inner ? page : 1;
+        const g: IssueGroup = {
+          key: k,
+          label: dimLabel(d, k),
+          count: items.length,
+          fails: items.reduce((s, i) => s + i.count, 0),
+          by_severity,
+          max_score: items.length ? Math.max(...items.map((i) => i.score)) : 0,
+          items: items.slice((pg - 1) * size, pg * size),
+          page: pg,
+          pageSize: size,
+        };
+        if (inner) g.subgroups = build(items, inner, null, onlySub, null).map((sg) => (onlySub != null && only != null ? { ...sg, items: items.filter((i) => issueDimValue(i, inner) === sg.key).slice((page - 1) * size, page * size), page } : sg));
+        return g;
+      });
+  };
+  return build(all, dim, sub, key, subKey);
 }
 
 // ───────────────────────────────────────── GET /issues/summary ──
@@ -342,27 +436,81 @@ export function issueSummary(req: NextRequest): IssueSummary {
 }
 
 // ───────────────────────────────────────── GET /issues/facets ──
+/**
+ * Per column: values with FAIL count (`count`, legacy) + total, fail rate, baseline rate, delta and the number of
+ * issues with FAILs there — each column ignoring its own filter (other values stay selectable). One pass: a row
+ * that fails exactly one column filter only feeds that column.
+ * Issue-level dims (severity, status, novelty, severity_class, category, user_impact, dev_miss, must_handle): issue
+ * counts (`count`) + Σ FAILs, each ignoring its own filter.
+ */
 export function issueFacets(req: NextRequest): IssueFacets {
   const p = parseIssueQuery(req);
   const e = getEngine();
-  const all = e.results.rowsInRange(p.range.from, p.range.to).filter((r) => r.result === "FAIL");
-  const facets = {} as Record<IssueFacetKey, { value: string; count: number }[]>;
-  for (const c of COLUMNS) {
-    const m = new Map<string, number>();
-    // each column's counts ignore that column's own filter (so the other values stay selectable)
-    for (const r of all) if (rowMatches(r, p.filters, c)) m.set(COLUMN_GET[c](r), (m.get(COLUMN_GET[c](r)) ?? 0) + 1);
-    facets[c] = [...m.entries()].filter(([v]) => v !== "").map(([value, count]) => ({ value, count })).sort((x, y) => y.count - x.count || (x.value < y.value ? -1 : 1));
-  }
-  const issues = analysisFor(p).issues.map(withState);
+  const a = analysisFor(p);
+  // issues that can own a FAIL row of an unselected value: the unfiltered range's issues ∪ the filtered ones
+  const universe = analyze({ from: p.range.from, to: p.range.to, groupBy: p.groupBy });
+  const known = new Set([...universe.issues.map((i) => i.id), ...a.issues.map((i) => i.id)]);
+  const sig = (r: ResultRow) => issueIdOf(groupKey(r, p.groupBy));
+  const cur = new Map<IssueColumn, Map<string, Acc>>(COLUMNS.map((c) => [c, new Map()]));
+  const feed = (r: ResultRow, base: boolean) => {
+    let miss: IssueColumn | null = null;
+    for (const c of COLUMNS) {
+      const want = p.filters[c];
+      if (want?.length && !want.includes(COLUMN_GET[c](r))) {
+        if (miss) return;
+        miss = c;
+      }
+    }
+    const fail = r.result === "FAIL";
+    const id = fail && !base ? sig(r) : null;
+    for (const c of miss ? [miss] : COLUMNS) {
+      const v = COLUMN_GET[c](r);
+      if (v === "") continue;
+      const m = cur.get(c)!;
+      let x = m.get(v);
+      if (!x) m.set(v, (x = acc()));
+      if (base) {
+        x.bt++;
+        if (fail) x.bf++;
+      } else {
+        x.t++;
+        if (fail) {
+          x.f++;
+          if (id && known.has(id)) x.iss.set(id, (x.iss.get(id) ?? 0) + 1);
+        }
+      }
+    }
+  };
+  for (const r of e.results.rowsInRange(p.range.from, p.range.to)) feed(r, false);
+  const b = baselineFor(p.range.from, p.range.to);
+  if (b.sufficient) for (const r of e.results.rowsInRange(b.from, b.to - 1)) feed(r, true);
+  const facets = {} as IssueFacets["facets"];
+  for (const c of COLUMNS)
+    facets[c] = [...cur.get(c)!.entries()]
+      // values with FAILs (legacy) + selected values
+      .filter(([v, x]) => x.f > 0 || (x.t > 0 && !!p.filters[c]?.includes(v)))
+      .map(([value, x]) => {
+        const st = statOf(value, x);
+        return { value, count: x.f, fails: x.f, total: x.t, fail_rate: st.fail_rate, baseline_fail_rate: st.baseline_fail_rate, delta: st.delta, issues: x.iss.size };
+      })
+      .sort((x, y) => y.count - x.count || (x.value < y.value ? -1 : 1));
+  const issues = a.issues.map(withState);
   const count = (vals: readonly string[], get: (i: Issue) => string, skip: keyof IssueQueryParsed["issue"]) => {
     const f = { ...p.issue, [skip]: undefined };
     const xs = issues.filter((i) => issueMatches(i, f));
-    return vals.map((value) => ({ value, count: xs.filter((i) => get(i) === value).length }));
+    return vals.map((value) => {
+      const m = xs.filter((i) => get(i) === value);
+      return { value, count: m.length, fails: m.reduce((s, i) => s + i.count, 0), issues: m.length };
+    });
   };
   facets.severity = count(SEVERITIES, (i) => i.severity, "severity");
   facets.status = count(ISSUE_STATUSES, (i) => i.state.status, "status");
   facets.novelty = count(["new", "recurring"], (i) => i.novelty, "novelty");
   facets.severity_class = count(CLASSES, (i) => i.severity_class, "severity_class");
+  facets.category = count(CATEGORIES, (i) => i.category, "category");
+  facets.user_impact = count(USER_IMPACTS, (i) => i.user_impact_type, "user_impact");
+  facets.dev_miss = count(DEV_MISSES, (i) => i.dev_miss_type, "dev_miss");
+  facets.must_handle = count(["true", "false"], (i) => String(i.must_handle), "must_handle");
   return { range: p.range, facets };
 }
 
@@ -434,7 +582,7 @@ export function issueDetail(req: NextRequest, id: string): IssueDetail {
       return w ? [{ workflow_id: wid, language: w.language, pipeline_id: w.pipeline_id, pipeline_version: w.pipeline_version, model_version: w.model_version, created_at: w.created_at, completed_at: w.completed_at ?? null, fails }] : [];
     });
   const s = issue.signature;
-  const similar = a.issues
+  const similar: IssueDetail["similar"] = a.issues
     .filter((i) => i.id !== id)
     .map((i) => {
       const relation =
@@ -445,10 +593,17 @@ export function issueDetail(req: NextRequest, id: string): IssueDetail {
             : i.signature.intent_predicted === s.intent_predicted && s.intent_predicted !== s.intent_expected
               ? ("same_prediction" as const)
               : null;
-      return relation ? { id: i.id, title: i.title, severity: i.severity, score: i.score, count: i.count, relation } : null;
+      return relation ? { id: i.id, title: i.title, severity: i.severity, score: i.score, count: i.count, category: i.category, relation } : null;
     })
     .filter((x): x is NonNullable<typeof x> => !!x)
     .slice(0, 6);
+  // same category (issue cluster taxonomy), by score; fills `similar` up to 8 when the other relations are scarce
+  const sameCat = a.issues.filter((i) => i.id !== id && i.category === issue.category);
+  for (const i of sameCat) {
+    if (similar.length >= 8) break;
+    if (!similar.some((x) => x.id === i.id)) similar.push({ id: i.id, title: i.title, severity: i.severity, score: i.score, count: i.count, category: i.category, relation: "same_category" });
+  }
+  const same_category = sameCat.slice(0, 8).map((i) => ({ id: i.id, title: i.title, severity: i.severity, score: i.score, count: i.count, signature: i.signature }));
   return {
     ...issue,
     range: p.range,
@@ -463,9 +618,13 @@ export function issueDetail(req: NextRequest, id: string): IssueDetail {
       pipeline_version: bd("pipeline_version"),
       os_version: bd("os_version"),
       one_ui_version: bd("one_ui_version"),
+      division: bd("division"),
+      region: bd("region"),
+      bixby_version: bd("bixby_version"),
     },
     workflows,
     similar,
+    same_category,
   };
 }
 
@@ -544,7 +703,7 @@ export function buildInsights(a: Analysis, p: IssueQueryParsed): IssueInsight[] 
       key: "insights.regression",
       vars: { fn: reg.signature.agent_function, expected: reg.signature.intent_expected, reason: reg.signature.failure_reason, axis: g.axis, current: g.current, previous: g.previous, curRate: g.currentRate, prevRate: g.previousRate, multiple: g.previousRate > 0 ? r1(g.currentRate / g.previousRate) : 0 },
       score: 55 + reg.factors.find((f) => f.key === "regression")!.value * 30,
-      evidence: { filter: { ...base, [g.axis]: g.current }, results: { ...reg.results_query, [g.axis === "pipeline_version" ? "version" : "model_version"]: g.current }, metrics: { current_rate: g.currentRate, previous_rate: g.previousRate, current_total: g.currentTotal, previous_total: g.previousTotal }, issue_id: reg.id },
+      evidence: { filter: { ...base, [g.axis]: g.current }, results: { ...reg.results_query, [RESULTS_PARAM[g.axis]]: g.current }, metrics: { current_rate: g.currentRate, previous_rate: g.previousRate, current_total: g.currentTotal, previous_total: g.previousTotal }, issue_id: reg.id },
     });
   }
   // spike
@@ -636,11 +795,90 @@ export function buildInsights(a: Analysis, p: IssueQueryParsed): IssueInsight[] 
       severity: "P3",
       evidence: { filter: { ...base, [imp.c]: imp.s.value }, results: null, metrics: { fail_rate: imp.s.fail_rate, baseline_fail_rate: imp.s.baseline_fail_rate, delta: imp.s.delta } },
     });
+  // division / region with the largest FAIL-rate increase vs the baseline
+  for (const col of ["division", "region"] as const) {
+    const x = cols[col].filter((s) => s.delta != null && s.total >= 30).sort((u, v) => v.delta! - u.delta!)[0];
+    if (x && x.delta! >= 1.5)
+      add({
+        kind: col,
+        key: col === "division" ? "insights.division" : "insights.region",
+        vars: { [col]: x.value, rate: x.fail_rate, baseRate: x.baseline_fail_rate ?? 0, delta: x.delta!, fails: x.fails },
+        score: 38 + Math.min(30, x.delta! * 3),
+        evidence: { filter: { ...base, [col]: x.value }, results: resultsParams(p.filters, { [col]: x.value }), metrics: { fail_rate: x.fail_rate, baseline_fail_rate: x.baseline_fail_rate, delta: x.delta } },
+      });
+  }
+  // Bixby version regression: per division × agent_function, newest vs previous Bixby version (rows since the
+  // newest appeared in that division), one-sided two-proportion z ≥ 2.33, ≥ 5 FAILs — e.g. "4.0.3 on TV: media_play"
+  const bx = bixbyCells(a);
+  if (bx) {
+    add({
+      kind: "bixby_version",
+      key: "insights.bixbyVersion",
+      vars: { version: bx.current, previous: bx.previous, division: bx.division, fn: bx.fn, rate: bx.rate, prevRate: bx.prevRate, delta: bx.delta, fails: bx.fails, z: bx.z },
+      score: 55 + Math.min(30, bx.delta),
+      evidence: {
+        filter: { ...base, division: bx.division, bixby_version: bx.current, agent_function: bx.fn },
+        results: resultsParams(p.filters, { division: bx.division, bixby_version: bx.current, agent_function: bx.fn }),
+        metrics: { current_rate: bx.rate, previous_rate: bx.prevRate, delta: bx.delta, current_total: bx.total, previous_total: bx.prevTotal, z: bx.z },
+        ...(bx.issue ? { issue_id: bx.issue } : {}),
+      },
+    });
+  }
   if (!a.baseline.sufficient)
     add({ kind: "overall", key: "insights.baselineInsufficient", vars: { days: a.baseline.days }, score: 10, severity: "P3", evidence: { filter: base, results: null, metrics: { coverage: a.baseline.coverage } } });
   out.sort((x, y) => y.score - x.score);
   out.forEach((x) => (x.score = r1(Math.min(100, x.score))));
   return out;
+}
+
+/** strongest Bixby-version regression cell (division × agent_function), see buildInsights */
+function bixbyCells(a: Analysis): { division: string; fn: string; current: string; previous: string; rate: number; prevRate: number; delta: number; fails: number; total: number; prevTotal: number; z: number; issue: string | null } | null {
+  const ord = bixbyOrder(a.rows.map((r) => r.bixby_version));
+  const first = new Map<string, number>();
+  for (const r of a.rows) {
+    const k = r.division + "|" + r.bixby_version;
+    if (!first.has(k) || r.eval_ts < first.get(k)!) first.set(k, r.eval_ts);
+  }
+  const newest = new Map<string, string>();
+  for (const k of first.keys()) {
+    const [dv, v] = k.split("|");
+    if (!newest.has(dv) || ord.indexOf(v) > ord.indexOf(newest.get(dv)!)) newest.set(dv, v);
+  }
+  const cells = new Map<string, { t: number; f: number; iss: Map<string, number> }>();
+  for (const r of a.rows) {
+    const nv = newest.get(r.division);
+    if (!nv || r.eval_ts < first.get(r.division + "|" + nv)!) continue;
+    const k = `${r.division}|${r.agent_function}|${r.bixby_version}`;
+    let x = cells.get(k);
+    if (!x) cells.set(k, (x = { t: 0, f: 0, iss: new Map() }));
+    x.t++;
+    if (r.result === "FAIL") {
+      x.f++;
+      const iid = a.rowIssue.get(r.utterance_id);
+      if (iid) x.iss.set(iid, (x.iss.get(iid) ?? 0) + 1);
+    }
+  }
+  let best: ReturnType<typeof bixbyCells> = null;
+  for (const [dv, nv] of newest) {
+    const prev = ord.slice(0, ord.indexOf(nv)).reverse();
+    for (const fn of AGENT_FUNCTIONS) {
+      const c = cells.get(`${dv}|${fn}|${nv}`);
+      const pv = prev.find((v) => (cells.get(`${dv}|${fn}|${v}`)?.t ?? 0) >= 15);
+      if (!c || !pv || c.t < 15 || c.f < 5) continue;
+      const q = cells.get(`${dv}|${fn}|${pv}`)!;
+      const rc = c.f / c.t, rp = q.f / q.t, diff = rc - rp;
+      const pool = (c.f + q.f) / (c.t + q.t);
+      const z = diff / Math.sqrt(Math.max(1e-9, pool * (1 - pool) * (1 / c.t + 1 / q.t)));
+      if (z < 2.33 || diff < 0.03) continue;
+      const delta = r1(diff * 100);
+      if (!best || delta > best.delta) {
+        // the issue with the most FAILs in that cell (the defect behind it)
+        const top = [...c.iss.entries()].sort((u, v) => v[1] - u[1] || (a.issueById.get(v[0])?.score ?? 0) - (a.issueById.get(u[0])?.score ?? 0))[0];
+        best = { division: dv, fn, current: nv, previous: pv, rate: r1(rc * 100), prevRate: r1(rp * 100), delta, fails: c.f, total: c.t, prevTotal: q.t, z: r1(z), issue: top ? top[0] : null };
+      }
+    }
+  }
+  return best;
 }
 
 export function issueInsights(req: NextRequest): InsightList {
@@ -719,17 +957,23 @@ export function issuesCsv(req: NextRequest): Response {
   const t = tFor(req, "issues");
   const cols = [
     "rank", "issue_id", "severity", "score", "severity_class", "status", "owner", "ticket_id", "title", "agent_function", "intent_expected", "intent_predicted", "failure_reason",
-    "count", "share_pct", "fail_rate_pct", "baseline_rate_pct", "delta_pp", "novelty", "languages", "markets", "devices", "model_versions", "first_seen", "last_seen",
-    ...FACTOR_KEYS.map((k) => `factor_${k}`), "top_pattern", "sample_utterance", "sample_judge_reason", "reasons",
+    "category", "user_impact_type", "dev_miss_type", "must_handle",
+    "count", "share_pct", "fail_rate_pct", "baseline_rate_pct", "delta_pp", "novelty", "languages", "markets", "regions", "devices", "divisions", "bixby_versions", "model_versions", "first_seen", "last_seen",
+    ...FACTOR_KEYS.map((k) => `factor_${k}`), "bixby_regression", "top_pattern", "sample_utterance", "sample_judge_reason", "reasons",
+    "category_reason", "user_impact_reason", "dev_miss_reason", "must_handle_reason",
   ];
   const iso = getEngine()._internal.isoKst;
   const lines = [cols.join(",")];
   for (const i of issues) {
     const row = [
       i.rank, i.id, i.severity, i.score, i.severity_class, i.state.status, i.state.owner ?? "", i.state.ticket_id ?? "", formatIssueText(t, i.title), i.signature.agent_function, i.signature.intent_expected, i.signature.intent_predicted,
-      i.signature.failure_reason, i.count, i.share, i.fail_rate, i.baseline_rate ?? "", i.delta ?? "", i.novelty, i.languages.join(" "), i.markets.join(" "), i.devices.join(" "), i.model_versions.join(" "),
-      iso(i.first_seen), iso(i.last_seen), ...FACTOR_KEYS.map((k) => i.factors.find((f) => f.key === k)?.contribution ?? 0), i.signature.pattern_template, i.sample.utterance_text, i.sample.judge_reason,
+      i.signature.failure_reason, i.category, i.user_impact_type, i.dev_miss_type, i.must_handle,
+      i.count, i.share, i.fail_rate, i.baseline_rate ?? "", i.delta ?? "", i.novelty, i.languages.join(" "), i.markets.join(" "), i.regions.join(" "), i.devices.join(" "), i.divisions.join(" "), i.bixby_versions.join(" "), i.model_versions.join(" "),
+      iso(i.first_seen), iso(i.last_seen), ...FACTOR_KEYS.map((k) => i.factors.find((f) => f.key === k)?.contribution ?? 0),
+      i.bixby_regression ? `${i.bixby_regression.division} ${i.bixby_regression.previous}→${i.bixby_regression.current} ${i.bixby_regression.previousRate}%→${i.bixby_regression.currentRate}%` : "",
+      i.signature.pattern_template, i.sample.utterance_text, i.sample.judge_reason,
       i.reasons.map((r) => formatIssueText(t, r)).join(" | "),
+      formatIssueText(t, i.category_reason), formatIssueText(t, i.type_reason.user_impact), formatIssueText(t, i.type_reason.dev_miss), formatIssueText(t, i.must_handle_reason),
     ];
     lines.push(row.map(csvCell).join(","));
   }
@@ -760,9 +1004,9 @@ export function issuesMarkdown(req: NextRequest): Response {
   const origin = req.nextUrl.origin;
   const href = (path: string, params: Record<string, string>) => `${origin}${path}?${new URLSearchParams({ ...params, ...rangeParams }).toString()}`;
   const rowFilter = rowFilterParams(p.filters);
-  // optional `issue_base` (a console page that opens ?issue=<id>, e.g. /issues/a); without it no issue links
-  const issueBase = /^\/issues(\/[a-z])?$/.test(sp.get("issue_base") ?? "") ? sp.get("issue_base")! : null;
-  const issueHref = (id: string) => (issueBase ? href(issueBase, { ...rowFilter, issue: id }) : null);
+  // issue deep links → /issues/<id> (single-issue page). Legacy `issue_base=/issues/a|b|c` keeps `?issue=<id>` links.
+  const legacyBase = /^\/issues\/[a-c]$/.test(sp.get("issue_base") ?? "") ? sp.get("issue_base")! : null;
+  const issueHref = (id: string) => (legacyBase ? href(legacyBase, { ...rowFilter, issue: id }) : href(`/issues/${encodeURIComponent(id)}`, rowFilter));
   const resultsHref = (q: Record<string, string>) => href("/results", q);
   const linksOf = (i: Issue) => [`[${t("report.failRows")}](${resultsHref(i.results_query)})`, ...(issueHref(i.id) ? [`[${t("report.issueLink")}](${issueHref(i.id)})`] : [])].join(" · ");
   const L: string[] = [];
@@ -787,11 +1031,43 @@ export function issuesMarkdown(req: NextRequest): Response {
   for (const i of top.filter((x) => x.severity === "P0" || x.severity === "P1")) {
     L.push(`### ${i.severity} · ${esc(formatIssueText(t, i.title))}`, "");
     L.push(`- \`${i.id}\` · ${t(`agentFunction.${i.signature.agent_function}` as never)} · ${i.signature.intent_expected} → ${i.signature.intent_predicted} · ${i.signature.failure_reason}`);
+    L.push(`- ${t("column.category")}: ${t(`category.${i.category}` as never)} · ${t("column.user_impact")}: ${t(`userImpact.${i.user_impact_type}` as never)} · ${t("column.dev_miss")}: ${t(`devMiss.${i.dev_miss_type}` as never)} · ${t("column.division")}: ${i.divisions.map((d) => t(`division.${d}` as never)).join(", ")} · Bixby ${i.bixby_versions.join(", ")}`);
     L.push(`- ${t("report.why")}: ${i.reasons.map((r) => formatIssueText(t, r)).join(" / ")}`);
     L.push(`- ${t("report.factors")}: ${i.factors.map((f) => `${t(`factor.${f.key}.label` as never)} ${f.contribution}/${f.weight}`).join(" · ")}`);
     L.push(`- ${t("report.example")}: "${esc(i.sample.utterance_text)}" → "${esc(i.sample.actual_response)}" (${esc(i.sample.judge_reason)})`);
     L.push(`- ${t("report.evidence")}: ${linksOf(i)}`, "");
   }
+  // impact level × user impact / dev miss (the two triage lenses share the impact grouping)
+  const lensTable = (title: string, types: readonly string[], get: (i: Issue) => string, group: string, xs: Issue[]) => {
+    L.push(`## ${title}`, "");
+    L.push(`| ${t("column.severity")} | ${types.map((x) => t(`${group}.${x}` as never)).join(" | ")} |`);
+    L.push(`|---|${types.map(() => "---:").join("|")}|`);
+    for (const sv of SEVERITIES) L.push(`| ${t(`impactLevel.${sv}` as never)} (${sv}) | ${types.map((x) => xs.filter((i) => i.severity === sv && get(i) === x).length || "·").join(" | ")} |`);
+    L.push("");
+  };
+  lensTable(t("report.userImpact"), USER_IMPACTS, (i) => i.user_impact_type, "userImpact", issues);
+  const must = issues.filter((i) => i.must_handle);
+  lensTable(`${t("report.devMiss")} (${t("report.mustHandleCount", { count: must.length, total: issues.length })})`, DEV_MISSES.filter((x) => x !== "out_of_scope"), (i) => i.dev_miss_type, "devMiss", must);
+  // division / region impact (FAIL rate vs baseline)
+  const cs = columnStats(a, new Set(issues.map((i) => i.id)));
+  for (const col of ["division", "region"] as const) {
+    L.push(`## ${t(col === "division" ? "report.divisionImpact" : "report.regionImpact")}`, "");
+    L.push(`| ${t(`column.${col}` as never)} | ${t("kpi.utterances")} | ${t("kpi.fails")} | ${t("kpi.failRate")} | ${t("kpi.baselineFailRate")} | Δ pp | ${t("kpi.issues")} |`);
+    L.push("|---|---:|---:|---:|---:|---:|---:|");
+    for (const x of cs[col]) L.push(`| [${t(`${col}.${x.value}` as never)}](${resultsHref(resultsParams(p.filters, { [col]: x.value }))}) | ${x.total} | ${x.fails} | ${x.fail_rate}% | ${x.baseline_fail_rate ?? "-"}% | ${x.delta ?? "-"} | ${x.issues} |`);
+    L.push("");
+  }
+  // Bixby version regressions
+  const bxi = insights.find((x) => x.kind === "bixby_version");
+  const bxIssues = issues.filter((i) => i.bixby_regression);
+  L.push(`## ${t("report.bixbyRegression")}`, "");
+  if (bxi) L.push(`- **${bxi.severity}** ${formatIssueText(t, { key: bxi.key, vars: bxi.vars })} — [${t("report.evidence")}](${resultsHref(bxi.evidence.results ?? {})})`);
+  for (const i of bxIssues.slice(0, 8)) {
+    const g = i.bixby_regression!;
+    L.push(`- ${i.severity} · ${esc(formatIssueText(t, i.title))} — ${t(`division.${g.division}` as never)} ${g.previous} ${g.previousRate}% → ${g.current} ${g.currentRate}% (z=${g.z}) · ${linksOf(i)}`);
+  }
+  if (!bxi && !bxIssues.length) L.push(`- ${t("report.noBixbyRegression")}`);
+  L.push("");
   if (pats.items.length) {
     L.push(`## ${t("report.newPatterns")}`, "");
     L.push(`| ${t("field.pattern")} | ${t("field.kind")} | ${t("field.function")} | ${t("field.count")} | ${t("field.failRate")} |`);
@@ -803,6 +1079,252 @@ export function issuesMarkdown(req: NextRequest): Response {
   L.push(ISSUE_STATUSES.map((s) => `${s} ${issues.filter((i) => i.state.status === s).length}`).join(" · "), "");
   const md = L.join("\n");
   return download(md, fileBase(p) + ".md", "text/markdown; charset=utf-8");
+}
+
+// ───────────────────────────────────────── GET /issues/breakdown · /issues/matrix ──
+const METRICS = ["fail_rate", "fail_count", "delta", "issue_count"] as const;
+
+function dimParam(p: IssueQueryParsed, name: string, def?: IssueDim): IssueDim {
+  const v = p.q.enumOne(name, DIMS, def);
+  if (!v) throw badRequest({ key: "validation.required", vars: { name } }, { field: name });
+  return v;
+}
+
+/** counted-FAIL predicate for the parsed issue filters (see issues-dims.ts) */
+function counterFor(a: Analysis, p: IssueQueryParsed) {
+  const matching = new Set(filteredIssues(a, { ...p, sort: "score_desc" }).map((i) => i.id));
+  return { count: counter(a, p.issue, matching), matching };
+}
+
+/**
+ * GET /issues/breakdown?dim=<dim>&<filters>[&limit=50] — one card per value of `dim`: severity counts of the issues
+ * touching it, FAIL rate + delta vs baseline, FAIL volume and share, a FAIL trend over the range buckets, top 3 issues
+ * and the top new utterance pattern. Cards are ranked by FAILs.
+ */
+export function issueBreakdown(req: NextRequest): IssueBreakdown {
+  const p = parseIssueQuery(req);
+  const dim = dimParam(p, "dim");
+  const limit = p.q.int("limit", { min: 1, max: 200, def: 50 })!;
+  const a = analysisFor(p);
+  const { count } = counterFor(a, p);
+  const tag = isTagDim(dim);
+  const nb = a.buckets.starts.length;
+  interface X extends Acc {
+    trend: number[];
+    tb: number[];
+    pats: Map<string, number>;
+  }
+  const m = new Map<string, X>();
+  const get = (v: string) => {
+    let x = m.get(v);
+    if (!x) m.set(v, (x = { ...acc(), trend: new Array(nb).fill(0), tb: new Array(nb).fill(0), pats: new Map() }));
+    return x;
+  };
+  const all = { ...acc(), tb: new Array(nb).fill(0) };
+  const cmpFrom = a.baseline.compare.from;
+  for (const r of a.rows) {
+    const b = a.buckets.index(r.eval_ts);
+    all.t++;
+    all.tb[b]++;
+    const v = dimValue(a, r, dim);
+    if (!tag && v) {
+      const x = get(v);
+      x.t++;
+      x.tb[b]++;
+    }
+    if (r.result !== "FAIL" || !v || (count && !count(r))) continue;
+    const x = get(v);
+    x.f++;
+    x.trend[b]++;
+    all.f++;
+    const iid = a.rowIssue.get(r.utterance_id);
+    if (iid) {
+      x.iss.set(iid, (x.iss.get(iid) ?? 0) + 1);
+      all.iss.set(iid, 1);
+    }
+    if (r.eval_ts >= cmpFrom && a.novelPatterns.has(r.utterance_pattern)) x.pats.set(r.utterance_pattern, (x.pats.get(r.utterance_pattern) ?? 0) + 1);
+  }
+  for (const r of a.baseRows) {
+    all.bt++;
+    const v = dimValue(a, r, dim);
+    if (!tag && v) get(v).bt++;
+    if (r.result !== "FAIL" || !v || (count && !count(r))) continue;
+    get(v).bf++;
+    all.bf++;
+  }
+  // new patterns that qualify (≥ 3 rows) — the same list as /issues/patterns
+  const pats = new Map(patternsOf(a).items.map((x) => [x.id, x]));
+  const totalFails = all.f || 1;
+  // values with counted FAILs (+ a selected row-dim value even without FAILs)
+  const entries = [...m.entries()].filter(([v, x]) => x.f > 0 || (!tag && x.t > 0 && !!p.filters[dim as IssueColumn]?.includes(v)));
+  entries.sort((u, v) => v[1].f - u[1].f || v[1].t - u[1].t || (u[0] < v[0] ? -1 : 1));
+  const items: IssueBreakdownItem[] = entries.slice(0, limit).map(([value, x], k) => {
+    const st = statOf(value, x, tag ? { t: all.t, bt: all.bt } : undefined);
+    const tb = tag ? all.tb : x.tb;
+    const by_severity = { P0: 0, P1: 0, P2: 0, P3: 0 } as Record<IssueSeverity, number>;
+    const touched = [...x.iss.keys()].map((id) => a.issueById.get(id)!).filter(Boolean);
+    for (const i of touched) by_severity[i.severity]++;
+    const top = touched.sort((u, v) => v.score - u.score || v.count - u.count).slice(0, 3);
+    const tp = [...x.pats.entries()].filter(([id]) => pats.has(id)).sort((u, v) => v[1] - u[1])[0];
+    const np = tp ? pats.get(tp[0])! : null;
+    return {
+      ...st,
+      label: dimLabel(dim, value),
+      rank: k + 1,
+      share: r1((x.f / totalFails) * 100),
+      by_severity,
+      trend: x.trend,
+      trend_rate: x.trend.map((f, b) => (tb[b] > 0 ? r1((f / tb[b]) * 100) : null)),
+      top_issues: top.map((i) => ({
+        id: i.id,
+        title: i.title,
+        severity: i.severity,
+        severity_class: i.severity_class,
+        score: i.score,
+        count: i.count,
+        category: i.category,
+        user_impact_type: i.user_impact_type,
+        dev_miss_type: i.dev_miss_type,
+        signature: i.signature,
+        count_in_value: x.iss.get(i.id) ?? 0,
+      })),
+      top_pattern: np ? { id: np.id, template: np.template, language: np.language, kind: np.kind, fail_rate: np.fail_rate, intent_expected: np.intent_expected, count_in_value: tp![1] } : null,
+    };
+  });
+  return {
+    range: p.range,
+    baseline: a.baseline,
+    dim,
+    bucket: a.buckets.bucket,
+    t: a.buckets.starts,
+    totals: statOf("", all),
+    items,
+    truncated: Math.max(0, entries.length - limit),
+  };
+}
+
+/**
+ * GET /issues/matrix?x=<dim>&y=<dim>&metric=fail_rate|fail_count|delta|issue_count&<filters>[&max_x=12&max_y=12]
+ * Any pair of dims. Axes are ordered (natural order for enumerated dims, else by FAILs) and capped: values beyond
+ * max_x / max_y fold into "__other__". Cell totals ignore issue-level axes (they do not split PASS rows).
+ */
+export function issueMatrix(req: NextRequest): IssueDimMatrix {
+  const p = parseIssueQuery(req);
+  const xd = dimParam(p, "x");
+  const yd = dimParam(p, "y");
+  const metric = p.q.enumOne("metric", METRICS, "fail_rate")! as IssueMatrixMetric;
+  const maxX = p.q.int("max_x", { min: 2, max: 40, def: 12 })!;
+  const maxY = p.q.int("max_y", { min: 2, max: 40, def: 12 })!;
+  const a = analysisFor(p);
+  const { count } = counterFor(a, p);
+  const tx = isTagDim(xd), ty = isTagDim(yd);
+  // pass 1: axis volumes (FAILs counted, totals)
+  const fx = new Map<string, number>(), fy = new Map<string, number>(), ttx = new Map<string, number>(), tty = new Map<string, number>();
+  const vals: [string, string, boolean][] = new Array(a.rows.length);
+  a.rows.forEach((r, k) => {
+    const xv = dimValue(a, r, xd), yv = dimValue(a, r, yd);
+    const counted = r.result === "FAIL" && (!count || count(r));
+    vals[k] = [xv, yv, counted];
+    if (!tx && xv) ttx.set(xv, (ttx.get(xv) ?? 0) + 1);
+    if (!ty && yv) tty.set(yv, (tty.get(yv) ?? 0) + 1);
+    if (counted && xv && yv) {
+      fx.set(xv, (fx.get(xv) ?? 0) + 1);
+      fy.set(yv, (fy.get(yv) ?? 0) + 1);
+    }
+  });
+  const ax = axisValues(xd, fx, ttx, maxX);
+  const ay = axisValues(yd, fy, tty, maxY);
+  // pass 2: cells + totals (issue-level axes use "*" for totals)
+  const cells = new Map<string, Acc>(), tot = new Map<string, { t: number; bt: number }>();
+  const xm = new Map<string, Acc>(), ym = new Map<string, Acc>();
+  const top = new Map<string, { id: string; score: number }>();
+  const tk = (xv: string, yv: string) => (tx ? "*" : xv) + "\u0000" + (ty ? "*" : yv);
+  const bump = (xv0: string, yv0: string, counted: boolean, fail: boolean, base: boolean, iid: string | undefined) => {
+    const xv = tx ? xv0 : (ax.fold.get(xv0) ?? "");
+    const yv = ty ? yv0 : (ay.fold.get(yv0) ?? "");
+    if (!tx && !xv) return;
+    if (!ty && !yv) return;
+    const tkk = tk(xv, yv);
+    let tt = tot.get(tkk);
+    if (!tt) tot.set(tkk, (tt = { t: 0, bt: 0 }));
+    if (base) tt.bt++;
+    else tt.t++;
+    if (!tx) {
+      const mx = xm.get(xv) ?? xm.set(xv, acc()).get(xv)!;
+      if (base) mx.bt++;
+      else mx.t++;
+    }
+    if (!ty) {
+      const my = ym.get(yv) ?? ym.set(yv, acc()).get(yv)!;
+      if (base) my.bt++;
+      else my.t++;
+    }
+    if (!fail || !counted) return;
+    const xf = tx ? (ax.fold.get(xv0) ?? "") : xv;
+    const yf = ty ? (ay.fold.get(yv0) ?? "") : yv;
+    if (!xf || !yf) return;
+    const k = xf + "\u0000" + yf;
+    const c = cells.get(k) ?? cells.set(k, acc()).get(k)!;
+    const mx = xm.get(xf) ?? xm.set(xf, acc()).get(xf)!;
+    const my = ym.get(yf) ?? ym.set(yf, acc()).get(yf)!;
+    if (base) {
+      c.bf++;
+      mx.bf++;
+      my.bf++;
+    } else {
+      c.f++;
+      mx.f++;
+      my.f++;
+      if (iid) {
+        c.iss.set(iid, (c.iss.get(iid) ?? 0) + 1);
+        mx.iss.set(iid, 1);
+        my.iss.set(iid, 1);
+        const sc = a.issueById.get(iid)?.score ?? 0;
+        const cur = top.get(k);
+        if (!cur || sc > cur.score) top.set(k, { id: iid, score: sc });
+      }
+    }
+  };
+  a.rows.forEach((r, k) => bump(vals[k][0], vals[k][1], vals[k][2], r.result === "FAIL", false, a.rowIssue.get(r.utterance_id)));
+  for (const r of a.baseRows) {
+    const fail = r.result === "FAIL";
+    bump(dimValue(a, r, xd), dimValue(a, r, yd), fail && (!count || count(r)), fail, true, undefined);
+  }
+  const allT = { t: a.rows.length, bt: a.baseRows.length };
+  const metricOf = (st: IssueDimStat): number | null => (metric === "fail_rate" ? st.fail_rate : metric === "fail_count" ? st.fails : metric === "delta" ? st.delta : st.issues);
+  const out: IssueDimMatrixCell[] = [];
+  let lo = Infinity, hi = -Infinity;
+  for (const yv of ay.values)
+    for (const xv of ax.values) {
+      const k = xv + "\u0000" + yv;
+      const c = cells.get(k) ?? acc();
+      const t = tot.get(tk(xv, yv)) ?? (tx && ty ? allT : { t: 0, bt: 0 });
+      const { value: _v, ...st } = statOf(xv, c, t);
+      void _v;
+      const value = metricOf({ ...st, value: "" });
+      if (value != null) {
+        lo = Math.min(lo, value);
+        hi = Math.max(hi, value);
+      }
+      out.push({ x: xv, y: yv, ...st, value, top_issue_id: top.get(k)?.id ?? null });
+    }
+  const marg = (vs: string[], mm: Map<string, Acc>, isTag: boolean) => vs.map((v) => statOf(v, mm.get(v) ?? acc(), isTag ? allT : undefined));
+  return {
+    range: p.range,
+    baseline: a.baseline,
+    x: xd,
+    y: yd,
+    metric,
+    x_values: ax.values,
+    y_values: ay.values,
+    x_labels: ax.values.map((v) => dimLabel(xd, v)),
+    y_labels: ay.values.map((v) => dimLabel(yd, v)),
+    x_totals: marg(ax.values, xm, tx),
+    y_totals: marg(ay.values, ym, ty),
+    cells: out,
+    domain: lo <= hi ? [lo, hi] : null,
+    folded: { x: ax.folded, y: ay.folded },
+  };
 }
 
 // ───────────────────────────────────────── new-critical watcher (SSE `issue`) ──

@@ -654,6 +654,32 @@ export function createMockEngine(root, opts) {
     return id;
   }
   function daysAgo(wf) { return (BASE_NOW - wf.created_at) / DAY; }
+  // division / region / bixby_version (domain.ts tables). Drawn from their own per-utterance streams
+  // ('|dim', '|dim2', '|model'), never from '|utt' or '|iss', so every pre-existing column stays byte-identical.
+  var DEVICE_MODELS = DOMAIN.deviceModels || {};
+  var DEVICE_DIVISION = DOMAIN.deviceDivision || {};
+  var DEFAULT_DIVISION = DOMAIN.defaultDivision || 'Mobile';
+  var MARKET_REGION = DOMAIN.marketRegion || {};
+  var BIXBY_ROLLOUT = DOMAIN.bixbyRollout || {};
+  function divisionOf(device) { return DEVICE_DIVISION[device] || DEFAULT_DIVISION; }
+  // TV OTA of Bixby 4.0.3 breaks media playback: on TV, in the last week, media FAILs sit mostly on 4.0.3
+  // (PASS rows less so). Only the version label is conditioned — PASS/FAIL and texts are untouched.
+  function bixbyFor(division, d, rng, row) {
+    var plan = BIXBY_ROLLOUT[division] || BIXBY_ROLLOUT[DEFAULT_DIVISION] || [];
+    var recentTv = row && division === 'TV' && d <= 10;
+    var media = recentTv && row.capsule_id === 'music';
+    // the FAIL rows the tv_bixby_403_media scenario re-labels (weather / general Q&A only, so no seeded issue loses rows)
+    var src = recentTv && row.result === 'FAIL' && (row.capsule_id === 'weather' || row.capsule_id === 'general_qa');
+    var w = [];
+    for (var i = 0; i < plan.length; i++) {
+      var x = plan[i], ramp = x.sinceDays == null ? 1 : clamp((x.sinceDays - d) / (x.rampDays || 1), 0, 1);
+      var k = x.weight * ramp;
+      if (media && x.version === '4.0.3') k *= row.result === 'FAIL' ? 6 : 0.6;
+      if (src && x.version === '4.0.3') k *= 4;
+      if (k > 0) w.push([x.version, k]);
+    }
+    return w.length ? rng.weighted(w) : (plan[0] ? plan[0].version : '');
+  }
   function deviceOs(device, rng, d) {
     if (device === 'Galaxy S26') return rng.chance(0.86) ? ['Android 16', 'One UI 8.5'] : ['Android 16', 'One UI 8.0'];
     if (device === 'Galaxy Watch') return rng.chance(clamp(0.78 - d * 0.035, 0.08, 0.78)) ? ['Wear OS 6', 'One UI 8 Watch'] : ['Wear OS 5', 'One UI 7 Watch'];
@@ -766,6 +792,24 @@ export function createMockEngine(root, opts) {
              ['settings.toggle', '방해금지 모드 좀 꺼줄래', '방해 금지 모드를 껐어요.', 'settings', '\'방해금지 모드\'라는 이름의 기기를 찾지 못했어요.', 'INTENT_MISMATCH', 'smartthings.device_off', '기존 Intent의 새 표현: SmartThings식 표현("좀 꺼줄래")이 설정 요청을 smartthings.device_off 로 보냄']],
         en: [['settings.toggle', 'switch off the wifi', 'Wi-Fi is now off.', 'settings', "I couldn't find a device called wifi.", 'INTENT_MISMATCH', 'smartthings.device_off', '기존 Intent의 새 표현: SmartThings식 표현("switch off the …")이 설정 요청을 smartthings.device_off 로 보냄'],
              ['settings.toggle', 'switch off do not disturb', 'Do Not Disturb is off.', 'settings', "I couldn't find a device called do not disturb.", 'INTENT_MISMATCH', 'smartthings.device_off', '기존 Intent의 새 표현: SmartThings식 표현("switch off …")이 설정 요청을 smartthings.device_off 로 보냄']]
+      } },
+    { id: 'tv_bixby_403_media', langs: ['ko', 'en', 'ja', 'es'], own: true,
+      // Bixby 4.0.3 TV OTA (last ~9 days) routes music requests to video search; EXISTING phrasings (same
+      // utterance patterns as the base templates) → a version regression, not a new pattern. FAIL rows only.
+      pick: function (r, wf, d, failed) { return failed && r.division === 'TV' && r.bixby_version === '4.0.3' && (r.capsule_id === 'weather' || r.capsule_id === 'general_qa') && d <= 9 ? 0.85 : 0; },
+      tpl: {
+        ko: [['music.play_genre', '{genre} 틀어줘', '{genre} 플레이리스트를 재생할게요.', 'music', '"{genre}" 관련 영상을 찾았어요. 어떤 영상을 볼까요?', 'INTENT_MISMATCH', 'video.search', 'Bixby 4.0.3 (TV): 음악 재생 요청이 영상 검색(video.search)으로 라우팅되어 재생되지 않음']],
+        en: [['music.play_genre', 'play {genre}', 'Playing a {genre} playlist.', 'music', 'Here are some videos for "{genre}".', 'INTENT_MISMATCH', 'video.search', 'Bixby 4.0.3 (TV): 음악 재생 요청이 영상 검색(video.search)으로 라우팅되어 재생되지 않음']],
+        ja: [['music.play_genre', '{genre}を流して', '{genre}のプレイリストを再生します。', 'music', '「{genre}」の動画が見つかりました。', 'INTENT_MISMATCH', 'video.search', 'Bixby 4.0.3 (TV): 음악 재생 요청이 영상 검색(video.search)으로 라우팅되어 재생되지 않음']],
+        es: [['music.play_genre', 'pon {genre}', 'Reproduciendo una lista de {genre}.', 'music', 'Estos son algunos videos de "{genre}".', 'INTENT_MISMATCH', 'video.search', 'Bixby 4.0.3 (TV): 음악 재생 요청이 영상 검색(video.search)으로 라우팅되어 재생되지 않음']]
+      } },
+    { id: 'buds_navigation_unsupported', langs: ['ko', 'en'], own: true,
+      // Galaxy Buds (no screen / no maps client) asked for turn-by-turn directions — the capability table marks
+      // navigation as unsupported on Audio, so the issue is out of scope for the dev lens (must_handle = false).
+      pick: function (r, wf, d, failed) { return failed && r.device_type === 'Galaxy Buds' && (r.capsule_id === 'weather' || r.capsule_id === 'general_qa') && d <= 12 ? 0.3 : 0; },
+      tpl: {
+        ko: [['navigation.route', '{place} 가는 길 알려줘', '{place}까지 경로를 안내할게요. 예상 소요 시간은 {min2}분이에요.', 'navigation', '"{place}" 검색 결과를 휴대폰에서 확인해 주세요.', 'INTENT_MISMATCH', 'qa.factoid', 'Galaxy Buds 단독 경로 안내 요청을 웹 검색으로 처리함 (Buds는 길찾기 미지원 — 휴대폰 연결 안내 필요)']],
+        en: [['navigation.route', 'directions to {place}', "Here's the fastest route to {place}. It'll take about {min2} minutes.", 'navigation', 'Check your phone for results about "{place}".', 'INTENT_MISMATCH', 'qa.factoid', 'Galaxy Buds 단독 경로 안내 요청을 웹 검색으로 처리함 (Buds는 길찾기 미지원 — 휴대폰 연결 안내 필요)']]
       } }
   ];
   var SCENARIO_IDX = {}; SCENARIOS.forEach(function (s) { SCENARIO_IDX[s.id] = s; });
@@ -819,6 +863,9 @@ export function createMockEngine(root, opts) {
       var rng = makeRng(hashStr(row.utterance_id + '|iss'));
       row.market = rng.weighted(MARKETS[row.language] || [['KR', 1]]);
       var failed = row.result === 'FAIL';
+      // division of the base device (every concrete model of a base shares its division) + Bixby version
+      row.division = divisionOf(row.device_type);
+      row.bixby_version = bixbyFor(row.division, d, makeRng(hashStr(row.utterance_id + '|dim')), row);
       for (var k = 0; k < SCENARIOS.length; k++) {
         var s = SCENARIOS[k];
         if (s.langs.indexOf(row.language) < 0) continue;
@@ -829,7 +876,16 @@ export function createMockEngine(root, opts) {
       }
       var os = deviceOs(row.device_type, rng, d);
       row.os_version = os[0]; row.one_ui_version = os[1];
-      if (row._scenario) { var sc = SCENARIO_IDX[row._scenario]; if (sc.oneUi) row.one_ui_version = sc.oneUi; if (sc.os) row.os_version = sc.os; }
+      var sc = row._scenario ? SCENARIO_IDX[row._scenario] : null;
+      if (sc) { if (sc.oneUi) row.one_ui_version = sc.oneUi; if (sc.os) row.os_version = sc.os; }
+      if (sc && sc.devices) {
+        // the scenario chose the device itself: keep it as is, re-derive its division / version
+        if (divisionOf(row.device_type) !== row.division) { row.division = divisionOf(row.device_type); row.bixby_version = bixbyFor(row.division, d, makeRng(hashStr(row.utterance_id + '|dim2')), row); }
+      } else if (DEVICE_MODELS[row.device_type]) {
+        row.device_type = makeRng(hashStr(row.utterance_id + '|model')).weighted(DEVICE_MODELS[row.device_type]);
+        row.division = divisionOf(row.device_type);
+      }
+      row.region = MARKET_REGION[row.market] || row.market;
       row.agent_function = agentFunctionOf(row.intent_expected, row.capsule_id);
       row.agent_function_predicted = agentFunctionOf(row.intent_predicted, row.intent_predicted === row.intent_expected ? row.capsule_id : '');
     }
@@ -964,7 +1020,10 @@ export function createMockEngine(root, opts) {
     { key: 'market', label: 'market', type: 'enum' },
     { key: 'os_version', label: 'os_version', type: 'enum' },
     { key: 'one_ui_version', label: 'one_ui_version', type: 'enum' },
-    { key: 'utterance_pattern', label: 'utterance_pattern', type: 'string' }
+    { key: 'utterance_pattern', label: 'utterance_pattern', type: 'string' },
+    { key: 'division', label: 'division', type: 'enum' },
+    { key: 'region', label: 'region', type: 'enum' },
+    { key: 'bixby_version', label: 'bixby_version', type: 'enum' }
   ];
   function csvCell(v) {
     if (v == null) return '';
@@ -2630,7 +2689,7 @@ export function createMockEngine(root, opts) {
     config: config, languages: LANGS, operators: OPERATORS, stages: STAGES, stageEdges: STAGE_EDGES, STATE_TO_STAGE: STATE_TO_STAGE,
     states: STATES, ACTIVE_STATES: ACTIVE_STATES, TERMINAL_STATES: TERMINAL_STATES, DAG_TEMPLATE: DAG_TEMPLATE,
     statusMeta: statusMeta, nodeStatusMeta: nodeStatusMeta, attemptStatusMeta: attemptStatusMeta, dlqStatusMeta: dlqStatusMeta, severityMeta: severityMeta,
-    failureCategoryMeta: failureCategoryMeta, failureReasonMeta: failureReasonMeta, eventCatalog: EVENT_CATALOG, capsules: CAPSULES, devices: DEVICES.map(function (d) { return d.id; }),
+    failureCategoryMeta: failureCategoryMeta, failureReasonMeta: failureReasonMeta, eventCatalog: EVENT_CATALOG, capsules: CAPSULES, devices: DEVICES.reduce(function (out, d) { (DEVICE_MODELS[d.id] || [[d.id, 1]]).forEach(function (m) { if (out.indexOf(m[0]) < 0) out.push(m[0]); }); return out; }, []),
     workflows: WORKFLOWS, getWorkflow: getWorkflow, listWorkflows: listWorkflows, workflowsByStage: workflowsByStage,
     events: { all: EVENTS_ALL, byWorkflow: EVENTS_BY_WF, recent: recentEvents, forWorkflow: function (id) { return EVENTS_BY_WF[id] || []; } },
     getEvents: function (id) { return EVENTS_BY_WF[id] || []; },

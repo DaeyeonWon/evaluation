@@ -1,0 +1,9 @@
+/*
+ * Issue Report — 분해 보기 / Breakdown view (/issues/categories). Owned by the Categories view engineer.
+ * Scope every rule under [data-variant="atlas"] .iss-cat; prefix keyframes with `at-isscat-`.
+ * Shared tokens (--sev-p0…p3, --cls-*, --iss-new) come from atlas-issues.css.
+ */
+[data-variant="atlas"] .iss-cat {
+  & .iss-cat-ph { margin: 0 0 10px; }
+  & .iss-cat-ph-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+}

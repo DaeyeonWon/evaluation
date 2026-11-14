@@ -5,7 +5,7 @@
  */
 import { domain } from "@/config/domain";
 import type {
-  AttemptStatus, Capsule, ComponentSpec, DagTemplateNode, DlqStatus, DomainLanguage, EventCatalogEntry, FailureCategory,
+  AttemptStatus, BixbyVersionInfo, CapabilityRule, Capsule, ComponentSpec, Division, Market, Region, DagTemplateNode, DlqStatus, DomainLanguage, EventCatalogEntry, FailureCategory,
   FailureCategoryMetaEntry, FailureReason, FailureReasonMetaEntry, LangCode, MetaEntry, ModelVersionInfo,
   NodeStatus, Operator, PipelineDef, ResultColumn, RolePermission, Severity, SeverityMetaEntry, Stage, StageEdge, StageId,
   StatusMetaEntry, Tone, WorkflowStatus,
@@ -20,7 +20,8 @@ export const REGION = "asia-northeast3";
 export const BUCKETS = {
   "input": "bixby-utterance-input",
   "artifacts": "bixby-pipeline-artifacts",
-  "results": "bixby-eval-results"
+  "results": "bixby-eval-results",
+  "audio": "bixby-utterance-audio"
 } as const;
 export const BIGQUERY = {
   "dataset": "bixby-eval-prod.bixby_eval",
@@ -1480,10 +1481,15 @@ export const CAPSULES: Capsule[] = [
 export const CAPSULE_BY_ID = Object.fromEntries(CAPSULES.map((c) => [c.id, c])) as Record<string, Capsule>;
 export const DEVICES: string[] = [
   "Galaxy S26",
+  "Galaxy Z Fold7",
+  "Galaxy Tab S11",
   "Galaxy Watch",
   "Galaxy Buds",
   "TV",
-  "Family Hub"
+  "Neo QLED",
+  "Family Hub",
+  "Bespoke AI Washer",
+  "Bespoke AI Oven"
 ];
 export const RESULT_COLUMNS: ResultColumn[] = [
   {
@@ -1630,6 +1636,21 @@ export const RESULT_COLUMNS: ResultColumn[] = [
     "key": "utterance_pattern",
     "label": "utterance_pattern",
     "type": "string"
+  },
+  {
+    "key": "division",
+    "label": "division",
+    "type": "enum"
+  },
+  {
+    "key": "region",
+    "label": "region",
+    "type": "enum"
+  },
+  {
+    "key": "bixby_version",
+    "label": "bixby_version",
+    "type": "enum"
   }
 ];
 
@@ -1643,6 +1664,17 @@ export const COMPONENTS: Record<string, ComponentSpec> = domain.components;
 /** Models under test (results.model_version) — distinct from pipeline_version. */
 export const MODELS: ModelVersionInfo[] = domain.models;
 export const MODEL_VERSIONS: string[] = MODELS.map((m) => m.id);
+/** Issue Report dimensions (docs/data-contract.md §8.1): device → division, market → region, Bixby versions, capability table. */
+export const DIVISIONS: Division[] = (domain.divisions ?? []).map((d) => d.id);
+export const DIVISION_INFO = domain.divisions ?? [];
+export const DEVICE_DIVISION: Record<string, Division> = domain.deviceDivision ?? {};
+export const REGIONS: Region[] = (domain.regions ?? []).map((r) => r.id);
+export const REGION_INFO = domain.regions ?? [];
+export const MARKET_REGION: Record<Market, Region> = domain.marketRegion ?? ({} as Record<Market, Region>);
+export const BIXBY_VERSION_INFO: BixbyVersionInfo[] = domain.bixbyVersions ?? [];
+/** oldest first */
+export const BIXBY_VERSIONS: string[] = BIXBY_VERSION_INFO.map((v) => v.version);
+export const CAPABILITIES: CapabilityRule[] = domain.capabilities ?? [];
 
 /** Standardized status tones (CSS tokens --st-<tone>). */
 export const TONES: Tone[] = ["success", "running", "queued", "retry", "failed", "dlq", "cancelled"];

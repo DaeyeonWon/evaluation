@@ -107,6 +107,98 @@ export const domain: DomainConfig = {
     { id: "Family Hub", weight: 11, adj: -0.01, lat: [1300, 2500] },
   ],
 
+  // ───────────────────────────── Issue Report dimensions (division · region · Bixby version) ──
+  // Remappable tables. A real deployment edits these to match its device catalog / markets; the console
+  // reads them through src/lib/catalog.ts (UI) and src/server/mock/engine.ts (mock result rows).
+  /**
+   * Concrete device models under each base device above. The mock engine draws the base device first
+   * (pass rates / latency use the base) and then re-labels it to one of these models from its own random
+   * stream, so adding a model never shifts the seeded rows. A base without an entry keeps its id.
+   */
+  deviceModels: {
+    "Galaxy S26": [["Galaxy S26", 64], ["Galaxy Z Fold7", 20], ["Galaxy Tab S11", 16]],
+    TV: [["TV", 58], ["Neo QLED", 42]],
+    "Family Hub": [["Family Hub", 56], ["Bespoke AI Washer", 24], ["Bespoke AI Oven", 20]],
+  },
+  divisions: [
+    { id: "Mobile", label: "모바일", labelEn: "Mobile" },
+    { id: "Wearable", label: "웨어러블", labelEn: "Wearable" },
+    { id: "Audio", label: "오디오", labelEn: "Audio" },
+    { id: "TV", label: "TV", labelEn: "TV" },
+    { id: "Appliance", label: "가전", labelEn: "Appliance" },
+  ],
+  /** device_type → division (result column `division`); unknown devices fall back to `defaultDivision` */
+  deviceDivision: {
+    "Galaxy S26": "Mobile",
+    "Galaxy Z Fold7": "Mobile",
+    "Galaxy Tab S11": "Mobile",
+    "Galaxy Watch": "Wearable",
+    "Galaxy Buds": "Audio",
+    TV: "TV",
+    "Neo QLED": "TV",
+    "Family Hub": "Appliance",
+    "Bespoke AI Washer": "Appliance",
+    "Bespoke AI Oven": "Appliance",
+  },
+  defaultDivision: "Mobile",
+  regions: [
+    { id: "KR", label: "한국", labelEn: "Korea" },
+    { id: "NA", label: "북미", labelEn: "North America" },
+    { id: "EU", label: "유럽", labelEn: "Europe" },
+    { id: "JP", label: "일본", labelEn: "Japan" },
+    { id: "LATAM", label: "중남미", labelEn: "Latin America" },
+  ],
+  /** market → region (result column `region`) */
+  marketRegion: { KR: "KR", US: "NA", GB: "EU", ES: "EU", JP: "JP", MX: "LATAM" },
+  /** Bixby client versions (result column `bixby_version`), oldest first; semver with an optional pre-release tag */
+  bixbyVersions: [
+    { version: "3.6.12", status: "LEGACY", notes: "웨어러블·오디오·가전 장기 지원 버전" },
+    { version: "4.0.1", status: "STABLE", notes: "4.0 정식 배포" },
+    { version: "4.0.3", status: "ROLLOUT", notes: "4.0 유지보수 배포 — TV OTA 진행 중 (TV 미디어 재생 라우팅 회귀 조사 중)" },
+    { version: "4.1.0-beta", status: "BETA", notes: "Galaxy S26 · Z Fold7 베타 프로그램 (Gemini 연동)" },
+  ],
+  /**
+   * Mock rollout of Bixby versions per division: weight × ramp, where ramp grows linearly from 0 at
+   * `sinceDays` days before "now" to 1 over `rampDays` (no `sinceDays` = always present).
+   */
+  bixbyRollout: {
+    Mobile: [
+      { version: "4.0.1", weight: 46 },
+      { version: "4.0.3", weight: 50, sinceDays: 26, rampDays: 10 },
+      { version: "4.1.0-beta", weight: 7, sinceDays: 9, rampDays: 4 },
+    ],
+    Wearable: [
+      { version: "3.6.12", weight: 52 },
+      { version: "4.0.1", weight: 48 },
+    ],
+    Audio: [
+      { version: "3.6.12", weight: 64 },
+      { version: "4.0.1", weight: 36 },
+    ],
+    TV: [
+      { version: "4.0.1", weight: 70 },
+      { version: "4.0.3", weight: 78, sinceDays: 10, rampDays: 5 },
+    ],
+    Appliance: [
+      { version: "3.6.12", weight: 72 },
+      { version: "4.0.1", weight: 28 },
+    ],
+  },
+  /**
+   * Capability table → Issue.must_handle. First entry whose `intent` is a prefix of intent_expected wins;
+   * no match = supported everywhere. A row is in scope when its division is listed (or its device is in
+   * `devices`) and its bixby_version ≥ `minBixby`. Policy / safety guardrails are always in scope.
+   */
+  capabilities: [
+    { intent: "galaxy_ai.gemini_handoff", divisions: ["Mobile"], minBixby: "4.1.0-beta", note: "Gemini 연동은 4.1 베타부터" },
+    { intent: "galaxy_ai.", divisions: ["Mobile"], minBixby: "4.0.1", note: "Galaxy AI 기능은 모바일 전용" },
+    { intent: "camera.", divisions: ["Mobile"], note: "카메라는 모바일 전용" },
+    { intent: "navigation.", divisions: ["Mobile", "Wearable"] },
+    { intent: "call.", divisions: ["Mobile", "Wearable", "Audio"] },
+    { intent: "message.", divisions: ["Mobile", "Wearable", "Audio"] },
+    { intent: "music.", divisions: ["Mobile", "Wearable", "Audio", "TV"], devices: ["Family Hub"], note: "가전 중 Family Hub만 미디어 재생 지원" },
+  ],
+
   // ───────────────────────────── models under test (≠ pipeline version) ──
   models: [
     { id: "bixby-nlu-2026.09", label: "Bixby NLU 2026.09", status: "RETIRED", releasedAt: "2026-09-08T10:00:00+09:00", passAdj: -0.02, weight: 0, notes: "10월 정기 배포로 대체" },
